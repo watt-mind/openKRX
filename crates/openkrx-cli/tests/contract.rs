@@ -76,14 +76,22 @@ fn the_help_says_which_statuses_belong_to_which_command() {
         "the envelope's `ok` field is explained where it can be misread"
     );
 
-    for command in ["inspect", "list"] {
-        let text = stdout(&run(&[command, "--help"]));
-        assert!(
-            text.contains("exits 0 whenever it produces its report"),
-            "{command} help states its own status rule"
-        );
-        assert!(text.contains("Use validate-structure"));
-    }
+    let inspect = stdout(&run(&["inspect", "--help"]));
+    assert!(inspect.contains("exits 0 whenever it produces its report"));
+    assert!(inspect.contains("the check table it prints"));
+    assert!(
+        inspect.contains("Use\nvalidate-structure") || inspect.contains("Use validate-structure")
+    );
+
+    // `list` runs no structural check, so its note must not claim a failed
+    // check is somewhere in its report: the report is the entry listing.
+    let list = stdout(&run(&["list", "--help"]));
+    assert!(list.contains("runs no structural check"));
+    assert!(list.contains("Use inspect to see the checks"));
+    assert!(
+        !list.contains("the outcome is in the report"),
+        "list must not describe a check outcome it never prints"
+    );
 
     let validate = stdout(&run(&["validate-structure", "--help"]));
     assert!(validate.contains("3 when a check failed"));

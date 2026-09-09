@@ -67,11 +67,18 @@ In --json mode `ok` says only that the command produced a report; read the
 exit status, or validate-structure's `summary`, to learn how the checks came
 out. Nothing openkrx prints is a conformance verdict and nothing is verified.";
 
-/// The note both report-only commands repeat, so the split is discoverable
-/// from either command's own help rather than only from the top-level table.
-const REPORT_ONLY_HELP: &str = "\
+/// `inspect`'s note, so the status split is discoverable from the command's
+/// own help rather than only from the top-level table.
+const INSPECT_STATUS_HELP: &str = "\
 This command exits 0 whenever it produces its report, even when a structural
-check failed: the outcome is in the report. Use validate-structure to get that
+check failed: the outcome is in the check table it prints. Use
+validate-structure to get that reading as an exit status instead.";
+
+/// `list`'s note. It runs no structural check at all, so saying that a failed
+/// check is "in the report" would be false here: the report is the entry list.
+const LIST_STATUS_HELP: &str = "\
+This command runs no structural check and exits 0 whenever it produces its
+listing. Use inspect to see the checks, or validate-structure to get their
 reading as an exit status.";
 
 #[derive(Subcommand)]
@@ -83,7 +90,7 @@ enum Command {
         json: bool,
     },
     /// Print what a package declares about itself, and every structural check.
-    #[command(after_help = REPORT_ONLY_HELP)]
+    #[command(after_help = INSPECT_STATUS_HELP)]
     Inspect {
         /// The package to read, or `-` to read standard input.
         #[arg(value_name = "FILE")]
@@ -93,7 +100,7 @@ enum Command {
         json: bool,
     },
     /// Print every archive entry, in central-directory order.
-    #[command(after_help = REPORT_ONLY_HELP)]
+    #[command(after_help = LIST_STATUS_HELP)]
     List {
         /// The package to read, or `-` to read standard input.
         #[arg(value_name = "FILE")]
