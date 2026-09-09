@@ -140,11 +140,11 @@ rules in
 | Required check | Status | Error code prefix | Test |
 | --- | --- | --- | --- |
 | No traversal or absolute destination: every component is validated, and `..`, `.`, an empty component and a control character are refused | Planning only; filesystem output pending | `extract.unsafe_path.parent_component`, `.current_component`, `.empty_component`, `.control_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_unsafe_component_class_is_refused`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
-| No platform-ambiguous destination: a trailing dot or space, a Windows reserved device name, and a colon are refused whatever the host platform | Planning only; filesystem output pending | `extract.unsafe_path.trailing_dot`, `.trailing_space`, `.reserved_device_name`, `.colon` | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
-| No symlink or reparse-point escape: a link entry rejects the plan and is never created, nor written as its target text | Planning only; filesystem output pending | `extract.unsupported.link` | `a_symlink_entry_rejects_the_whole_plan`, `entry_kinds_are_read_from_the_central_directory_fields` |
+| No platform-ambiguous destination: a trailing dot or space, a leading space, a Windows reserved device name, a colon, and the six characters Windows refuses in a name (`*`, `?`, `<`, `>`, `\|`, `"`) are refused whatever the host platform | Planning only; filesystem output pending | `extract.unsafe_path.trailing_dot`, `.trailing_space`, `.leading_space`, `.reserved_device_name`, `.colon`, `.reserved_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_character_windows_refuses_outright_is_one_reserved_character_class` |
+| No symlink or reparse-point escape: a link entry rejects the plan and is never created, nor written as its target text, on every host that carries a Unix mode (3 Unix and 19 OS X) | Planning only; filesystem output pending | `extract.unsupported.link` | `a_symlink_entry_rejects_the_whole_plan`, `a_darwin_host_symlink_is_refused_like_a_unix_one`, `entry_kinds_are_read_from_the_central_directory_fields` |
 | No special files: a device node, socket, FIFO or a Unix mode stating no file type rejects the plan | Planning only; filesystem output pending | `extract.unsupported.special_file` | `a_special_file_entry_rejects_the_whole_plan` |
 | No implicit character-set guessing for a destination name | Planning only; filesystem output pending | `extract.unsupported.non_utf8_name` | `a_name_that_is_not_utf8_is_refused_rather_than_decoded` |
-| Specified Unicode and case collisions, refused rather than resolved | Planning only; filesystem output pending | `extract.ambiguous.collision`, `.file_directory_conflict` | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision`, `a_file_that_is_also_a_directory_prefix_is_refused`, `a_shared_file_name_in_different_directories_is_not_a_collision` |
+| Specified Unicode and case collisions, refused rather than resolved | Planning only; filesystem output pending | `extract.ambiguous.collision`, `.file_directory_conflict` | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision`, `a_file_that_is_also_a_directory_prefix_is_refused`, `a_directory_prefix_that_arrives_before_its_file_is_refused_the_same_way`, `a_shared_file_name_in_different_directories_is_not_a_collision` |
 | Documented output limits — file count, total bytes, path, component and depth — with checked arithmetic | Planning only; filesystem output pending | `extract.over_limit.files`, `.total_bytes`, `.path_bytes`, `.component_bytes`, `.depth` | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary`, `the_path_length_limit_holds_at_its_boundary`, `the_component_length_limit_holds_at_its_boundary`, `the_depth_limit_holds_at_its_boundary` |
 | A failure prevents the operation reporting success: a rejection rejects the whole plan, never a reduced one | Planning only; filesystem output pending | every `extract.*` code | every rejection test above; each asserts that no plan was produced |
 | No panic on any input | Planning only; filesystem output pending | any code; never a panic | `planning_every_fixture_inventory_never_panics`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
@@ -167,6 +167,15 @@ rules in
   layer keeps apart in the other direction. The plan is refused where a
   collision is visible under NFC; nothing here can predict every
   filesystem's own folding.
+- **A host that carries a mode this reader does not map.** `EntryKind`
+  reads `st_mode` for hosts 3 (Unix) and 19 (OS X), the two APPNOTE lists as
+  storing it in the high attribute bits, so a link written on either is
+  refused as a link. Should a further host be found to store a mode there,
+  an entry it wrote would classify as `Unknown` and be planned as an
+  ordinary file — its declared link target written as file content, never
+  followed and never created as a link. The compensating control is that
+  nothing writes yet, and that adding such a host is a one-line mapping with
+  a test; no host is added on a guess.
 - **A Unix mode of zero is treated as a special file.** Some writers set a
   Unix host system without a meaningful `st_mode`. Such an archive is
   refused rather than extracted on an assumption. If a real producer is ever
