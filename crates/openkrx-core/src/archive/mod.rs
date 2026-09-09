@@ -225,6 +225,12 @@ impl<'a> ArchiveInventory<'a> {
     /// Intended for small structural documents such as the format marker and
     /// package metadata, not for attachment payloads.
     ///
+    /// The decoded budget is therefore per call, not cumulative: each call is
+    /// capped at `max_entry_decoded_bytes` on its own, and `n` calls can decode
+    /// up to `n * max_entry_decoded_bytes` in total, unbounded by
+    /// `max_total_decoded_bytes`, which only bounds the inventory pass. A caller
+    /// that reads several entries budgets for that itself.
+    ///
     /// # Errors
     ///
     /// Returns [`ArchiveError::NoSuchEntry`] for an out-of-range index. Decoding

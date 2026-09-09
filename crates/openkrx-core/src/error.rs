@@ -14,8 +14,6 @@ use core::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Structure {
-    /// End-of-central-directory record or its comment.
-    Eocd,
     /// Central-directory record header or its variable-length fields.
     CentralDirectory,
     /// Local file header or its variable-length fields.
@@ -31,7 +29,6 @@ impl Structure {
     #[must_use]
     pub const fn code(self) -> &'static str {
         match self {
-            Self::Eocd => "archive.truncated.eocd",
             Self::CentralDirectory => "archive.truncated.central_directory",
             Self::LocalHeader => "archive.truncated.local_header",
             Self::EntryData => "archive.truncated.entry_data",

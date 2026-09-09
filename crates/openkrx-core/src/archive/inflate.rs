@@ -1,8 +1,9 @@
 //! Bounded entry decoding with streaming limit enforcement and CRC-32 checking.
 //!
 //! Decoding never buffers a whole entry unless a caller explicitly asks for its
-//! bytes: the counting path keeps one [`Limits::OUTPUT_BUFFER_BYTES`] output
-//! buffer and discards each chunk after accounting for it. Limits are therefore
+//! bytes: the deflate path keeps one [`Limits::OUTPUT_BUFFER_BYTES`] output
+//! buffer and discards each chunk after accounting for it, while a stored entry
+//! is accounted for in place and allocates nothing. Limits are therefore
 //! enforced against actual decoded bytes, and no limit can be overshot by more
 //! than one buffer before decoding aborts.
 //!
@@ -58,14 +59,16 @@ pub(crate) fn decode(
         decoded: 0,
         crc: Crc32::new(),
     };
-    let mut buffer = vec![0_u8; Limits::OUTPUT_BUFFER_BYTES];
     match request.method {
         METHOD_STORED => {
             for chunk in request.data.chunks(Limits::OUTPUT_BUFFER_BYTES) {
                 accounting.accept(chunk, &mut sink)?;
             }
         }
-        _ => inflate_all(request, &mut buffer, &mut accounting, &mut sink)?,
+        _ => {
+            let mut buffer = vec![0_u8; Limits::OUTPUT_BUFFER_BYTES];
+            inflate_all(request, &mut buffer, &mut accounting, &mut sink)?;
+        }
     }
     accounting.finish()
 }

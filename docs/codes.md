@@ -75,7 +75,6 @@ The image ended inside a structure. Fields: `entry`, when entry-scoped.
 
 | Code | Meaning | Asserted by |
 | --- | --- | --- |
-| `archive.truncated.eocd` | The end-of-central-directory record, or its comment, runs past the end of the image. | `no_truncation_of_a_valid_archive_is_ever_accepted` (the truncation sweep; no test pins this code specifically) |
 | `archive.truncated.central_directory` | A central-directory record header, or one of its variable-length fields, is cut short. | `a_central_record_cut_short_is_reported_as_truncation` |
 | `archive.truncated.local_header` | A local file header, or one of its variable-length fields, is cut short. | `a_record_pointing_past_the_image_is_reported_as_truncation` |
 | `archive.truncated.entry_data` | An entry declares more compressed data than the image holds. | `an_entry_declaring_more_data_than_the_image_holds_is_truncated` |

@@ -148,3 +148,22 @@ and such a change is recorded here explicitly.
   records the searches, the design decisions and the evidence gaps.
   `scripts/check-codes.py` fails the build when a code exists in the crate
   sources but not in the catalogue, or the other way round.
+
+### Changed
+
+- Archive inventory internals: the end-of-central-directory record is read
+  as its 22 fixed bytes, proven present before parsing begins, so locating
+  the record can no longer produce a truncation error; the 64 KiB inflate
+  output buffer is allocated only for a deflate entry, so a stored entry
+  allocates nothing; and `ArchiveInventory::entry_bytes` now documents that
+  its decoded budget is per call, capped at `max_entry_decoded_bytes` each
+  time and never charged against `max_total_decoded_bytes`. No limit value,
+  public signature or accepted archive changes.
+
+### Removed
+
+- The `archive.truncated.eocd` stable code and its `Structure::Eocd`
+  variant. The code was unreachable by construction and asserted by no test;
+  an image with no usable end record is reported as
+  `archive.malformed.eocd_missing`, as before. `Structure` is
+  `#[non_exhaustive]`, so no consumer match was exhaustive over it.
