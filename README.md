@@ -121,9 +121,12 @@ success:
 ```
 
 `verified: false` states the cryptographic boundary and is never `true`.
-Every response and every diagnostic carries a stable code; a diagnostic
-carries the code, an entry index and numbers, and never the input path, an
-entry name or a metadata value.
+`ok` reports that stdout carries a report rather than a diagnostic; it is not
+a judgement of the package, and it stays `true` when a check failed. Read
+`validate-structure`'s `summary`, or the exit status, to act on the checks.
+
+Every diagnostic carries a stable code; it carries the code, an entry index
+and numbers, and never the input path, an entry name or a metadata value.
 
 ## Documentation
 

@@ -149,7 +149,7 @@ pub fn inspect(data: &InspectData) -> String {
         row("entries", &observed.entry_count.to_string()),
         row(
             "root prefix",
-            &optional_name(observed.root_prefix_bytes.as_deref()),
+            &root_prefix(observed.root_prefix_bytes.as_deref()),
         ),
         row(
             "metadata entry",
@@ -317,9 +317,17 @@ fn row(label: &str, value: &str) -> String {
     format!("  {label:<22}{value}")
 }
 
-/// An observed name, or a statement that there was none.
-fn optional_name(bytes: Option<&[u8]>) -> String {
-    bytes.map_or_else(|| "not observed".to_owned(), escape)
+/// An observed root prefix, which may legitimately be empty.
+///
+/// One of the three layouts rule A19 describes puts `Metalayer/` at the
+/// archive root, so an empty prefix is an observation rather than a missing
+/// value, and printing nothing after the label would read as a glitch.
+fn root_prefix(bytes: Option<&[u8]>) -> String {
+    match bytes {
+        None => "not observed".to_owned(),
+        Some([]) => "none; the metadata entry is at the archive root".to_owned(),
+        Some(bytes) => escape(bytes),
+    }
 }
 
 /// The metadata entry's name and index, when one was located.

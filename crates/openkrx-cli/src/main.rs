@@ -36,14 +36,43 @@ use exit::{Category, Failure};
     version,
     about = "Read a Hungarian KRX document package locally. Nothing is uploaded, \
 nothing is written and nothing is verified.",
-    after_help = "Exit statuses: 0 success, 2 usage, 3 a structural check failed, \
-4 a rule could not be decided, 5 the input could not be read, 6 malformed package, \
-7 unsupported feature, 8 resource limit exceeded."
+    after_help = EXIT_STATUS_HELP
 )]
 struct Args {
     #[command(subcommand)]
     command: Command,
 }
+
+/// The exit-status table, printed under `openkrx --help`.
+///
+/// It says which statuses belong to which command, because 3 and 4 belong to
+/// `validate-structure` alone: for `inspect` and `list` a failing or undecided
+/// check is part of the report, not of the status, and a reader who took the
+/// table for a blanket rule would read a broken package as a clean one.
+const EXIT_STATUS_HELP: &str = "\
+Exit statuses:
+  0  the command produced its report; for validate-structure, nothing failed
+     and nothing was left undecided
+  2  the arguments were rejected
+  3  validate-structure only: a structural check failed
+  4  validate-structure only: nothing failed, but a rule could not be decided
+  5  the input could not be read, or is larger than the 64 MiB input cap
+  6  the package is malformed, truncated or ambiguous
+  7  the package uses a feature this reader does not implement
+  8  a documented parsing limit was exceeded
+
+inspect and list exit 0 whenever they produce their report: read the check
+outcomes in the report, or use validate-structure, to act on a failing check.
+In --json mode `ok` says only that the command produced a report; read the
+exit status, or validate-structure's `summary`, to learn how the checks came
+out. Nothing openkrx prints is a conformance verdict and nothing is verified.";
+
+/// The note both report-only commands repeat, so the split is discoverable
+/// from either command's own help rather than only from the top-level table.
+const REPORT_ONLY_HELP: &str = "\
+This command exits 0 whenever it produces its report, even when a structural
+check failed: the outcome is in the report. Use validate-structure to get that
+reading as an exit status.";
 
 #[derive(Subcommand)]
 enum Command {
@@ -54,6 +83,7 @@ enum Command {
         json: bool,
     },
     /// Print what a package declares about itself, and every structural check.
+    #[command(after_help = REPORT_ONLY_HELP)]
     Inspect {
         /// The package to read, or `-` to read standard input.
         #[arg(value_name = "FILE")]
@@ -63,6 +93,7 @@ enum Command {
         json: bool,
     },
     /// Print every archive entry, in central-directory order.
+    #[command(after_help = REPORT_ONLY_HELP)]
     List {
         /// The package to read, or `-` to read standard input.
         #[arg(value_name = "FILE")]
@@ -72,7 +103,15 @@ enum Command {
         json: bool,
     },
     /// Report the structural check inventory, outcome by outcome.
-    #[command(name = "validate-structure")]
+    #[command(
+        name = "validate-structure",
+        after_help = "Exit status: 0 when no check failed and none was left \
+undecided, 3 when a check failed, 4 when a rule could not be decided. That is \
+a reading of the checks, not a conformance verdict: openkrx cannot make one \
+while primary sources leave essential rules open.\n\nIn --json mode read \
+`summary`, or the exit status. `ok` reports only that the command produced a \
+report, and stays true when a check failed."
+    )]
     ValidateStructure {
         /// The package to read, or `-` to read standard input.
         #[arg(value_name = "FILE")]
@@ -155,10 +194,7 @@ fn reader(command: Reader, file: &str, json: bool) -> i32 {
                 let text = render::json::failure(command.name(), &failure);
                 input::line(&mut std::io::stdout(), &text);
             }
-            input::line(
-                &mut std::io::stderr(),
-                &format!("openkrx: {}", failure.message()),
-            );
+            input::line(&mut std::io::stderr(), &failure.line());
             failure.category.status()
         }
     }

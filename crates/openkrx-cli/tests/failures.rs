@@ -37,6 +37,10 @@ fn a_failing_check_is_status_three_for_validate_structure_only() {
     let output = on("validate-structure", &package, true);
     assert_eq!(status(&output), 3);
     let value = one_object(&output);
+    // `ok` is about the command, not about the package: a report was produced,
+    // and the failure is inside it. A consumer reads `summary`, or the exit
+    // status, never `ok`. This is documented in the help of both the tool and
+    // this command, because the field name invites the other reading.
     assert_eq!(value["ok"], true, "a report was produced");
     assert_eq!(value["data"]["summary"], "inconsistent");
     let failed: Vec<&serde_json::Value> = value["data"]["checks"]
@@ -62,10 +66,13 @@ fn a_malformed_image_is_status_six() {
     let error = diagnostic(&output);
     assert_eq!(error["code"], "archive.malformed.eocd_missing");
     assert_eq!(error["category"], "package");
-    assert_eq!(
-        stderr(&output).trim(),
-        "openkrx: archive.malformed.eocd_missing"
+    let line = stderr(&output);
+    assert!(line.starts_with("openkrx: archive.malformed.eocd_missing —"));
+    assert!(
+        line.contains("truncated in transit"),
+        "and what to do about it"
     );
+    assert!(line.trim_end().ends_with("(exit 6)"));
 }
 
 #[test]
@@ -145,8 +152,12 @@ fn a_failure_in_human_mode_writes_one_line_on_standard_error_and_nothing_else() 
     assert_eq!(status(&output), 6);
     assert!(output.stdout.is_empty(), "no report on stdout");
     let text = stderr(&output);
-    assert_eq!(text.lines().count(), 1);
+    assert_eq!(text.lines().count(), 1, "one line, whatever it explains");
     assert!(text.starts_with("openkrx: archive.malformed.eocd_missing"));
+    assert!(
+        text.contains("(exit 6)"),
+        "the status is stated, not implied"
+    );
 }
 
 #[test]

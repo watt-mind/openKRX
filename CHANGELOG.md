@@ -97,8 +97,13 @@ and such a change is recorded here explicitly.
   undecided. A diagnostic carries a stable code, a category, an entry index
   and numbers, and never the input path, an entry name or a metadata value;
   human output escapes control, invisible and undecodable bytes and cuts a
-  name longer than 200 characters. Two stable codes, `input.unreadable` and
-  `input.over_limit.archive_bytes`, were added, and
+  name longer than 200 characters, and each diagnostic line names its status
+  and says what its category means. `openkrx --help` publishes the exit-status
+  table, marking the two statuses that belong to `validate-structure` alone,
+  and states that the envelope's `ok` reports only that a report was produced:
+  it stays `true` when a structural check failed, so a consumer reads
+  `summary`, or the exit status, to act on the checks. Two stable codes,
+  `input.unreadable` and `input.over_limit.archive_bytes`, were added, and
   `scripts/check-codes.py` now catalogues the `input.*` prefix as well.
   Nothing is extracted, created, cached, logged or written anywhere.
 - **The documentation set and its maintenance gate.**

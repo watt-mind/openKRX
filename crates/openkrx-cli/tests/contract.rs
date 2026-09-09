@@ -63,6 +63,34 @@ fn each_command_documents_its_file_argument_and_json_flag() {
 }
 
 #[test]
+fn the_help_says_which_statuses_belong_to_which_command() {
+    // A blanket "3 means a check failed" would be read as true of `inspect`
+    // too, and a reader checking `$?` after `inspect` would take a broken
+    // package for a clean one.
+    let top = stdout(&run(&["--help"]));
+    assert!(top.contains("validate-structure only: a structural check failed"));
+    assert!(top.contains("validate-structure only: nothing failed"));
+    assert!(top.contains("inspect and list exit 0 whenever they produce"));
+    assert!(
+        top.contains("`ok` says only that the command produced a report"),
+        "the envelope's `ok` field is explained where it can be misread"
+    );
+
+    for command in ["inspect", "list"] {
+        let text = stdout(&run(&[command, "--help"]));
+        assert!(
+            text.contains("exits 0 whenever it produces its report"),
+            "{command} help states its own status rule"
+        );
+        assert!(text.contains("Use validate-structure"));
+    }
+
+    let validate = stdout(&run(&["validate-structure", "--help"]));
+    assert!(validate.contains("3 when a check failed"));
+    assert!(validate.contains("stays true when a check failed"));
+}
+
+#[test]
 fn version_is_the_package_version() {
     let output = run(&["--version"]);
     assert_eq!(status(&output), 0);

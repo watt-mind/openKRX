@@ -68,6 +68,39 @@ impl Category {
         }
     }
 
+    /// One content-free sentence saying what this category means.
+    ///
+    /// A stable code alone reads as a log line, and the reader of a package is
+    /// not the person who chose the code. The sentence names the kind of
+    /// problem and what could be done about it, using no part of the input:
+    /// no path, no entry name, no declared value.
+    #[must_use]
+    pub const fn explanation(self) -> &'static str {
+        match self {
+            Self::Success => "the command produced its report",
+            Self::Usage => "the arguments were rejected",
+            Self::Inconsistent => "a structural check did not hold",
+            Self::Unresolved => "a rule could not be decided from the sources",
+            Self::Input => {
+                "the input could not be read: check that the file exists, is \
+readable, is a file rather than a directory, and is not larger than the 64 MiB \
+input cap"
+            }
+            Self::Package => {
+                "the package contradicts itself or is incomplete: it may have \
+been truncated in transit, so obtaining it again is worth trying"
+            }
+            Self::Unsupported => {
+                "the package uses a ZIP or XML feature openkrx does not \
+implement; it is not damaged, and another reader may open it"
+            }
+            Self::Limit => {
+                "the package is larger or more complex than a documented \
+limit allows; the limits are not configurable from the command line"
+            }
+        }
+    }
+
     /// The stable machine-readable name reported as `error.category`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -170,6 +203,19 @@ impl Failure {
             text.push_str(&format!(" at entry {entry}"));
         }
         text
+    }
+
+    /// The one line human mode writes on stderr: the code, its numbers, and
+    /// one sentence saying what the category means. It carries no part of the
+    /// input, so it stays safe to log.
+    #[must_use]
+    pub fn line(&self) -> String {
+        format!(
+            "openkrx: {} — {} (exit {})",
+            self.message(),
+            self.category.explanation(),
+            self.category.status()
+        )
     }
 }
 
@@ -314,6 +360,26 @@ mod tests {
             failure.message(),
             "archive.over_limit.entries (limit 256, observed 300)"
         );
+    }
+
+    #[test]
+    fn a_diagnostic_line_explains_its_category_without_naming_the_input() {
+        let line = Failure::over_input_cap().line();
+        assert!(line.starts_with("openkrx: input.over_limit.archive_bytes"));
+        assert!(line.contains("could not be read"));
+        assert!(line.ends_with("(exit 5)"));
+        for category in [
+            Category::Success,
+            Category::Usage,
+            Category::Inconsistent,
+            Category::Unresolved,
+            Category::Input,
+            Category::Package,
+            Category::Unsupported,
+            Category::Limit,
+        ] {
+            assert!(!category.explanation().is_empty());
+        }
     }
 
     #[test]

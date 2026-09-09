@@ -384,6 +384,16 @@ list, and the boundary sentence. `operations` lists implemented package
 operations. `verified: false` expresses the cryptographic boundary and is
 never `true` in this design, in any response.
 
+**`ok` is about the command, not about the package.** It says that stdout
+carries a report rather than a diagnostic. It stays `true` when a structural
+check failed, because the failure is in the report; `validate-structure` on a
+package with a failing check writes `"ok": true` and
+`"summary": "inconsistent"` and exits 3. A consumer deciding what to do about
+a package therefore reads `summary`, or the exit status, and never `ok`. The
+field name invites the other reading, so it is stated here, in
+`openkrx --help` and in `openkrx validate-structure --help`; renaming it
+would remove a field from the envelope, which would raise `schema_version`.
+
 ### The failed envelope
 
 Every failure exits with the status its category names, in both modes. In
@@ -556,7 +566,19 @@ category holds each row.
 `inspect` and `list` never exit 3 or 4: a failing or undecided check is part
 of their report, not their status. A structural failure is therefore visible
 in three ways that never disagree — the check's outcome, the summary word,
-and the exit status.
+and the exit status — but only `validate-structure` puts it in the status. A
+reader who took the table for a blanket rule would run `inspect`, check `$?`,
+and take a broken package for a clean one, so the table is printed under
+`openkrx --help` with the two `validate-structure`-only rows marked as such,
+and `openkrx inspect --help` and `openkrx list --help` each repeat their own
+rule. Statuses 3 and 4 exist to be scripted against; `inspect` and `list`
+exist to be read.
+
+In human mode the diagnostic line names the status and says what the category
+means, in one line that still carries no part of the input, for example:
+`openkrx: archive.unsupported.zip64 at entry 0 — the package uses a ZIP or
+XML feature openkrx does not implement; it is not damaged, and another reader
+may open it (exit 7)`.
 
 A code classifies to exactly one category, by its head and its category
 segment: `input.*` to 5; `*.over_limit.*` to 8, except

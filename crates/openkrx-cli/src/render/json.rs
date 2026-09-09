@@ -6,6 +6,15 @@
 //! `false` in both, always: openKRX performs no cryptography, so no output of
 //! it can ever mean that something was verified.
 //!
+//! **`ok` is about the command, not about the package.** It says that the
+//! report on stdout is a report rather than a diagnostic, and it stays `true`
+//! when a structural check failed, because the failure is in the report. A
+//! consumer deciding what to do about a package reads `validate-structure`'s
+//! `summary`, or the exit status, never `ok`. Renaming the field would break
+//! the envelope, so `schema_version` would have to be raised to do it; the
+//! contract is documented instead, in `docs/architecture.md`, in
+//! `openkrx --help` and in `openkrx validate-structure --help`.
+//!
 //! `schema_version` is `1`. Adding a field does not raise it, so a consumer
 //! must ignore fields it does not recognise; removing, renaming or redefining
 //! one does, and a consumer that reads an unknown `schema_version` must stop

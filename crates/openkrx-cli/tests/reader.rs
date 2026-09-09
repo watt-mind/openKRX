@@ -185,6 +185,21 @@ fn the_other_two_layouts_leave_the_root_prefix_rule_undecided() {
 }
 
 #[test]
+fn an_empty_root_prefix_is_stated_rather_than_left_blank() {
+    // One of the three layouts rule A19 describes puts `Metalayer/` at the
+    // archive root, so an empty prefix is an observation, not a missing value.
+    let output = on("inspect", &layout_package(""), false);
+    assert_eq!(status(&output), 0);
+    assert!(
+        stdout(&output)
+            .contains("root prefix           none; the metadata entry is at the archive root"),
+        "an empty prefix is named"
+    );
+    let value = one_object(&on("inspect", &layout_package(""), true));
+    assert_eq!(value["data"]["observations"]["root_prefix"], "");
+}
+
+#[test]
 fn standard_input_is_read_by_every_command() {
     let package = consistent_package();
     for command in ["inspect", "list", "validate-structure"] {
