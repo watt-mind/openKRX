@@ -61,10 +61,10 @@ specification, 2017-01-16), `HK-2019` (Hivatali kapu technical guide,
 | A16 | BKSZ/KSZ messages sent from Hivatali kapu currently carry addressing in a `message.properties` file in the `Metalayer` directory (keys `sender_contract`, `sender_address`, `request_id`, `service`, `recipient_addresses`); merging it into the metadata XML is stated as future work | Service | `BKSZ-2.1` §4.3.1.2 (pp. 53–54) |
 | A17 | The `.krx` file name starts with the sender's KÉR root partner identifier; the characters between it and the `.krx` extension are free, up to 20 characters; the name always ends in `.krx` | Service | `KRX-SPEC` §9 (p. 3) |
 | A18 | Certificates returned over Hivatali kapu place the certificate PDF in `Payload/ID-1` | Example | `BKSZ-2.1` §4.3.2.2 (pp. 66–67) |
-| A19 | Directory nesting and the location of `mimetype` | **Unresolved** | Three primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
-| A20 | Compression method, extra fields, and byte-exactness required for the `mimetype` entry | **Unresolved** | No source states them |
-| A21 | ZIP entry name character encoding (UTF-8 general-purpose flag versus CP437) and case sensitivity | **Unresolved** | No source states them |
-| A22 | Payload subdirectory naming: `ID-<n>`, `ID<n>` and `ID_<n>` all appear; the numbering base and whether the names must be contiguous are also unstated | **Unresolved** | Primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
+| A19 | Directory nesting and the location of `mimetype` | **Unresolved** | Three primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) and [the 2026-09-09 search](#what-the-2026-09-09-search-added) |
+| A20 | Compression method, extra fields, and byte-exactness required for the `mimetype` entry | **Unresolved** | No source states them; see [the 2026-09-09 search](#what-the-2026-09-09-search-added) |
+| A21 | ZIP entry name character encoding (UTF-8 general-purpose flag versus CP437) and case sensitivity | **Unresolved** | No source states them; see [the 2026-09-09 search](#what-the-2026-09-09-search-added) |
+| A22 | Payload subdirectory naming: `ID-<n>`, `ID<n>` and `ID_<n>` all appear; the numbering base and whether the names must be contiguous are also unstated | **Unresolved** | Primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) and [the 2026-09-09 search](#what-the-2026-09-09-search-added) |
 
 ## Metadata rules
 
@@ -90,6 +90,15 @@ developers on request.
 | M13 | Whether `MERET` carries kilobytes or bytes, and its rounding | **Unresolved** | `HK-2019` schema versus `MKR-2.27` appendix 9 |
 | M14 | Whether `ELHELYEZKEDES` is an archive-root-relative path, and how it maps onto real entry names given A19 | **Unresolved** | No source reconciles the two |
 | M15 | Which metadata fields a receiving service actually requires beyond schema validity ("addressing data checks" in `KRX-SPEC` §6 are unspecified) | **Unresolved** | `KRX-SPEC` §6 (p. 3) |
+
+M11–M15 were re-examined in the 2026-09-09 upstream search and none of them
+changed. The search established one fact that bears on all five: the
+upstream OCD metadata layer is a PEPPOL VCD derivative built to the UBL 2.1
+naming and design rules (`OCD-JOINUP`), which is a different grammar from
+`KER_META_V0_9`. Recovering the upstream specification would therefore not
+settle the `MERET` unit, the metadata file name casing, or the meaning of
+`ELHELYEZKEDES`; only the Hungarian schema owner can. See
+[the 2026-09-09 search](#what-the-2026-09-09-search-added).
 
 ## Unresolved essential rules
 
@@ -122,6 +131,54 @@ may not report that an archive is a valid KRX package, and a writer must not
 be built until the layout is settled by a citable source or by an
 authoritative statement obtained from the format owner.
 
+## What the 2026-09-09 search added
+
+An archive-level evidence search was run on 2026-09-09 specifically to
+settle A19–A22 and M11–M15. **It resolved none of them.** Nine rules remain
+unresolved, and the count above is unchanged. The searches, the queries and
+the sources are recorded in
+[references.md](references.md#searches-performed); what follows is only
+what a reader of this document needs in order to know why nothing moved.
+
+Three things were found, and none of them is a normative statement:
+
+- The upstream OCD catalogue entry is no longer lost. It is archived and
+  readable (`OCD-JOINUP`), and a 2014 European Commission study
+  (`ISA2-2014`) describes OCD's governance and licence. Neither names a
+  directory, an entry name, a `mimetype` location, a compression method or
+  an encoding rule, so neither touches A19–A21. The specification that
+  would — SPOCS deliverable D2.2 — is now identified by title, authors and
+  year, but every copy of it is behind a dead link or a dead registration
+  wall, so it is still not retrieved.
+- A government user guide (`KRXGOV-2021`) publishes screenshots of a real
+  archive whose path is `KRX` → `OCD` → `Payload` → `ID-1`, and a third
+  party's format-identification signature (`TRID-OCD`), machine-derived
+  from six real archives, records the strings `METALAYER`, `MIMETYPE`,
+  `PAYLOAD` and `ID-1` together with a local file header at offset zero.
+  The screenshots corroborate the `KRX/OCD/…` shape and the hyphenated
+  `ID-<n>` form from a second producer; the TrID signature corroborates only
+  that entries with those names co-occur, and it records no path.
+- Nothing observed the archive root, so the location of `mimetype` — the
+  precise conflict in A19 — is still unobserved as well as unstated.
+
+Why that is not enough to move a row. A19 is a contradiction between three
+primary sources; corroborating one of them with a screenshot and a signature
+scan does not make the other two wrong, and this document does not settle
+disputes between primary sources by counting observations. A20 needs a
+statement about compression method, extra fields and byte-exactness, and no
+source found makes one. A21 needs a statement about entry-name encoding and
+case; `TRID-OCD` upper-cases its strings and so carries no casing evidence
+at all, and the screenshots show a file manager's rendering, not entry
+bytes. A22 has the same shape as A19.
+
+The practical consequence is unchanged, and is stated once, above: openKRX
+must not claim structural conformance or build a writer. The consequence
+that *is* new is for the reader: the two research actions named in
+[research.md](research.md#open-evidence-gaps) are no longer symmetrical. An
+independent implementation and a lawfully usable sample are still absent
+with no route to them, whereas the layout question now has one concrete
+document to obtain and one owner to ask.
+
 ## What is nevertheless usable now
 
 KRX-02 needs only archive-level facts that no source contradicts: the
@@ -153,17 +210,50 @@ Publicly available and independently usable:
   (successful and unsuccessful acceptance), published as embedded objects
   inside `HK-2019` on posta.hu. These support metadata-level checks only.
 
-Missing, and required before any conformance claim:
+Publicly available, but only as corroboration:
+
+- Screenshots of a real archive's `KRX/OCD/Payload/ID-1` path in a
+  government user guide (`KRXGOV-2021`), and a third party's TrID
+  format signature derived from six real archives (`TRID-OCD`). Neither is
+  a sample archive and neither states a rule; both are recorded in
+  references.md with exactly what they do and do not show.
+
+Missing, and required before any conformance claim, after a documented
+search on 2026-09-09:
 
 - No public sample `.krx` archive was found, so no archive-level rule can
-  be checked against a real producer's output.
+  be checked against a real producer's output. Nothing downloadable exists;
+  the only `.krx` file names visible in public search results are private
+  submission receipts and were not opened.
 - No independent reference implementation, test suite, or public
-  conformance corpus for KRX was found.
-- The upstream SPOCS OCD container specification is not retrievable: the
-  URL `MKR-2.27` cites on joinup.ec.europa.eu now redirects to
-  interoperable-europe.ec.europa.eu and returns HTTP 404. Its logical
-  structure is described only second-hand in academic papers.
+  conformance corpus for KRX was found. GitHub code search returns no hit
+  for `KULDEMENY_META.xml` or `KER_META_V0_9`; there is no PRONOM or DROID
+  format record; the one implementation that exists in the wild is a
+  closed-source Hungarian desktop tool.
+- The upstream SPOCS OCD container specification is still not retrieved,
+  but it is now identified: SPOCS deliverable D2.2, *Standard Document and
+  Validation Common Specifications*, 2010. Its catalogue entry is readable
+  in an archived copy and states that OCD is licensed under EUPL v1.1, so
+  the document would be usable if a copy were obtained; every known copy is
+  behind a dead link.
+- The SPOCS eDocuments reference implementation (`SPOCS-BB`, EUPL v1.1)
+  existed and is documented, but only its generated documentation pages are
+  archived. The code, the schema artefacts and the SVN repository are gone.
 - No public statement of which KRX versions other than `v0.9` are accepted.
+
+Two requests would close most of this, and neither is code. Both are for a
+person to make, not an agent:
+
+1. Ask the format owner — Magyar Posta for the hybrid service, ORFK for
+   `KER_META`, NISZ for the Hivatali kapu and KÉR interfaces — to state, in
+   writing, whether `mimetype` sits at the archive root or inside
+   `KRX/OCD/`, whether entry names carry the `KRX/` prefix, which
+   compression method and encoding flag the `mimetype` entry uses, and
+   which payload subdirectory spelling is required. That is A19 to A22 in
+   four sentences, and it is the only route to them.
+2. Ask the European Commission, the Interoperable Europe portal team, or an
+   author of SPOCS D2.2 for a copy of that deliverable, which its own
+   catalogue entry says is EUPL v1.1 licensed.
 
 Until an official sample archive or an independent implementation exists,
 openKRX fixtures must remain independently authored synthetic archives
@@ -178,8 +268,15 @@ agreement with a real service remains unverified.
   licence was found. Link only; do not vendor, and do not copy at length.
 - epapir.gov.hu: states "Minden jog fenntartva ©". No redistribution
   licence was found. Link only.
-- SPOCS OCD asset on the European Commission catalogue: page unavailable
-  (HTTP 404), so no licence could be recorded.
+- SPOCS OCD: the live catalogue page is still unavailable (HTTP 404), but
+  the archived copy and `ISA2-2014` both record the licence as EUPL v1.1,
+  which does grant redistribution. No OCD artefact has been obtained, so
+  nothing is vendored under it; the licence is recorded because it makes
+  the missing specification worth pursuing.
+- `KRXGOV-2021`, the recipient-side guides, and BLANKETTA's help: no reuse
+  licence; link only. The `KRXGOV-2021` screenshots additionally contain a
+  natural person's name and are neither reproduced nor described further.
+- TrID signature definitions: linked, not copied.
 
 Nothing from these sources is committed to this repository. Element names,
 enumeration values, and directory names are recorded above as facts needed
