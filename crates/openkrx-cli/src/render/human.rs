@@ -16,10 +16,12 @@
 
 use openkrx_core::Capabilities;
 
+use crate::commands::extract::ExtractData;
 use crate::commands::inspect::{AttachmentView, InspectData, MetadataView};
 use crate::commands::list::ListData;
 use crate::commands::validate::ValidateData;
 use crate::commands::{CheckView, OutcomeView};
+use crate::extract::cleanup::Cleanup;
 
 /// Characters of a name written before the rest is summarised away.
 pub const MAX_UNITS: usize = 200;
@@ -138,6 +140,68 @@ pub fn list(data: &ListData) -> String {
     lines.push(format!("{} entries.", data.entries.len()));
     lines.push(BOUNDARY.to_owned());
     lines.join("\n")
+}
+
+/// The extraction report: one row per file written, then the totals.
+///
+/// The rows carry the destination-relative path of each file, escaped exactly
+/// as `list` escapes an entry name, because it came from the same untrusted
+/// bytes. The destination itself is never printed: the caller named it, and a
+/// report that repeats it cannot be pasted into a bug report unedited.
+#[must_use]
+pub fn extract(data: &ExtractData) -> String {
+    let mut lines = vec![format!("{:>5}  {:>12}  {}", "entry", "bytes", "path")];
+    for item in &data.items {
+        lines.push(format!(
+            "{:>5}  {:>12}  {}",
+            item.entry_index,
+            item.bytes,
+            escape(item.path.as_bytes())
+        ));
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "{} {} written, {} {} created, {} bytes.",
+        data.files_written,
+        plural(data.files_written, "file", "files"),
+        data.directories_created,
+        plural(data.directories_created, "directory", "directories"),
+        data.bytes_written,
+    ));
+    lines.push(
+        "Nothing was overwritten: every file was created new, and nothing already in the \
+destination was changed or removed. Paths are relative to the destination."
+            .to_owned(),
+    );
+    lines.push(BOUNDARY.to_owned());
+    lines.join("\n")
+}
+
+/// The extra line a failed extraction writes on standard error.
+///
+/// A caller who has just been told an extraction failed needs one more fact:
+/// whether the destination was left as it was found. The counts say so without
+/// naming a path.
+#[must_use]
+pub fn cleanup(cleanup: Cleanup) -> String {
+    if cleanup.removed == 0 && cleanup.left_in_place == 0 {
+        return "openkrx: nothing had been written, so the destination is as it was found"
+            .to_owned();
+    }
+    format!(
+        "openkrx: {} {} this run had created {} removed; {} could not be removed and {} still \
+there. Nothing that was already in the destination was touched",
+        cleanup.removed,
+        plural(cleanup.removed, "path", "paths"),
+        plural(cleanup.removed, "was", "were"),
+        cleanup.left_in_place,
+        plural(cleanup.left_in_place, "is", "are"),
+    )
+}
+
+/// `one` when the count is exactly one, `many` otherwise.
+fn plural(count: u32, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
 }
 
 /// The inspection report: observations, declared metadata, then the checks.

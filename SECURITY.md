@@ -2,18 +2,24 @@
 
 ## Current surface
 
-The CLI supports help, version, capability reporting, and the three reader
-commands `inspect`, `list` and `validate-structure`. They render the core
-library's bounded ZIP inventory (`openkrx_core::archive::inventory`), bounded
-metadata parsing (`openkrx_core::metadata::parse`) and structural check
-inventory (`openkrx_core::profile::check`), which still operate on
-caller-supplied byte slices only. Reading the one input a command takes is
-the whole of openKRX's I/O, and it is bounded before parsing begins. Nothing
-extracts files, writes anywhere, uses keys, or accesses government
-services. The requirements below remain implementation gates for package
-support, not claims that a complete secure KRX parser exists. A successful
-inventory, parse or structural report is an observation, never a conformance
-or authenticity statement.
+The CLI supports help, version, capability reporting, the three reader
+commands `inspect`, `list` and `validate-structure`, and `extract`. The
+reader commands render the core library's bounded ZIP inventory
+(`openkrx_core::archive::inventory`), bounded metadata parsing
+(`openkrx_core::metadata::parse`) and structural check inventory
+(`openkrx_core::profile::check`), which still operate on caller-supplied byte
+slices only. `extract` writes: it joins `openkrx_core::extract::plan` onto a
+directory the caller names, under the no-clobber, no-link, undo-on-failure
+policy mapped [below](#threat-model-mapping-extraction-output-layer). The
+core crate itself still performs no I/O of any kind.
+
+Reading the one input a command takes is bounded before parsing begins, and
+writing happens only where `extract` was explicitly pointed. Nothing creates
+a package, uses keys, or accesses government services. The requirements below
+remain implementation gates for package support, not claims that a complete
+secure KRX parser exists. A successful inventory, parse, structural report or
+extraction is an observation, never a conformance or authenticity
+statement.
 
 Only the current `develop` branch receives fixes during scaffolding. There
 are no released versions to support yet.
@@ -61,12 +67,13 @@ package operations in the capabilities response.
 Each required archive check above, the stable error-code prefix it produces,
 and the test that holds it. Test names are in `crates/openkrx-core/tests/`.
 Limits appear in [architecture.md](docs/architecture.md#archive-inventory-limits).
-The extraction rows are in
-[their own table below](#threat-model-mapping-extraction-planning-layer) and
-are planning only; filesystem output and the writer rows do not exist yet,
-and those checks are unimplemented, not passing. The no-panic row is held by
-the sweeps and, on random input, by the `inventory` fuzz target and its
-bounded CI lane ([testing.md](docs/testing.md#fuzzing)).
+The extraction rows are in their own tables below: planning in
+[one](#threat-model-mapping-extraction-planning-layer) and filesystem output
+in [the other](#threat-model-mapping-extraction-output-layer). No package
+*writer* exists, and those checks are unimplemented, not passing. The
+no-panic row is held by the sweeps and, on random input, by the `inventory`
+fuzz target and its bounded CI lane
+([testing.md](docs/testing.md#fuzzing)).
 
 | Required check | Error code prefix | Test |
 | --- | --- | --- |
@@ -123,11 +130,11 @@ run is not a campaign. Both are described in
 
 `openkrx_core::extract::plan` decides what an extraction would create. It is
 a pure function of the archive inventory: it opens nothing, writes nothing
-and consults no filesystem. **Every row here is planning only; filesystem
-output is pending.** A row states that an unsafe extraction is refused before
-it could start, never that a safe extraction was performed, and no command
-reaches this layer yet — `capabilities().operations` still names the three
-reader commands only.
+and consults no filesystem. **Every row here is planning only.** A row states
+that an unsafe extraction is refused before it could start, never that a safe
+extraction was performed; what happens at a real destination is the
+[output layer](#threat-model-mapping-extraction-output-layer), and `extract`
+surfaces every code below with its own exit status.
 
 Test names are in `crates/openkrx-core/tests/`, except the two component
 classes an accepted inventory can no longer carry, whose tests are the
@@ -139,17 +146,17 @@ rules in
 
 | Required check | Status | Error code prefix | Test |
 | --- | --- | --- | --- |
-| No traversal or absolute destination: every component is validated, and `..`, `.`, an empty component and a control character are refused | Planning only; filesystem output pending | `extract.unsafe_path.parent_component`, `.current_component`, `.empty_component`, `.control_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_unsafe_component_class_is_refused`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
-| No platform-ambiguous destination: a trailing dot or space, a leading space, a Windows reserved device name, a colon, and the six characters Windows refuses in a name (`*`, `?`, `<`, `>`, `\|`, `"`) are refused whatever the host platform | Planning only; filesystem output pending | `extract.unsafe_path.trailing_dot`, `.trailing_space`, `.leading_space`, `.reserved_device_name`, `.colon`, `.reserved_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_character_windows_refuses_outright_is_one_reserved_character_class` |
-| No symlink or reparse-point escape: a link entry rejects the plan and is never created, nor written as its target text, on every host that carries a Unix mode (3 Unix and 19 OS X) | Planning only; filesystem output pending | `extract.unsupported.link` | `a_symlink_entry_rejects_the_whole_plan`, `a_darwin_host_symlink_is_refused_like_a_unix_one`, `entry_kinds_are_read_from_the_central_directory_fields` |
-| No special files: a device node, socket, FIFO or a Unix mode stating no file type rejects the plan | Planning only; filesystem output pending | `extract.unsupported.special_file` | `a_special_file_entry_rejects_the_whole_plan` |
-| No implicit character-set guessing for a destination name | Planning only; filesystem output pending | `extract.unsupported.non_utf8_name` | `a_name_that_is_not_utf8_is_refused_rather_than_decoded` |
-| Specified Unicode and case collisions, refused rather than resolved | Planning only; filesystem output pending | `extract.ambiguous.collision`, `.file_directory_conflict` | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision`, `a_file_that_is_also_a_directory_prefix_is_refused`, `a_directory_prefix_that_arrives_before_its_file_is_refused_the_same_way`, `a_shared_file_name_in_different_directories_is_not_a_collision` |
-| Documented output limits — file count, total bytes, path, component and depth — with checked arithmetic | Planning only; filesystem output pending | `extract.over_limit.files`, `.total_bytes`, `.path_bytes`, `.component_bytes`, `.depth` | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary`, `the_path_length_limit_holds_at_its_boundary`, `the_component_length_limit_holds_at_its_boundary`, `the_depth_limit_holds_at_its_boundary` |
-| A failure prevents the operation reporting success: a rejection rejects the whole plan, never a reduced one | Planning only; filesystem output pending | every `extract.*` code | every rejection test above; each asserts that no plan was produced |
-| No panic on any input | Planning only; filesystem output pending | any code; never a panic | `planning_every_fixture_inventory_never_panics`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
-| Diagnostics free of personal content and private paths | Planning only; filesystem output pending | every code; `Display` prints code, entry index and limit numbers only | `error_display_carries_codes_and_numbers_but_no_entry_name` |
-| Confinement to a caller-selected destination, no-clobber creation, commit and cleanup after an interrupted write | **Not implemented** | — | — |
+| No traversal or absolute destination: every component is validated, and `..`, `.`, an empty component and a control character are refused | Planning; the output layer holds the rest | `extract.unsafe_path.parent_component`, `.current_component`, `.empty_component`, `.control_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_unsafe_component_class_is_refused`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
+| No platform-ambiguous destination: a trailing dot or space, a leading space, a Windows reserved device name, a colon, and the six characters Windows refuses in a name (`*`, `?`, `<`, `>`, `\|`, `"`) are refused whatever the host platform | Planning; the output layer holds the rest | `extract.unsafe_path.trailing_dot`, `.trailing_space`, `.leading_space`, `.reserved_device_name`, `.colon`, `.reserved_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_character_windows_refuses_outright_is_one_reserved_character_class` |
+| No symlink or reparse-point escape: a link entry rejects the plan and is never created, nor written as its target text, on every host that carries a Unix mode (3 Unix and 19 OS X) | Planning; the output layer holds the rest | `extract.unsupported.link` | `a_symlink_entry_rejects_the_whole_plan`, `a_darwin_host_symlink_is_refused_like_a_unix_one`, `entry_kinds_are_read_from_the_central_directory_fields` |
+| No special files: a device node, socket, FIFO or a Unix mode stating no file type rejects the plan | Planning; the output layer holds the rest | `extract.unsupported.special_file` | `a_special_file_entry_rejects_the_whole_plan` |
+| No implicit character-set guessing for a destination name | Planning; the output layer holds the rest | `extract.unsupported.non_utf8_name` | `a_name_that_is_not_utf8_is_refused_rather_than_decoded` |
+| Specified Unicode and case collisions, refused rather than resolved | Planning; the output layer holds the rest | `extract.ambiguous.collision`, `.file_directory_conflict` | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision`, `a_file_that_is_also_a_directory_prefix_is_refused`, `a_directory_prefix_that_arrives_before_its_file_is_refused_the_same_way`, `a_shared_file_name_in_different_directories_is_not_a_collision` |
+| Documented output limits — file count, total bytes, path, component and depth — with checked arithmetic | Planning; the output layer holds the rest | `extract.over_limit.files`, `.total_bytes`, `.path_bytes`, `.component_bytes`, `.depth` | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary`, `the_path_length_limit_holds_at_its_boundary`, `the_component_length_limit_holds_at_its_boundary`, `the_depth_limit_holds_at_its_boundary` |
+| A failure prevents the operation reporting success: a rejection rejects the whole plan, never a reduced one | Planning; the output layer holds the rest | every `extract.*` code | every rejection test above; each asserts that no plan was produced |
+| No panic on any input | Planning; the output layer holds the rest | any code; never a panic | `planning_every_fixture_inventory_never_panics`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
+| Diagnostics free of personal content and private paths | Planning; the output layer holds the rest | every code; `Display` prints code, entry index and limit numbers only | `error_display_carries_codes_and_numbers_but_no_entry_name` |
+| Confinement to a caller-selected destination, no-clobber creation, commit and cleanup after an interrupted write | Implemented, in the output layer | `output.*` | [the output table](#threat-model-mapping-extraction-output-layer) |
 
 ### Residual risks of this layer
 
@@ -186,6 +193,67 @@ rules in
   existing file, a case-insensitive filesystem and a concurrent writer are
   all invisible to a pure function. The filesystem ticket owns them.
 
+## Threat-model mapping: extraction output layer
+
+`crates/openkrx-cli/src/extract/` is the only code in openKRX that writes to
+a filesystem. It adds no rule about names, entry kinds, collisions or
+ceilings — those are the planner's, above — and owns the destination alone.
+The policy, phase by phase, is in
+[architecture.md](docs/architecture.md#extraction-output); the codes are
+catalogued in [codes.md](docs/codes.md#output-codes). Test names in this
+table are in `crates/openkrx-cli/tests/extract.rs`, except where noted.
+
+Every failure exits 9 and leaves the destination as it was found: either the
+run was refused before the first write, or the undo pass removed everything
+this run had created. A partial result is never reported as a success.
+
+| Required check | Error code prefix | Test |
+| --- | --- | --- |
+| Confinement to a caller-selected destination: it must already exist, be a real directory, and not be a symbolic link or reparse point; `extract` never creates it | `output.destination_missing`, `.destination_not_a_directory`, `.destination_symlink` | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `a_destination_that_is_a_file_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused` |
+| No overwrite: a planned path that exists in any form — file, directory, symbolic link, or a link with a missing target — refuses the whole extraction before anything is written | `output.exists` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused` |
+| No symlink or reparse-point escape through the path: every existing ancestor inside the destination must be a real directory, checked in preflight and again after each directory this run creates | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_symlink_inside_the_destination_is_refused`, `a_destination_or_write_problem_is_nine` (`src/exit.rs`) |
+| Exclusive creation: files with `create_new` (`O_EXCL` / `CREATE_NEW`), directories with `create_dir` and never `create_dir_all` | `output.exists`, `output.io` | `a_package_is_extracted_with_byte_identical_payloads`, `a_target_file_that_already_exists_refuses_the_whole_extraction` |
+| Interrupted-write detection: a `.openkrx-extract.partial` marker exists for the length of the run, and its presence refuses the next one | `output.partial_marker_present` | `a_marker_left_by_an_interrupted_run_refuses_the_next_one`, `the_json_report_names_every_file_and_the_marker_it_removed` |
+| Cleanup that never deletes pre-existing data: only paths this run created are removed, newest first, with `remove_dir` rather than `remove_dir_all` | `output.io`, and the `cleanup` counts | `a_failed_write_removes_this_runs_files_and_leaves_everything_else` |
+| A failure never reports success, and never leaves partial output as a completed run | every `output.*` code, exit status 9 | every refusal test above; each reads the destination back |
+| Payload bytes preserved exactly, with no mode bits, timestamps, links, special files or nested unpacking | not applicable: a preservation rule, not a refusal | `a_package_is_extracted_with_byte_identical_payloads`, `a_planner_refusal_keeps_its_own_category_and_names_no_path` |
+| Diagnostics free of the destination path, an entry name and payload bytes; the written paths appear only in a successful report | every code; the diagnostic carries the code, its category and an entry index | `extract_never_carries_a_canary_in_a_diagnostic` (`tests/privacy.rs`), `a_planner_refusal_keeps_its_own_category_and_names_no_path` |
+| No implicit execution or nested extraction | not applicable: the writer creates regular files and directories only, and never opens what it wrote | reviewed by construction |
+
+### Residual risks of the output layer
+
+- **A concurrent writer at the destination is out of scope.** The destination
+  is trusted not to be modified by another principal while the command runs.
+  `create_new` and the post-creation `symlink_metadata` checks defend against
+  what is already there — an existing file, a symbolic link, a Windows
+  reparse point — and not against an attacker who can act inside the window
+  between a check and the operation that follows it. Closing that window
+  needs `openat2` with `RESOLVE_BENEATH`, or the equivalent per-platform
+  primitive, and is deliberately deferred. Extract into a directory only you
+  can write to.
+- **A crash leaves partial output.** A signal, a power loss or a killed
+  process cannot run the undo pass, so partial files and the marker stay
+  behind. The marker is the compensating control: a destination containing it
+  is incomplete, the next run refuses it, and clearing it is a deliberate
+  human act. Whole-tree atomicity through rename-based staging is deferred,
+  with the reasons in
+  [architecture.md](docs/architecture.md#cleanup-after-a-failed-write).
+- **The undo pass can itself fail.** The condition that stopped the write —
+  a read-only destination, a full disk — can stop the removal too. Such paths
+  are counted as `left_in_place` rather than retried or hidden, so the report
+  says the destination is not as it was found.
+- **Windows junctions are not exercised by CI.** Reparse points are detected
+  through `FILE_ATTRIBUTE_REPARSE_POINT`, but the runner cannot reliably
+  create a junction or a symbolic link without developer mode or elevation,
+  so the ancestor-link and leaf-link tests are `cfg(unix)`. The Windows half
+  of the rule is held by construction and by the same code path, not by a
+  test on that platform.
+- **Extraction is not verification.** A file `extract` wrote is a byte-exact
+  copy of what the package declared. It is not evidence that the package is
+  authentic, that its contents are what they claim to be, or that a document
+  inside it is safe to open. Attachments are opaque bytes and are never
+  interpreted.
+
 ## Threat-model mapping: command-line input layer
 
 The core crate performs no I/O, so reading the one input a reader command
@@ -195,8 +263,9 @@ are in `crates/openkrx-cli/tests/`. The command contract, the data shapes and
 the eight exit statuses are in
 [architecture.md](docs/architecture.md#command-contract-and-json-envelope) and
 [Exit statuses](docs/architecture.md#exit-statuses); the two codes are
-catalogued in [codes.md](docs/codes.md). No extraction, output or writer row
-exists yet; those checks are unimplemented, not passing.
+catalogued in [codes.md](docs/codes.md). The rows for what `extract` writes
+are in [its own table](#threat-model-mapping-extraction-output-layer); no
+package *writer* exists, and those checks are unimplemented, not passing.
 
 | Required check | Error code prefix | Test |
 | --- | --- | --- |
@@ -205,7 +274,7 @@ exists yet; those checks are unimplemented, not passing.
 | Diagnostics never carry the input path, an entry name or a metadata value: on standard error in every case, and on standard output whenever a run failed | every code; the diagnostic carries the code, its category, an entry index and numbers only | `standard_error_never_carries_a_canary_whatever_happened`, `a_failed_run_never_carries_a_canary_on_standard_output_either`, `the_input_path_is_absent_from_a_successful_report_as_well`, `a_declared_value_reaches_standard_output_only_for_inspect` |
 | Attacker-controlled names and values reach a terminal escaped and bounded | not applicable: a rendering rule, not a refusal | `a_name_that_is_not_utf8_is_reported_as_bytes_rather_than_guessed`, `an_invisible_character_in_a_name_never_reaches_the_terminal`, `a_long_name_is_cut_and_the_remainder_is_counted` |
 | A parsing failure keeps its category: the input cap is an input problem, and a package problem stays distinguishable from an unsupported feature and from a resource limit | `archive.*`, `metadata.*`, exit statuses 6, 7 and 8 | `a_malformed_image_is_status_six`, `an_unsupported_feature_is_status_seven`, `an_over_limit_archive_is_status_eight_with_its_numbers`, `every_catalogued_code_classifies_to_a_category` |
-| No implicit execution, nested extraction, or remote access | not applicable: the executable opens the path it was given, reads it, and writes nothing anywhere | reviewed by construction; nothing is logged, cached or persisted |
+| No implicit execution, nested extraction, or remote access | not applicable: the executable opens the path it was given, reads it, and writes only where `extract` was pointed | reviewed by construction; nothing is logged, cached or persisted, and nothing written is ever opened again |
 
 The file argument is opened exactly as written, with no path normalisation,
 globbing, symlink resolution or extension inference on any platform, and `-`

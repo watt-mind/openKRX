@@ -29,18 +29,22 @@ rules that no primary source settles, so that claim is not available.
 ## Not yet implemented
 
 The three library layers are reachable from the command line: `inspect`,
-`list` and `validate-structure` render them, and `capabilities().operations`
-names exactly those three. Everything below is still absent.
+`list` and `validate-structure` render them, `extract` writes what
+[Extraction planning](#extraction-planning) decided, and
+`capabilities().operations` names exactly those four. Everything below is
+still absent.
 
-- Extraction output. Nothing writes to a filesystem, so no no-clobber rule
-  and no interrupted-write cleanup policy exists yet; those are requirements
-  in [SECURITY.md](../SECURITY.md), not implemented behaviour. The half of
-  extraction that needs no filesystem — deciding what would be written, and
-  refusing everything that could not be written safely — is implemented and
-  described under [Extraction planning](#extraction-planning). No command
-  reaches it: `capabilities().operations` still names the three reader
-  commands only.
-- Package creation, deterministic writing and any writer limits.
+- Package creation, deterministic writing and any writer limits. `extract`
+  writes files out of a package; nothing writes a package.
+- Atomic whole-tree extraction. Files are created directly in the
+  destination, not staged elsewhere and renamed into place, so an interrupted
+  run is detected rather than prevented; see
+  [Extraction output](#extraction-output).
+- `openat2`-style path resolution. Confinement is enforced with
+  `symlink_metadata` and exclusive creation, which defend against what is
+  already at the destination and not against a concurrent writer with access
+  to it. The assumption is stated under
+  [Race assumptions](#race-assumptions-and-what-they-do-not-cover).
 - Signature handling of any kind, including `signatures.xml` (rule A7).
   `signatures.xml` is an ordinary entry to the inventory and nothing else.
 - Attachment interpretation. Attachments are named and, when a reference
@@ -122,11 +126,16 @@ as a failure rather than as a success.
 | --- | --- |
 | `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the two core entry points, and hands the result to a renderer. |
 | `src/input.rs` | The only I/O in openKRX: opening a file exactly as named, or reading standard input as binary, bounded by the input cap. |
-| `src/exit.rs` | `Category`, the eight exit statuses, and the single classifier from a stable dotted code to one of them. |
+| `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*` diagnostic explains itself with. |
 | `src/commands/mod.rs` | The shared check, outcome and name views every command's report is built from. |
 | `src/commands/inspect.rs` | The `inspect` report: observations, the declared document, and every check. |
 | `src/commands/list.rs` | The `list` report: one row per archive entry, in central-directory order. |
 | `src/commands/validate.rs` | The `validate-structure` report: the summary word, the checks, and the undecided rules. |
+| `src/commands/extract.rs` | The `extract` report: the counts, one record per file written, and whether the run removed its marker. |
+| `src/extract/mod.rs` | The four phases of a protected extraction — plan, preflight, write, commit — the marker name, and the failure policy that undoes this run's work. |
+| `src/extract/preflight.rs` | What is decided before a byte is written: the destination, the marker, and every planned path against what is already there. Holds the link and reparse-point test. |
+| `src/extract/writer.rs` | Exclusive creation of the marker, the directories and the files, each recorded as this run created it. |
+| `src/extract/cleanup.rs` | The ledger of what this run created and the reverse-order undo, which never removes anything pre-existing. |
 | `src/render/json.rs` | The one-object JSON envelope, in both its successful and its failed shape. |
 | `src/render/human.rs` | Terminal-safe text: control, invisible and undecodable bytes are escaped and a long name is cut. |
 
@@ -376,14 +385,13 @@ every time.
 The split is deliberate. Every rule
 [SECURITY.md](../SECURITY.md#required-threat-model-for-package-support)
 requires of extraction that does **not** need a filesystem is decided here,
-where it can be tested exhaustively without touching a disk. What is left for
-the follow-up command ticket is the filesystem half alone: joining a plan
-onto a caller-selected destination, no-clobber creation, the interrupted-write
-commit and cleanup policy, streaming each entry's bytes through
-`ArchiveInventory::entry_bytes`, and the `extract` command and its exit
-statuses. Until that lands, `capabilities().operations` names the three
-reader commands and nothing else, and no `extract.*` code is reachable from
-the command line.
+where it can be tested exhaustively without touching a disk. The filesystem
+half — joining a plan onto a caller-selected destination, no-clobber
+creation, the interrupted-write policy and the `extract` command — is in
+`openkrx-cli` and described under
+[Extraction output](#extraction-output). A `extract.*` code therefore does
+reach the command line: it is what `extract` reports when the package could
+not be planned at all.
 
 A plan carries no `PathBuf`, no absolute path and no platform separator. A
 `PlanItem` holds the entry index, the destination path as a `Vec<String>` of
@@ -481,16 +489,119 @@ deduplicated and sorted component-wise so a parent precedes its children. An
 empty directory is deliberately **not** materialised, so a directory marker
 with nothing beneath it produces nothing at all.
 
+## Extraction output
+
+`extract` is the only command that writes, and
+`crates/openkrx-cli/src/extract/` is the only code in openKRX that touches a
+filesystem for output. It adds no rule about names, entry kinds, collisions
+or ceilings: those belong to the planner above, and are enforced before this
+layer runs. What it owns is the destination.
+
+```text
+openkrx extract <FILE|-> --into <DIR> [--json]
+```
+
+`<DIR>` must already exist, must be a directory, and must not be a symbolic
+link or a Windows reparse point; all three are checked with
+`symlink_metadata`, which does not follow a link. It need **not** be empty.
+`extract` never creates its destination: creating one would mean choosing
+where, with which parents and with which permissions, and a typo in the
+argument would silently produce a tree instead of a refusal.
+
+A run has four phases, and each finishes before the next begins.
+
+**1. Plan.** `archive::inventory`, then `extract::plan` under
+`ExtractLimits::DEFAULT`. A planning refusal rejects the whole package with
+its own `extract.*` code and its own category — an unsupported entry is still
+a 7, a ceiling still an 8 — and nothing has touched the destination.
+
+**2. Preflight.** The destination, then the marker, then every planned path.
+For each planned file, every ancestor inside the destination that exists must
+be a real directory (`output.symlink_in_path`, `output.not_a_directory`) and
+the file path itself must not exist **in any form** — file, directory, link,
+or a link whose target is missing (`output.exists`). A preflight refusal
+means nothing was written, and the JSON report says so with `removed: 0`.
+
+**3. Write.** A `.openkrx-extract.partial` marker is created in the
+destination with `create_new`, before anything else. Then each planned
+directory in plan order — which lists every implicit parent, sorted so a
+parent precedes its child — with `create_dir`, never `create_dir_all`, and
+each is re-read with `symlink_metadata` after creation. A directory that
+already existed is neither counted nor recorded: this run did not create it,
+so this run must never remove it. Then each planned file with
+`OpenOptions::new().write(true).create_new(true)`, which is `O_EXCL` on Unix
+and `CREATE_NEW` on Windows: it refuses rather than truncating, and it does
+not follow a symbolic link at the leaf. Bytes come from
+`ArchiveInventory::entry_bytes`, bounded by `max_entry_decoded_bytes` and
+CRC-checked, and are written in full. **No permission bit and no timestamp is
+copied from the archive**: a package is untrusted input, and the process
+umask, or the destination's inherited Windows ACL, decides instead.
+
+**4. Commit.** Removing the marker is the last step. A destination that still
+holds `.openkrx-extract.partial` was not finished, and a consumer must treat
+it as incomplete.
+
+### Cleanup after a failed write
+
+Every path this run creates — files, directories and the marker — is recorded
+in creation order. Any failure after the first write walks that record
+backwards and removes exactly those paths: `remove_file` for a file,
+`remove_dir` for a directory, never `remove_dir_all`, so a directory that has
+since acquired something this run did not create survives instead of being
+deleted with its contents. **Nothing pre-existing can be removed**, because
+nothing pre-existing was ever recorded.
+
+The command then exits with the failure's own category, and the report says
+what the pass did: `removed` is how many of this run's paths are gone,
+`left_in_place` how many could not be removed and are still there. Human mode
+prints the same as a second line on standard error. Neither is a path.
+
+**Residual limitation.** A crash — a signal, a power loss, a killed process —
+cannot run the undo pass, so it leaves partial files and the marker behind.
+That is what the marker is for: the next run into that destination is refused
+with `output.partial_marker_present` rather than mixing two runs' output, and
+clearing it is a deliberate human act. Rename-based staging — writing into a
+temporary tree and renaming it into place — would make the whole extraction
+atomic, and is deliberately deferred: it needs a second confined destination
+on the same filesystem, doubles the peak space, and moves the no-clobber
+question to the rename rather than removing it.
+
+### Race assumptions, and what they do not cover
+
+The destination is trusted not to be modified by another principal while the
+command runs. Exclusive creation and the post-creation `symlink_metadata`
+checks defend against what is **already** at the destination — an existing
+file, a symbolic link, a Windows reparse point — and not against an attacker
+holding concurrent write access to it, who can win the window between a check
+and the operation that follows it. Closing that window needs `openat2` with
+`RESOLVE_BENEATH` on Linux, or the equivalent per-platform primitive, and is
+deliberately deferred; it is recorded as a residual risk in
+[SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer).
+
+Per platform: Windows reparse points are detected through
+`FILE_ATTRIBUTE_REPARSE_POINT` as well as `is_symlink`, because a junction
+does not always report as a symbolic link; reserved device names, trailing
+dots and trailing spaces are already refused by the planner, so no output
+name can collapse onto another one there. Case-insensitive filesystems and
+APFS normalisation are covered by the planner's NFC and case-folded collision
+rejection, and by the no-clobber rule as the second line: two paths a
+filesystem equates cannot both be created with `create_new`.
+
 ## Command contract and JSON envelope
 
 The supported surface is `openkrx --help`, `openkrx --version`,
-`openkrx capabilities [--json]`, and the three reader commands:
+`openkrx capabilities [--json]`, the three reader commands, and `extract`:
 
 ```text
 openkrx inspect            <FILE|-> [--json]
 openkrx list               <FILE|-> [--json]
 openkrx validate-structure <FILE|-> [--json]
+openkrx extract            <FILE|-> --into <DIR> [--json]
 ```
+
+The three reader commands write nothing anywhere. `extract` writes exactly
+the files the package declares, into the directory `--into` names, under the
+rules in [Extraction output](#extraction-output).
 
 Each reader command takes exactly one input: a path, opened exactly as
 written with no normalisation, globbing or extension inference on any
@@ -540,7 +651,7 @@ the inventory refuses more than 256 entries and a name longer than 255 bytes.
   "data": {
     "project": "openKRX",
     "stage": "reader",
-    "operations": ["inspect", "list", "validate-structure"]
+    "operations": ["inspect", "list", "validate-structure", "extract"]
   },
   "verified": false
 }
@@ -702,6 +813,56 @@ the checks first cite it.
 }
 ```
 
+### `extract`
+
+`items[]` records one file per entry written, in plan order, which is
+central-directory order. `path` is relative to the destination, with its
+components joined by `/` on every platform; the destination itself is never
+reported, because the caller named it and a report that repeats it cannot be
+logged unedited. `directories_created` counts only directories this run
+created, not ones that were already there, and `marker_removed` says the run
+reached its last step.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "extract",
+  "data": {
+    "files_written": 3,
+    "directories_created": 5,
+    "bytes_written": 1041,
+    "items": [
+      {"entry_index": 0, "path": "mimetype", "bytes": 19},
+      {"entry_index": 2, "path": "KRX/OCD/Payload/ID-1/synthetic.pdf", "bytes": 19}
+    ],
+    "marker_removed": true
+  },
+  "verified": false
+}
+```
+
+`items[].path` is the only place a name from the package reaches the output
+of a command other than `inspect`, and it appears **only on success**. A
+failed `extract` carries the ordinary failed envelope plus one extra object:
+
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "command": "extract",
+  "error": {"code": "output.exists", "category": "output", "entry_index": 2},
+  "cleanup": {"removed": 0, "left_in_place": 0},
+  "verified": false
+}
+```
+
+`cleanup` is present for `extract` alone. It counts paths this run had
+created and then removed, and paths it created and could not remove; both
+zero means nothing had been written when the run was refused. Human mode
+prints the same fact as a second line on standard error. Neither carries a
+path, an entry name or an operating-system message.
+
 There is deliberately no field named `valid`, `conforming` or `is_krx` in any
 response, and no command prints such a word as a claim.
 
@@ -715,7 +876,7 @@ must stop rather than guess.
 
 ## Exit statuses
 
-Eight categories, exhaustive and stable; a consumer may branch on the number.
+Nine categories, exhaustive and stable; a consumer may branch on the number.
 `crates/openkrx-cli/src/exit.rs` holds the only mapping, and one unit test per
 category holds each row.
 
@@ -728,7 +889,8 @@ category holds each row.
 | 5 | `input` | The input could not be opened or read, or it reached the input cap. |
 | 6 | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. |
 | 7 | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, a multi-disk archive, another compression method, or an XML feature the parser refuses. |
-| 8 | `limit` | A documented parsing limit was exceeded. |
+| 8 | `limit` | A documented parsing or extraction limit was exceeded. |
+| 9 | `output` | `extract` only: the destination could not be used, or a write failed. Nothing incomplete was left behind. |
 
 `inspect` and `list` never exit 3 or 4: a failing or undecided check is part
 of their report, not their status. A structural failure is therefore visible
@@ -750,11 +912,17 @@ may open it (exit 7)`.
 A code classifies to exactly one category, by its head and its category
 segment: `input.*` to 5; `*.over_limit.*` to 8, except
 `input.over_limit.archive_bytes`, which is an input problem because nothing
-was parsed at all; `*.unsupported.*` to 7; and `*.truncated.*`,
-`*.malformed.*`, `*.ambiguous.*`, `archive.unsafe_name.*` and
-`archive.no_such_entry` to 6. The remaining `metadata.*` codes are
-structural-check failures, which reach a status only through
-`validate-structure`'s summary, as 3.
+was parsed at all; `*.unsupported.*` to 7; `*.truncated.*`, `*.malformed.*`,
+`*.ambiguous.*`, `archive.unsafe_name.*`, `extract.unsafe_path.*` and
+`archive.no_such_entry` to 6; and every `output.*` code to 9. The remaining
+`metadata.*` codes are structural-check failures, which reach a status only
+through `validate-structure`'s summary, as 3.
+
+Statuses 3, 4 and 9 each belong to one command. 9 is `extract`'s alone, and
+it says something the other statuses do not: the destination was left as it
+was found, either because the run was refused before writing or because the
+undo pass removed everything it had created. In human mode the second line on
+standard error states which of the two happened.
 
 The core error enums are `#[non_exhaustive]`, so no downstream `match` on
 their variants can be exhaustive and a new code cannot be made to fail

@@ -14,15 +14,23 @@ what the code asserts from them in [conformance.md](conformance.md).
 
 ## Not yet implemented
 
-The three reader commands expose the three library layers, so
-`capabilities().operations` names them. Reading is the only package operation
-that exists. The authoritative, code-level version of this list is
+The three reader commands expose the three library layers and `extract`
+writes what the planner decided, so `capabilities().operations` names all
+four. Reading and protected extraction are the package operations that exist.
+The authoritative, code-level version of this list is
 [architecture.md](architecture.md#not-yet-implemented).
 
-- Extraction of any kind, and with it every filesystem control the security
-  policy requires: no-clobber publication, path sanitisation, symlink and
-  reparse-point defence, and interrupted-write cleanup.
-- Package creation and deterministic writing.
+- Package creation and deterministic writing. `extract` takes files out of a
+  package; nothing puts one together.
+- Atomic whole-tree extraction. Files are created directly in the
+  destination, so a crash leaves partial output plus the
+  `.openkrx-extract.partial` marker that makes it detectable; rename-based
+  staging is deferred, with reasons in
+  [architecture.md](architecture.md#cleanup-after-a-failed-write).
+- `openat2`-style path resolution. Extraction is confined with
+  `symlink_metadata` and exclusive creation, which do not defend against a
+  concurrent writer holding access to the destination; see
+  [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer).
 - Signature handling, including `signatures.xml` (rule A7). openKRX
   performs no cryptography and is not planned to.
 - Attachment interpretation of any kind.
@@ -50,14 +58,15 @@ criteria and verification.
 | [KRX-02: bounded archive inventory](work-packages.md#krx-02-bounded-archive-inventory) | **Done** | `openkrx_core::archive::inventory`: a bounded, profile-agnostic ZIP reader with published limits, exact byte coverage, ambiguity refusal and 43 stable codes. No CLI exposure. |
 | [KRX-03: metadata and structural validation](work-packages.md#krx-03-metadata-and-structural-validation) | **Done** | `openkrx_core::metadata::parse` and `openkrx_core::profile::check`: bounded `KER_META_V0_9`-shaped parsing and the eleven-check structural inventory, with each unresolved rule reported as `Unresolved(rule)`. No verdict, no CLI exposure. |
 | [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | **Done** | `inspect`, `list` and `validate-structure` over the existing layers, with bounded input, eight stable exit statuses, a one-object JSON contract and content-free diagnostics. The first milestone that makes any of this usable without writing Rust; its output stays within [profile.md](profile.md) and reports observations, never a conformance verdict. |
-| [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | Planned | `extract`, planned before any write, with the full filesystem threat model held by tests on every supported OS. |
+| [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | **Done** | `openkrx_core::extract::plan` and the `extract` command: the whole plan decided before a byte is written, a destination that must already exist, no overwrite, no link escape, exit status 9, and an undo pass that removes only what the run created. |
 | [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | Planned, and blocked on evidence | `create`. Cannot be built while the container layout is unresolved: see [Known gaps](conformance.md#known-gaps). |
 | [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |
 
-KRX-05 is next: it is the first milestone that writes to a filesystem, so
-the whole extraction threat model becomes live with it. KRX-06 is the one
-that cannot start, whatever the engineering appetite, until a citable source
-or an authoritative statement settles the layout.
+KRX-05 was the first milestone that writes to a filesystem, so the whole
+extraction threat model is now live; its residual risks are recorded in
+[SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer). KRX-06 is
+the one that cannot start, whatever the engineering appetite, until a citable
+source or an authoritative statement settles the layout.
 
 ## Engineering items
 

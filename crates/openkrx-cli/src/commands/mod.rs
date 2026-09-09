@@ -1,11 +1,17 @@
-//! The three reader commands, each rendering core types and nothing more.
+//! The command reports, each rendering core types and nothing more.
 //!
 //! A command in this module reads no bytes and decides no package semantics.
 //! It converts what `openkrx_core::archive::inventory` and
 //! `openkrx_core::profile::check` already produced into one presentation type,
 //! which `crate::render` then writes as JSON or as text. Nothing here can
 //! introduce a rule the core crate does not hold.
+//!
+//! `extract` is the one exception to the first sentence, and only in one
+//! direction: its report is the record of what `crate::extract` actually wrote,
+//! built while writing. It still decides no package semantics — the planner
+//! did that before a byte was written.
 
+pub mod extract;
 pub mod inspect;
 pub mod list;
 pub mod validate;

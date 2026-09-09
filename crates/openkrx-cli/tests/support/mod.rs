@@ -133,6 +133,17 @@ impl Scratch {
         path
     }
 
+    /// Create a subdirectory of this scratch directory and return its path.
+    ///
+    /// `create_dir` rather than `create_dir_all`, so a name used twice in one
+    /// test is a loud failure rather than a silently shared directory.
+    #[must_use]
+    pub fn dir(&self, name: &str) -> PathBuf {
+        let path = self.path.join(name);
+        std::fs::create_dir(&path).expect("create a destination directory");
+        path
+    }
+
     /// The directory itself.
     #[must_use]
     pub fn path(&self) -> &Path {
@@ -180,6 +191,55 @@ pub fn layout_package(root_prefix: &str) -> Vec<u8> {
         &Document::header_only().bytes(),
         &[],
     )
+}
+
+/// The destination path and exact bytes of every entry of
+/// [`attachment_package`], in central-directory order.
+///
+/// The extraction tests compare what was written against these rather than
+/// against a re-read of the archive, so a writer that silently transformed
+/// its bytes could not pass by transforming the expectation too.
+#[must_use]
+pub fn attachment_package_contents() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
+        ("mimetype", MARKER_CONTENT.to_vec()),
+        (
+            "KRX/OCD/Metalayer/KULDEMENY_META.xml",
+            Document::default().bytes(),
+        ),
+        (
+            "KRX/OCD/Payload/ID-1/synthetic.pdf",
+            b"synthetic payload 0".to_vec(),
+        ),
+    ]
+}
+
+/// The directories [`attachment_package`] would create, parent-first.
+pub const ATTACHMENT_PACKAGE_DIRECTORIES: [&str; 5] = [
+    "KRX",
+    "KRX/OCD",
+    "KRX/OCD/Metalayer",
+    "KRX/OCD/Payload",
+    "KRX/OCD/Payload/ID-1",
+];
+
+/// A package whose third entry declares itself a symbolic link.
+///
+/// The planner refuses the whole plan with `extract.unsupported.link`; the
+/// command must surface that as an unsupported feature and write nothing.
+#[must_use]
+pub fn symlink_entry_package() -> Vec<u8> {
+    let document = Document::header_only();
+    Archive::of(vec![
+        Entry::stored(b"mimetype", MARKER_CONTENT),
+        Entry::deflated(
+            format!("KRX/OCD/Metalayer/{METADATA_FILE}").as_bytes(),
+            &document.bytes(),
+        ),
+        Entry::stored(b"KRX/OCD/Payload/ID-1/link", b"../../../../etc/passwd")
+            .with_unix_mode(0o120_777),
+    ])
+    .build()
 }
 
 /// A package declaring an attachment the archive does not hold.

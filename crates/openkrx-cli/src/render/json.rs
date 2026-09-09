@@ -23,6 +23,7 @@
 use serde::Serialize;
 
 use crate::exit::Failure;
+use crate::extract::cleanup::Cleanup;
 
 /// The envelope version. Adding a field is compatible and does not raise it.
 const SCHEMA_VERSION: u32 = 1;
@@ -44,6 +45,10 @@ struct Failed<'a> {
     ok: bool,
     command: &'a str,
     error: Diagnostic<'a>,
+    /// What the extraction undo pass removed, present for `extract` alone and
+    /// only once it had created something. Counts, never a path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cleanup: Option<Cleanup>,
     verified: bool,
 }
 
@@ -78,10 +83,26 @@ pub fn success<T: Serialize>(command: &str, data: &T) -> String {
 
 /// Serialise one failed response as a single line.
 pub fn failure(command: &str, failure: &Failure) -> String {
+    failed(command, failure, None)
+}
+
+/// The same, carrying what the extraction undo pass removed.
+///
+/// A caller of `extract` needs to know whether the destination was left as it
+/// was found. `removed` is how many of this run's paths are gone and
+/// `left_in_place` how many could not be removed; both are counts, because a
+/// diagnostic may never carry a path.
+pub fn failure_with_cleanup(command: &str, failure: &Failure, cleanup: Cleanup) -> String {
+    failed(command, failure, Some(cleanup))
+}
+
+/// Build the failed envelope, with or without the cleanup counts.
+fn failed(command: &str, failure: &Failure, cleanup: Option<Cleanup>) -> String {
     let response = Failed {
         schema_version: SCHEMA_VERSION,
         ok: false,
         command,
+        cleanup,
         error: Diagnostic {
             code: failure.code,
             category: failure.category.as_str(),
