@@ -1,9 +1,25 @@
 //! openKRX development foundation.
 //!
-//! No document processing is implemented. Capabilities describe only operations
-//! that can actually process input; bootstrap introspection is not one of them.
+//! The crate implements one processing layer: [`archive::inventory`], a bounded,
+//! profile-agnostic ZIP reader for hostile input. It performs no filesystem,
+//! clock, process or network access; a caller supplies the whole archive image
+//! as bytes. No metadata parsing, extraction, writing or profile validation
+//! exists, so [`capabilities`] still reports no operations: an inventory is not
+//! a package operation and never asserts that an archive is a KRX package.
+
+#![warn(missing_docs)]
 
 use serde::Serialize;
+
+pub mod archive;
+mod error;
+mod limits;
+
+pub use error::{
+    AmbiguityKind, ArchiveError, LimitKind, MalformedKind, Structure, UnsafeNameKind,
+    UnsupportedKind,
+};
+pub use limits::Limits;
 
 /// Machine-readable implementation status; never a verification verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

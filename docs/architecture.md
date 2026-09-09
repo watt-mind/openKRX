@@ -9,8 +9,11 @@ The edition-2024 Rust workspace targets Rust 1.88 and contains:
 | `openkrx-core` | Current capability model; future package semantics |
 | `openkrx-cli` | `openkrx` executable and human/JSON presentation |
 
-Both crates use `publish = false`. No archive/XML parser or writer is
-implemented. `openkrx --help`, `openkrx --version`, and
+Both crates use `publish = false`. The core crate implements one processing
+layer, `openkrx_core::archive::inventory`: a bounded, profile-agnostic ZIP
+container reader over a caller-supplied byte slice. No XML parser, profile
+validator, extractor or writer is implemented, and no CLI command exposes the
+inventory yet. `openkrx --help`, `openkrx --version`, and
 `openkrx capabilities [--json]` are the entire supported CLI surface.
 Help and version use the argument parser's normal output. Successful
 capability reporting exits with status 0; invalid CLI arguments exit with
@@ -32,8 +35,10 @@ In JSON mode, capabilities writes exactly one JSON object on stdout:
 }
 ```
 
-`operations` lists implemented package operations; empty means none.
-`verified: false` expresses the cryptographic boundary. Diagnostics belong
+`operations` lists implemented package operations; empty means none. An
+archive inventory is a library capability, not a package operation, so the
+list stays empty until a command ships. `verified: false` expresses the
+cryptographic boundary. Diagnostics belong
 on stderr. Consumers should tolerate additional object fields. Incompatible
 contract changes require an explicit schema-version decision.
 
@@ -68,9 +73,56 @@ Unknown required rules must prevent a claim of full conformance.
 ## Safety and determinism
 
 All archive and XML boundaries in [SECURITY.md](../SECURITY.md) are required
-before package features ship. Select concrete numeric limits through the
-first reader work package and publish them here with maximum-memory and
-streaming behavior. There are no implemented parser limits to list today.
+before package features ship. The archive layer implements its share of them.
+XML, extraction and writer limits are still unimplemented and unlisted.
+
+### Archive inventory limits
+
+`Limits::DEFAULT` carries these values. Every field is public, so a caller may
+tighten any of them; the defaults are the contract, and changing one requires
+changing this table in the same commit with a written rationale.
+
+| Limit | Default | Enforced against |
+| --- | --- | --- |
+| `max_archive_bytes` | 64 MiB | length of the input slice |
+| `max_entries` | 256 | count declared by the end record, before the directory is walked |
+| `max_name_bytes` | 255 | each entry name |
+| `max_entry_decoded_bytes` | 32 MiB | bytes actually decoded for one entry |
+| `max_total_decoded_bytes` | 128 MiB | bytes actually decoded across all entries |
+| `max_compression_ratio` | 100 | decoded divided by compressed, once an entry passes 64 KiB |
+| `max_extra_field_bytes` | 4 KiB | each local and each central extra-field block |
+| `max_comment_bytes` | 1 KiB | the archive comment and each entry comment |
+
+The 64 KiB ratio grace window exists because a small entry can compress badly
+for legitimate reasons; below that volume the per-entry ceiling already bounds
+the work. The remaining defaults are sized for the packages the format
+description implies — a marker entry, one metadata document, and a small
+number of attachments (`profile.md` rules A5 and A10) — and are deliberately
+far below what a general-purpose ZIP reader would accept.
+
+Supported compression methods are 0 (stored) and 8 (deflate). ZIP64 records,
+markers and extra fields, encryption and strong-encryption flags, patched
+data, multi-disk archives and every other method are refused with an
+`archive.unsupported.*` code rather than being decoded or ignored.
+
+### Peak memory and streaming
+
+Peak additional memory for an inventory is the input slice the caller already
+holds, plus one `miniz_oxide` inflate state, plus one 64 KiB output buffer,
+plus per-entry metadata (names borrow the input slice; nothing is copied).
+Decoded payloads are counted, CRC-checked and discarded, never retained, so
+memory does not grow with decoded volume. Because the output buffer is the
+enforcement granularity, no limit is ever exceeded by more than one buffer
+before decoding aborts. `ArchiveInventory::entry_bytes` is the one exception
+and is opt-in: it decodes a single named entry into a `Vec<u8>` bounded by
+`max_entry_decoded_bytes`, for structural documents, not attachments.
+
+Ambiguity is rejected, never resolved. More than one end-of-central-directory
+record that terminates the image, an entry name that collides with another
+byte-exactly or after case folding, and any byte the declared structures do
+not exactly cover are all errors, because each would let two readers disagree
+about the same archive. Entry-name case rules are unresolved (`profile.md`
+A21), which is precisely why a case-folded collision cannot be resolved here.
 
 The writer must use caller-supplied timestamps and deterministic ordering,
 ZIP settings, names, and XML serialization. Equal inputs and settings must

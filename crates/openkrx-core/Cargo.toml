@@ -12,4 +12,5 @@ description = "openKRX capability model (development scaffold)"
 workspace = true
 
 [dependencies]
+miniz_oxide.workspace = true
 serde.workspace = true
