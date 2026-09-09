@@ -76,6 +76,19 @@ jobs:
     name: Minimum supported Rust (1.88)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # `rust-toolchain.toml` pins `channel = "stable"`, and a toolchain file
+      # overrides the rustup default for every cargo and rustc call inside the
+      # checkout — so installing 1.88 and making it the default was not enough,
+      # and this job used to compile on current stable. `RUSTUP_TOOLCHAIN` is
+      # the one override that beats the toolchain file, so it is set for the
+      # whole job: every step below, including `Swatinem/rust-cache` (which
+      # keys its cache on the toolchain in use), sees 1.88.0. The value is the
+      # full `1.88.0`, which is the name the pinned action below installs, so
+      # rustup resolves it directly instead of auto-installing a second copy
+      # under the `1.88` name. The version step is the evidence — it must
+      # print 1.88.0, not the current stable.
+      RUSTUP_TOOLCHAIN: 1.88.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,9 +96,9 @@ jobs:
       # This pin is the action's `1.88` version branch: its action.yml hard-codes
       # the toolchain and declares no `toolchain` input, so passing one is
       # unsupported. The version step below records the toolchain `cargo`
-      # actually resolves to in this job; note that `rust-toolchain.toml`
-      # currently overrides the rustup default, which a separate change
-      # addresses.
+      # actually resolves to in this job: `rust-toolchain.toml` pins stable and
+      # would override the rustup default, so the job-level `RUSTUP_TOOLCHAIN`
+      # env above forces 1.88.0.
       - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884 # 1.88 @ 2026-09-03
       - run: rustc --version && cargo --version
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

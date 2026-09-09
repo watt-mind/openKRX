@@ -109,6 +109,14 @@ cargo llvm-cov --workspace --locked --all-features --summary-only
 cargo llvm-cov --workspace --locked --all-features --html
 ```
 
+CI also holds the minimum supported Rust version: the
+`Minimum supported Rust (1.88)` job forces the 1.88 toolchain with a job-level
+`RUSTUP_TOOLCHAIN` environment variable — because `rust-toolchain.toml` pins
+`channel = "stable"` and a toolchain file otherwise overrides the installed
+default — and prints `rustc --version` as evidence before it runs
+`cargo check --workspace --all-targets --locked`. Locally the equivalent is
+`cargo +1.88 check --workspace --all-targets --locked`.
+
 The workspace line-coverage floor is **90 %**, enforced in CI. It is a floor,
 not a target: parser and filesystem work must add meaningful boundary
 coverage rather than only raise the aggregate. A test that merely repeats a
