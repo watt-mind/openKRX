@@ -22,6 +22,10 @@ Verification: another contributor can trace each normative rule to its
 source; documentation checks pass. Unresolved essential rules block the
 associated conformance/writer work, not generic bounded ZIP research.
 
+Output: [profile.md](profile.md) holds the evidence table and the list of
+unresolved rules. Treat its unresolved rows as binding constraints on the
+packages below, not as open design choices.
+
 ## KRX-02: Bounded archive inventory
 
 Dependencies: KRX-01's archive-level rules. Owner: core reader contributor;
@@ -36,6 +40,12 @@ Verification: limit boundaries, hostile header/stream disagreements,
 duplicate and overlapping entries, compression bombs, and malformed archive
 regressions; add a fuzz target and update the threat-model mapping.
 
+Must treat as unknown: directory nesting and the location of the `mimetype`
+entry, that entry's compression method and byte-exactness, entry-name
+character encoding and case rules, and payload directory naming. The
+inventory is profile-agnostic: it reports observed entries and never labels
+an archive a conforming KRX package.
+
 ## KRX-03: Metadata and structural validation
 
 Dependencies: KRX-01 and KRX-02. Owner: profile contributor; core metadata
@@ -49,6 +59,13 @@ while required rules are unknown. Attachments remain opaque.
 Verification: synthetic accepted/rejected metadata, duplicate IDs/references,
 missing entries, namespace ambiguity, depth/node/text limits, and an
 independent profile example with recorded provenance.
+
+Must treat as unknown: the metadata file name's casing, the unit and
+rounding of the declared attachment size, the base path and separator
+normalisation of the declared attachment location, and every rule listed as
+unresolved in [profile.md](profile.md). Each unknown maps to a distinct
+"unsupported or unknown" outcome, never to "invalid", and no full-conformance
+verdict may be emitted while any of them stands.
 
 ## KRX-04: Reader CLI and stable output
 
