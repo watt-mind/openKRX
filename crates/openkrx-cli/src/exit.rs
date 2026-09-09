@@ -13,6 +13,10 @@
 //! [`Category::of_code`] returns `None` for a segment it does not know. A test
 //! reads every code out of `docs/codes.md` — the catalogue `check-codes.py`
 //! forces to stay complete — and fails when one of them classifies to `None`.
+//! It fixes no head list of its own: it takes every backticked dotted token as
+//! a code and asserts that the heads it saw are exactly the ones the `HEADS`
+//! line of `scripts/check-codes.py` names, so a new head cannot be added to
+//! one side alone.
 
 use openkrx_core::{ArchiveError, PlanError, ProfileError};
 
@@ -427,6 +431,9 @@ mod tests {
     /// The catalogue `scripts/check-codes.py` forces to stay complete.
     const CATALOGUE: &str = include_str!("../../../docs/codes.md");
 
+    /// The checker that owns the one head list, read for that list alone.
+    const CHECKER: &str = include_str!("../../../scripts/check-codes.py");
+
     #[test]
     fn success_is_zero() {
         assert_eq!(Category::Success.status(), 0);
@@ -605,17 +612,16 @@ mod tests {
 
     /// Whether a backticked span of the catalogue is a code rather than prose.
     ///
-    /// The heads are the five `scripts/check-codes.py` extracts, so the test
-    /// covers exactly the codes that checker forces into the catalogue. The
-    /// document also writes `archive.*` and `metadata.` in running text, so a
-    /// span counts only when it is a full dotted code: two or more segments of
-    /// lower-case letters, digits and underscores.
+    /// No head is fixed here: a span counts when it is a full dotted code —
+    /// a lower-case head followed by one or more segments of lower-case
+    /// letters, digits and underscores — so a new head is picked up the moment
+    /// the catalogue documents it. The document also writes `archive.*` and
+    /// `metadata.` in running text, and paths such as `check-codes.py`, none of
+    /// which match that shape.
     fn code_shaped(piece: &str) -> bool {
         let mut segments = piece.split('.');
-        if !matches!(
-            segments.next(),
-            Some("archive" | "extract" | "input" | "metadata" | "output")
-        ) {
+        let head = segments.next().unwrap_or_default();
+        if head.is_empty() || !head.bytes().all(|byte| byte.is_ascii_lowercase()) {
             return false;
         }
         let rest: Vec<&str> = segments.collect();
@@ -628,16 +634,39 @@ mod tests {
             })
     }
 
+    /// The heads `scripts/check-codes.py` extracts, read from its HEADS line.
+    ///
+    /// That line is the one place the head list is written; this parser wants
+    /// a single line of the form `HEADS = ("a", "b")`, and panics when the
+    /// script no longer offers one, because silently reading no head would
+    /// turn the equality assertion below into a tautology.
+    fn checker_heads() -> Vec<String> {
+        let line = CHECKER
+            .lines()
+            .find(|line| line.starts_with("HEADS = ("))
+            .expect("scripts/check-codes.py must keep its one-line HEADS tuple");
+        let heads: Vec<String> = line
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect();
+        assert!(!heads.is_empty(), "the HEADS line names no head: {line}");
+        heads
+    }
+
     #[test]
     fn every_catalogued_code_classifies_to_a_category() {
         let mut seen = 0_usize;
         let mut inputs: Vec<&str> = Vec::new();
+        let mut heads: Vec<&str> = Vec::new();
         for line in CATALOGUE.lines() {
             for piece in line.split('`').skip(1).step_by(2) {
                 if !code_shaped(piece) {
                     continue;
                 }
                 seen += 1;
+                heads.push(piece.split('.').next().unwrap_or_default());
                 assert!(
                     Category::of_code(piece).is_some(),
                     "docs/codes.md lists {piece}, which this build cannot \
@@ -649,6 +678,17 @@ classify; add its category segment to Category::of_code"
             }
         }
         assert!(seen > 80, "the catalogue was read, {seen} codes found");
+        heads.sort_unstable();
+        heads.dedup();
+        let mut expected = checker_heads();
+        expected.sort_unstable();
+        expected.dedup();
+        assert_eq!(
+            heads, expected,
+            "the heads docs/codes.md documents and the HEADS line of \
+scripts/check-codes.py disagree; a head belongs in both, so that the checker \
+extracts it and this test classifies it"
+        );
         inputs.sort_unstable();
         assert_eq!(
             inputs,
