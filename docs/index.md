@@ -2,6 +2,7 @@
 
 - [Architecture and CLI contract](architecture.md)
 - [Format evidence and references](references.md)
+- [First supported KRX profile: evidence](profile.md)
 - [Roadmap](roadmap.md)
 - [Dependency-ordered implementation specifications](work-packages.md)
 - [Testing and quality gates](testing.md)
