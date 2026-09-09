@@ -11,13 +11,14 @@ enum is `#[non_exhaustive]`; a consumer matches on the code string and must
 treat an unknown code as a failure rather than as a success.
 
 `scripts/check-codes.py` keeps this catalogue honest. It extracts every
-`"archive.…"`, `"extract.…"`, `"input.…"` and `"metadata.…"` string literal from
-`crates/*/src/**` and fails when a code exists in the sources but not here,
-or here but not in the sources. It runs as part of `bash scripts/check.sh`.
+`"archive.…"`, `"extract.…"`, `"input.…"`, `"metadata.…"` and `"output.…"`
+string literal from `crates/*/src/**` and fails when a code exists in the
+sources but not here, or here but not in the sources. It runs as part of
+`bash scripts/check.sh`.
 
 Test names below are functions in `crates/openkrx-core/tests/`, except in the
-input section, whose tests are in `crates/openkrx-cli/tests/`. Where a code
-has several asserting tests, the most specific one is named.
+input and output sections, whose tests are in `crates/openkrx-cli/tests/`.
+Where a code has several asserting tests, the most specific one is named.
 
 Each code also classifies to one exit status, listed in
 [architecture.md](architecture.md#exit-statuses): `input.*` to 5,
@@ -25,10 +26,11 @@ Each code also classifies to one exit status, listed in
 `archive.no_such_entry` to 6, `*.unsupported.*` to 7, and `*.over_limit.*` to
 8 — except `input.over_limit.archive_bytes`, which is an input problem because
 nothing was parsed at all. A structural-check code is never an exit status of
-its own: `validate-structure` reports 3 when any check failed. The
-`extract.*` codes have no exit status yet: no command reaches them, because
-the extraction planner is a library function and the `extract` command does
-not exist.
+its own: `validate-structure` reports 3 when any check failed. The `extract.*`
+codes follow the same segment rule as the archive ones — `extract.unsafe_path.*`
+and `extract.ambiguous.*` to 6, `extract.unsupported.*` to 7,
+`extract.over_limit.*` to 8 — and every `output.*` code classifies to 9, the
+status `extract` alone can exit with.
 
 ## Reading a diagnostic
 
@@ -61,6 +63,36 @@ the shape of a filesystem.
 | --- | --- | --- | --- |
 | `input.unreadable` | The named file, or standard input, could not be opened or read: it does not exist, it is a directory, it is not permitted, or the read failed part-way. | — | `an_unreadable_input_is_status_five` |
 | `input.over_limit.archive_bytes` | The input reached the input cap, one byte past `Limits::DEFAULT.max_archive_bytes`, and was refused before any parsing began. `limit` is the archive ceiling and `observed` the cap, because reading stops there and the real length is never learned. | `limit`, `observed` | `an_input_past_the_cap_is_refused_before_parsing` |
+
+## Output codes
+
+`openkrx-cli`, defined in `crates/openkrx-cli/src/exit.rs` and produced by
+`crates/openkrx-cli/src/extract/`. These are the failures of the one command
+that writes. Every one of them classifies to exit status 9, and every one of
+them means **nothing incomplete was left behind**: before the first write,
+because the run was refused during preflight; after it, because the undo pass
+removed every path this run had created. A failed run never removes anything
+that was already in the destination.
+
+No code carries a path. The destination is the caller's own argument and a
+diagnostic that repeated it could not be logged safely; the entry index says
+which planned file the failure concerns, wherever the failure belongs to one.
+
+The **fields** column is `entry` alone: an output failure carries no limit
+value, because none of these conditions is a ceiling. Tests are in
+`crates/openkrx-cli/tests/extract.rs`, except the classifier rows, which are
+the `#[cfg(test)]` module in `crates/openkrx-cli/src/exit.rs`.
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `output.destination_missing` | The `--into` directory does not exist. `extract` never creates its destination: a typo would otherwise produce a new tree instead of a refusal. | — | `a_destination_that_does_not_exist_is_refused_rather_than_created` |
+| `output.destination_not_a_directory` | The `--into` argument names something that exists but is not a directory. | — | `a_destination_that_is_a_file_is_refused` |
+| `output.destination_symlink` | The `--into` argument names a symbolic link or a Windows reparse point. Extraction writes only into a real directory, so that the destination the caller sees is the destination that is written. | — | `a_destination_that_is_itself_a_symlink_is_refused` |
+| `output.partial_marker_present` | The destination already holds `.openkrx-extract.partial`, so an earlier run into it did not finish and its output may be incomplete. Refused rather than added to. | — | `a_marker_left_by_an_interrupted_run_refuses_the_next_one` |
+| `output.exists` | A path the package would create already exists, in any form — file, directory, symbolic link or a dangling link — or is the `.openkrx-extract.partial` marker this run creates first. Nothing is ever overwritten, and the whole extraction is refused before anything is written. | `entry` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code` |
+| `output.symlink_in_path` | An existing directory inside the destination that the package would write through is a symbolic link or a reparse point, which could place output outside the destination. Checked in preflight and again after each directory this run creates. | `entry` | `an_ancestor_symlink_inside_the_destination_is_refused` |
+| `output.not_a_directory` | A path inside the destination that the package needs as a directory exists as something else. | `entry` | `a_destination_or_write_problem_is_nine` |
+| `output.io` | A create, write or remove failed. The underlying reason is deliberately not reported: an operating-system message can name a path, and the distinction is not part of the contract. | `entry`, when a file was being written | `a_failed_write_removes_this_runs_files_and_leaves_everything_else` |
 
 ## Archive codes
 

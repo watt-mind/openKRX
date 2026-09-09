@@ -7,17 +7,24 @@
 //! its exit status. Each takes one file, or `-` for standard input, and each
 //! accepts `--json`.
 //!
+//! A fourth command writes: [`extract`] joins the core crate's extraction plan
+//! onto a caller-selected destination that must already exist, creates every
+//! planned file exclusively, and undoes its own work if anything fails. It
+//! never overwrites, never follows a link out of the destination, and never
+//! removes anything it did not create.
+//!
 //! Package semantics live entirely in `openkrx-core`, which performs no I/O.
-//! This crate reads the bytes, calls `archive::inventory` and `profile::check`,
-//! and presents what came back. It adds no rule of its own, and it writes
-//! nothing anywhere: no file is created, no cache is kept and nothing is
-//! logged.
+//! This crate reads the bytes, calls `archive::inventory`, `profile::check`
+//! and `extract::plan`, and presents what came back. It adds no rule of its
+//! own. Apart from what `extract` was explicitly asked to write, it writes
+//! nothing anywhere: no cache is kept and nothing is logged.
 //!
 //! **Nothing here verifies anything.** openKRX performs no cryptography, so
 //! `verified` is `false` in every response and a successful run is not
 //! authentication, not proof of delivery and not a legal determination.
 //!
 //! [`inspect`]: crate::commands::inspect
+//! [`extract`]: mod@crate::extract
 
 use clap::{Parser, Subcommand};
 use openkrx_core::{Limits, MetadataLimits, archive, capabilities, profile};
@@ -25,17 +32,20 @@ use serde::Serialize;
 
 mod commands;
 mod exit;
+mod extract;
 mod input;
 mod render;
 
 use exit::{Category, Failure};
+use extract::cleanup::Cleanup;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
     name = "openkrx",
     version,
-    about = "Read a Hungarian KRX document package locally. Nothing is uploaded, \
-nothing is written and nothing is verified.",
+    about = "Read a Hungarian KRX document package locally, and extract one into a \
+directory you name. Nothing is uploaded and nothing is verified.",
     after_help = EXIT_STATUS_HELP
 )]
 struct Args {
@@ -60,6 +70,7 @@ Exit statuses:
   6  the package is malformed, truncated or ambiguous
   7  the package uses a feature this reader does not implement
   8  a documented parsing limit was exceeded
+  9  extract only: the destination could not be used, or a write failed
 
 inspect and list exit 0 whenever they produce their report: read the check
 outcomes in the report, or use validate-structure, to act on a failing check.
@@ -73,6 +84,23 @@ const INSPECT_STATUS_HELP: &str = "\
 This command exits 0 whenever it produces its report, even when a structural
 check failed: the outcome is in the check table it prints. Use
 validate-structure to get that reading as an exit status instead.";
+
+/// `extract`'s note. The command writes, so its help says what it will and
+/// will not do to the destination before the reader runs it once to find out.
+const EXTRACT_STATUS_HELP: &str = "\
+The destination directory must already exist and must not be a symbolic link
+or a reparse point; it need not be empty. Nothing is ever overwritten: if any
+file the package would create is already there, the whole extraction is
+refused before anything is written, and exits 9.
+
+While a run is in progress the destination holds .openkrx-extract.partial.
+It is removed when the run finishes, so a destination that still contains it
+was interrupted: openkrx refuses to extract into it again until you clear it.
+If a write fails part-way, every file and directory this run created is
+removed again and nothing that was already there is touched.
+
+No permission bits and no timestamps are copied from the package, and no
+symbolic link, special file or nested archive is ever created or unpacked.";
 
 /// `list`'s note. It runs no structural check at all, so saying that a failed
 /// check is "in the report" would be false here: the report is the entry list.
@@ -105,6 +133,20 @@ enum Command {
         /// The package to read, or `-` to read standard input.
         #[arg(value_name = "FILE")]
         file: String,
+        /// Emit one JSON object instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write a package's files into a directory that already exists.
+    #[command(after_help = EXTRACT_STATUS_HELP)]
+    Extract {
+        /// The package to read, or `-` to read standard input.
+        #[arg(value_name = "FILE")]
+        file: String,
+        /// The existing directory to write into. It is never created, never
+        /// emptied, and nothing in it is ever overwritten.
+        #[arg(long, value_name = "DIR")]
+        into: PathBuf,
         /// Emit one JSON object instead of human-readable text.
         #[arg(long)]
         json: bool,
@@ -186,7 +228,57 @@ fn run() -> i32 {
         Command::Inspect { file, json } => reader(Reader::Inspect, &file, json),
         Command::List { file, json } => reader(Reader::List, &file, json),
         Command::ValidateStructure { file, json } => reader(Reader::ValidateStructure, &file, json),
+        Command::Extract { file, into, json } => extract(&file, &into, json),
     }
+}
+
+/// The name `extract`'s JSON envelope carries.
+const EXTRACT: &str = "extract";
+
+/// Run `extract` and report it, in whichever mode was asked for.
+///
+/// The three phases stay visible here: read the input under the cap, take an
+/// inventory of it, and only then let `crate::extract` touch a filesystem.
+/// A failure in any of them is reported the same way, so a caller sees one
+/// diagnostic shape whether the package could not be read or the destination
+/// could not be written.
+fn extract(file: &str, into: &std::path::Path, json: bool) -> i32 {
+    let bytes = match input::read(input::Source::parse(file)) {
+        Ok(bytes) => bytes,
+        Err(failure) => return refused(&failure, Cleanup::NONE, json),
+    };
+    let inventory = match archive::inventory(&bytes, &Limits::DEFAULT) {
+        Ok(inventory) => inventory,
+        Err(error) => return refused(&Failure::from(error), Cleanup::NONE, json),
+    };
+    match extract::run(&inventory, into) {
+        Ok(data) => {
+            let text = if json {
+                render::json::success(EXTRACT, &data)
+            } else {
+                render::human::extract(&data)
+            };
+            input::line(&mut std::io::stdout(), &text);
+            Category::Success.status()
+        }
+        Err(refusal) => refused(&refusal.failure, refusal.cleanup, json),
+    }
+}
+
+/// Report a refused extraction and return its exit status.
+///
+/// Human mode writes two lines on stderr: the failure, and what the undo pass
+/// did. JSON mode writes one object on stdout carrying both, and the same two
+/// lines on stderr, exactly as every other command does with its diagnostic.
+/// Neither mode names the destination or any file.
+fn refused(failure: &Failure, cleanup: Cleanup, json: bool) -> i32 {
+    if json {
+        let text = render::json::failure_with_cleanup(EXTRACT, failure, cleanup);
+        input::line(&mut std::io::stdout(), &text);
+    }
+    input::line(&mut std::io::stderr(), &failure.line());
+    input::line(&mut std::io::stderr(), &render::human::cleanup(cleanup));
+    failure.category.status()
 }
 
 /// Run one reader command and report it, in whichever mode was asked for.

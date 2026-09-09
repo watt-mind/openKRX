@@ -131,24 +131,28 @@ diagnostics. Exercise Linux, macOS, and Windows CI.
 
 ## KRX-05: Protected extraction
 
-**Split into two tickets.** The planning half is implemented in the core
-crate: `openkrx_core::extract::plan` decides what an extraction would create
-and refuses everything that could not be created safely, as a pure function
-of the archive inventory, with no filesystem access at all. See
+**Implemented, in two parts.** The planning half is in the core crate:
+`openkrx_core::extract::plan` decides what an extraction would create and
+refuses everything that could not be created safely, as a pure function of
+the archive inventory, with no filesystem access at all. See
 [architecture.md](architecture.md#extraction-planning) and the
 [extraction planning codes](codes.md#extraction-planning-codes). The
-filesystem half is a follow-up ticket, blocked by this one and by KRX-04: a
-caller-selected destination, no-clobber creation, streaming each planned item
-through `ArchiveInventory::entry_bytes`, the commit and cleanup policy for an
-interrupted write, and the `extract` command with its statuses and JSON
-report. `capabilities().operations` gains nothing until that lands.
+filesystem half is in `crates/openkrx-cli/src/extract/`: a caller-selected
+destination that must already exist, no-clobber creation, no link or reparse
+point in any path, each planned item decoded through
+`ArchiveInventory::entry_bytes`, the `.openkrx-extract.partial` marker and
+the undo pass for an interrupted write, and the `extract` command with exit
+status 9, the `output.*` codes and its JSON report. See
+[architecture.md](architecture.md#extraction-output) and the
+[output codes](codes.md#output-codes). `capabilities().operations` names
+`extract` now that every property is held by a test.
 
-Dependencies: KRX-02 and KRX-04, both implemented. `extract` joins the
+Dependencies: KRX-02 and KRX-04, both implemented. `extract` joined the
 existing command surface: it reuses the bounded input reader, the one-object
 JSON envelope, the exit-status categories and the content-free diagnostic
-rule of KRX-04, and adds the filesystem statuses and codes that writing
-needs. Owner: extraction contributor; core planning
-and CLI filesystem output modules, extraction tests, security documentation.
+rule of KRX-04, and added the filesystem status and codes that writing needs.
+Owner: extraction contributor; core planning and CLI filesystem output
+modules, extraction tests, security documentation.
 
 Acceptance: `extract` plans before writes, preserves payload bytes, enforces
 aggregate/per-entry limits, never overwrites or escapes the destination, and
@@ -156,8 +160,11 @@ has documented interrupted-write cleanup. State platform/race assumptions.
 No recursive unpacking, links, special files, or implicit execution.
 
 Verification: traversal/absolute names, case/Unicode collisions, existing
-files, parent/leaf symlinks or reparse points, concurrent replacement where
-defended, I/O failure injection, and cleanup without deleting existing data.
+files, parent/leaf symlinks or reparse points, I/O failure injection, and
+cleanup without deleting existing data — held by
+`crates/openkrx-core/tests/extract_{plan,rejects}.rs` and
+`crates/openkrx-cli/tests/extract.rs`. Concurrent replacement is **not**
+defended and is stated as a residual risk rather than tested.
 
 ## KRX-06: Deterministic profile writer
 

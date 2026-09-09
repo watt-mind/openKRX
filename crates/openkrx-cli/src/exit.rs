@@ -1,6 +1,6 @@
 //! Exit-status categories and the one place a failure is classified.
 //!
-//! Eight categories exist, they are published in
+//! Nine categories exist, they are published in
 //! `docs/architecture.md#exit-statuses`, and they are stable: a consumer may
 //! branch on the number. [`Category::of_code`] is the single classifier, and
 //! [`Category::status`] the single number source, so a status can never be
@@ -14,7 +14,7 @@
 //! reads every code out of `docs/codes.md` — the catalogue `check-codes.py`
 //! forces to stay complete — and fails when one of them classifies to `None`.
 
-use openkrx_core::{ArchiveError, ProfileError};
+use openkrx_core::{ArchiveError, PlanError, ProfileError};
 
 /// Refusing to read more than this many bytes from the input.
 ///
@@ -26,6 +26,23 @@ pub const INPUT_CAP_BYTES: u64 = openkrx_core::Limits::DEFAULT.max_archive_bytes
 pub const INPUT_UNREADABLE: &str = "input.unreadable";
 /// The input is larger than [`INPUT_CAP_BYTES`], refused before parsing.
 pub const INPUT_OVER_LIMIT: &str = "input.over_limit.archive_bytes";
+
+/// The destination does not exist. `extract` never creates it.
+pub const OUTPUT_DESTINATION_MISSING: &str = "output.destination_missing";
+/// The destination exists but is not a directory.
+pub const OUTPUT_DESTINATION_NOT_A_DIRECTORY: &str = "output.destination_not_a_directory";
+/// The destination is a symbolic link or a reparse point.
+pub const OUTPUT_DESTINATION_SYMLINK: &str = "output.destination_symlink";
+/// The destination already holds an interrupted run's marker file.
+pub const OUTPUT_PARTIAL_MARKER_PRESENT: &str = "output.partial_marker_present";
+/// A path this run would create already exists, in any form.
+pub const OUTPUT_EXISTS: &str = "output.exists";
+/// An existing ancestor inside the destination is a link or a reparse point.
+pub const OUTPUT_SYMLINK_IN_PATH: &str = "output.symlink_in_path";
+/// An existing ancestor inside the destination is not a directory.
+pub const OUTPUT_NOT_A_DIRECTORY: &str = "output.not_a_directory";
+/// A create, write or remove failed. The underlying reason is never reported.
+pub const OUTPUT_IO: &str = "output.io";
 
 /// What kind of outcome a run had, and therefore which status it exits with.
 ///
@@ -50,6 +67,8 @@ pub enum Category {
     Unsupported,
     /// A documented resource limit was exceeded.
     Limit,
+    /// The destination could not be used, or a write failed. `extract` only.
+    Output,
 }
 
 impl Category {
@@ -65,6 +84,7 @@ impl Category {
             Self::Package => 6,
             Self::Unsupported => 7,
             Self::Limit => 8,
+            Self::Output => 9,
         }
     }
 
@@ -98,6 +118,11 @@ implement; it is not damaged, and another reader may open it"
                 "the package is larger or more complex than a documented \
 limit allows; the limits are not configurable from the command line"
             }
+            Self::Output => {
+                "the destination could not be written: it must already exist \
+as a directory that is not a link, must not hold a file this package would \
+have to overwrite, and must be writable"
+            }
         }
     }
 
@@ -113,6 +138,7 @@ limit allows; the limits are not configurable from the command line"
             Self::Package => "package",
             Self::Unsupported => "unsupported",
             Self::Limit => "limit",
+            Self::Output => "output",
         }
     }
 
@@ -121,6 +147,11 @@ limit allows; the limits are not configurable from the command line"
     /// `input.*` is classified before the general `*.over_limit.*` rule, so
     /// that an input larger than the cap is an input problem rather than a
     /// package that exceeded a parsing limit: nothing was parsed at all.
+    /// `extract.*` follows the same segment rule as `archive.*`: a refused
+    /// entry kind is an unsupported feature, an ambiguous or unsafe
+    /// destination is a package problem, and a ceiling is a limit. Every
+    /// `output.*` code is [`Category::Output`], because each one is a fact
+    /// about the destination rather than about the package.
     /// Returns `None` for a code shape this build does not know, which the
     /// catalogue test forbids.
     #[must_use]
@@ -130,11 +161,25 @@ limit allows; the limits are not configurable from the command line"
         let kind = segments.next()?;
         Some(match (head, kind) {
             ("input", "unreadable" | "over_limit") => Self::Input,
-            ("archive" | "metadata", "over_limit") => Self::Limit,
-            ("archive" | "metadata", "unsupported") => Self::Unsupported,
-            ("archive" | "metadata", "truncated" | "malformed" | "ambiguous") => Self::Package,
+            ("archive" | "extract" | "metadata", "over_limit") => Self::Limit,
+            ("archive" | "extract" | "metadata", "unsupported") => Self::Unsupported,
+            ("archive" | "extract" | "metadata", "truncated" | "malformed" | "ambiguous") => {
+                Self::Package
+            }
             ("archive", "unsafe_name" | "no_such_entry") => Self::Package,
+            ("extract", "unsafe_path") => Self::Package,
             ("metadata", "missing" | "reference" | "count_mismatch") => Self::Inconsistent,
+            (
+                "output",
+                "destination_missing"
+                | "destination_not_a_directory"
+                | "destination_symlink"
+                | "partial_marker_present"
+                | "exists"
+                | "symlink_in_path"
+                | "not_a_directory"
+                | "io",
+            ) => Self::Output,
             _ => return None,
         })
     }
@@ -146,6 +191,53 @@ limit allows; the limits are not configurable from the command line"
 /// reading — never a success — but its explanation would describe a damaged
 /// package, which an unclassified code is no evidence of.
 const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this build does not classify; see docs/codes.md for what it means";
+
+/// The sentence one particular code deserves instead of its category's.
+///
+/// Eight codes share [`Category::Output`], and the one sentence that covers
+/// all of them tells a caller with a missing destination about overwriting,
+/// which is noise at the moment they need one instruction. Each `output.*`
+/// code therefore names its own condition and what to do about it. Every
+/// sentence is content-free: no path, no file name, no operating-system
+/// message, so the line stays safe to log wherever the others are.
+const fn advice(code: &str) -> Option<&'static str> {
+    Some(match code.as_bytes() {
+        b"output.destination_missing" => {
+            "the destination directory does not exist, and extract never \
+creates one: create it first, or correct the --into argument"
+        }
+        b"output.destination_not_a_directory" => {
+            "the --into argument names something that is not a directory"
+        }
+        b"output.destination_symlink" => {
+            "the destination is a symbolic link or a reparse point; extraction \
+writes only into a real directory, so name the directory itself"
+        }
+        b"output.partial_marker_present" => {
+            "the destination still holds .openkrx-extract.partial from an \
+interrupted run, so what is in it may be incomplete: review it and remove \
+that file, or extract into a different directory"
+        }
+        b"output.exists" => {
+            "a file this package would create is already in the destination; \
+nothing is ever overwritten, so extract into an empty directory, or move the \
+existing file out of the way first"
+        }
+        b"output.symlink_in_path" => {
+            "a directory this package would write through is a symbolic link \
+or a reparse point, which could place output outside the destination"
+        }
+        b"output.not_a_directory" => {
+            "a path this package needs as a directory is something else in the \
+destination already"
+        }
+        b"output.io" => {
+            "a create, write or remove failed: check that the destination is \
+writable and has free space"
+        }
+        _ => return None,
+    })
+}
 
 /// A run that ended before a report could be produced.
 ///
@@ -192,6 +284,21 @@ impl Failure {
         Self::new(INPUT_UNREADABLE)
     }
 
+    /// A destination or write failure, carrying no path and no reason.
+    #[must_use]
+    pub fn output(code: &'static str) -> Self {
+        Self::new(code)
+    }
+
+    /// The same, scoped to the entry whose output the failure concerns.
+    #[must_use]
+    pub fn output_at(code: &'static str, entry: u32) -> Self {
+        Self {
+            entry_index: Some(entry),
+            ..Self::new(code)
+        }
+    }
+
     /// The input is larger than the cap; `observed` is the cap itself, because
     /// the reader stops there and never learns the real length.
     #[must_use]
@@ -226,7 +333,7 @@ impl Failure {
     #[must_use]
     pub fn line(&self) -> String {
         let explanation = if self.classified {
-            self.category.explanation()
+            advice(self.code).unwrap_or_else(|| self.category.explanation())
         } else {
             UNCLASSIFIED_EXPLANATION
         };
@@ -247,6 +354,25 @@ impl From<ArchiveError> for Failure {
                 ..
             } => (Some(limit_value), observed),
             ArchiveError::Unsupported { value, .. } => (None, value),
+            _ => (None, None),
+        };
+        Self {
+            entry_index: error.entry_index(),
+            limit,
+            observed,
+            ..Self::new(error.code())
+        }
+    }
+}
+
+impl From<PlanError> for Failure {
+    fn from(error: PlanError) -> Self {
+        let (limit, observed) = match error {
+            PlanError::OverLimit {
+                limit_value,
+                observed,
+                ..
+            } => (Some(limit_value), observed),
             _ => (None, None),
         };
         Self {
@@ -280,7 +406,23 @@ mod tests {
     //! code the crates define.
 
     use super::{Category, Failure};
-    use openkrx_core::{ArchiveError, LimitKind, MalformedKind, Structure, UnsupportedKind};
+    use openkrx_core::extract::{ExtractLimitKind, UnsupportedEntryKind};
+    use openkrx_core::{
+        ArchiveError, LimitKind, MalformedKind, PlanError, Structure, UnsupportedKind,
+    };
+
+    /// Every category, in status order. Adding one must be added here too.
+    const EVERY_CATEGORY: [Category; 9] = [
+        Category::Success,
+        Category::Usage,
+        Category::Inconsistent,
+        Category::Unresolved,
+        Category::Input,
+        Category::Package,
+        Category::Unsupported,
+        Category::Limit,
+        Category::Output,
+    ];
 
     /// The catalogue `scripts/check-codes.py` forces to stay complete.
     const CATALOGUE: &str = include_str!("../../../docs/codes.md");
@@ -382,40 +524,79 @@ mod tests {
     }
 
     #[test]
+    fn a_destination_or_write_problem_is_nine() {
+        assert_eq!(Category::Output.status(), 9);
+        assert_eq!(Category::Output.as_str(), "output");
+        for code in [
+            super::OUTPUT_DESTINATION_MISSING,
+            super::OUTPUT_DESTINATION_NOT_A_DIRECTORY,
+            super::OUTPUT_DESTINATION_SYMLINK,
+            super::OUTPUT_PARTIAL_MARKER_PRESENT,
+            super::OUTPUT_EXISTS,
+            super::OUTPUT_SYMLINK_IN_PATH,
+            super::OUTPUT_NOT_A_DIRECTORY,
+            super::OUTPUT_IO,
+        ] {
+            assert_eq!(Category::of_code(code), Some(Category::Output), "{code}");
+            assert_eq!(Failure::output(code).category, Category::Output);
+        }
+        let scoped = Failure::output_at(super::OUTPUT_EXISTS, 7);
+        assert_eq!(scoped.message(), "output.exists at entry 7");
+        assert!(scoped.line().ends_with("(exit 9)"));
+        assert!(scoped.line().contains("nothing is ever overwritten"));
+        // Each output code says what happened rather than sharing one
+        // sentence that describes all nine conditions at once.
+        let missing = Failure::output(super::OUTPUT_DESTINATION_MISSING).line();
+        assert!(missing.contains("does not exist"));
+        assert!(!missing.contains("overwritten"), "{missing}");
+    }
+
+    #[test]
+    fn a_planning_refusal_keeps_the_category_its_segment_names() {
+        let unsupported = Failure::from(PlanError::Unsupported {
+            kind: UnsupportedEntryKind::Link,
+            entry: 2,
+        });
+        assert_eq!(unsupported.category, Category::Unsupported);
+        assert_eq!(unsupported.code, "extract.unsupported.link");
+        assert_eq!(unsupported.entry_index, Some(2));
+
+        let over = Failure::from(PlanError::OverLimit {
+            limit: ExtractLimitKind::Files,
+            limit_value: 256,
+            observed: Some(257),
+            entry: Some(256),
+        });
+        assert_eq!(over.category, Category::Limit);
+        assert_eq!(
+            over.message(),
+            "extract.over_limit.files (limit 256, observed 257) at entry 256"
+        );
+        for code in [
+            "extract.unsafe_path.parent_component",
+            "extract.ambiguous.collision",
+        ] {
+            assert_eq!(Category::of_code(code), Some(Category::Package), "{code}");
+        }
+    }
+
+    #[test]
     fn a_diagnostic_line_explains_its_category_without_naming_the_input() {
         let line = Failure::over_input_cap().line();
         assert!(line.starts_with("openkrx: input.over_limit.archive_bytes"));
         assert!(line.contains("could not be read"));
         assert!(line.ends_with("(exit 5)"));
-        for category in [
-            Category::Success,
-            Category::Usage,
-            Category::Inconsistent,
-            Category::Unresolved,
-            Category::Input,
-            Category::Package,
-            Category::Unsupported,
-            Category::Limit,
-        ] {
+        for category in EVERY_CATEGORY {
             assert!(!category.explanation().is_empty());
         }
     }
 
     #[test]
     fn every_status_is_distinct_and_only_success_is_zero() {
-        let categories = [
-            Category::Success,
-            Category::Usage,
-            Category::Inconsistent,
-            Category::Unresolved,
-            Category::Input,
-            Category::Package,
-            Category::Unsupported,
-            Category::Limit,
-        ];
+        let categories = EVERY_CATEGORY;
         let mut statuses: Vec<i32> = categories.iter().map(|kind| kind.status()).collect();
         statuses.sort_unstable();
-        assert_eq!(statuses, vec![0, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(statuses, vec![0, 2, 3, 4, 5, 6, 7, 8, 9]);
         for category in categories {
             assert_eq!(category.status() == 0, category == Category::Success);
             assert!(!category.as_str().is_empty());
@@ -424,14 +605,17 @@ mod tests {
 
     /// Whether a backticked span of the catalogue is a code rather than prose.
     ///
-    /// The heads are the three `scripts/check-codes.py` extracts, so the test
+    /// The heads are the five `scripts/check-codes.py` extracts, so the test
     /// covers exactly the codes that checker forces into the catalogue. The
     /// document also writes `archive.*` and `metadata.` in running text, so a
     /// span counts only when it is a full dotted code: two or more segments of
     /// lower-case letters, digits and underscores.
     fn code_shaped(piece: &str) -> bool {
         let mut segments = piece.split('.');
-        if !matches!(segments.next(), Some("archive" | "input" | "metadata")) {
+        if !matches!(
+            segments.next(),
+            Some("archive" | "extract" | "input" | "metadata" | "output")
+        ) {
             return false;
         }
         let rest: Vec<&str> = segments.collect();
@@ -464,7 +648,7 @@ classify; add its category segment to Category::of_code"
                 }
             }
         }
-        assert!(seen > 60, "the catalogue was read, {seen} codes found");
+        assert!(seen > 80, "the catalogue was read, {seen} codes found");
         inputs.sort_unstable();
         assert_eq!(
             inputs,

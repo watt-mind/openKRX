@@ -40,8 +40,9 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
 | `crates/openkrx-cli/tests/contract.rs` | The executable's argument surface by subprocess: the capability envelope's exact shape and its operation list, that the human output states the boundary rather than a verdict, that help names every command and the exit statuses, and that six kinds of argument error each exit 2. |
 | `crates/openkrx-cli/tests/reader.rs` | Each reader command on a package that can be read, in both modes: the consistent package, the entry listing and its stable ordering, the declared document beside the observed archive, every check rendered as its own outcome, the two other layouts leaving A19 undecided, `-` on all three commands producing the same report as a file, a name that is not UTF-8 reported as bytes, an invisible character escaped, a long name cut with its remainder counted, and that a successful run writes nothing on stderr. |
+| `crates/openkrx-cli/tests/extract.rs` | `extract`, the one command that writes, by subprocess against a destination each test owns and then reads back: a successful extraction with byte-identical payloads and nothing else created, the JSON report and its item order, a target file that already exists, a destination that is missing, a file, or a symbolic link, a marker left by an interrupted run, an entry named like that marker refused under the no-clobber code, a non-empty destination whose contents survive, a planner refusal keeping its own category and naming no path, a malformed and an unreadable package never reaching the destination, the usage errors, and — behind `cfg(unix)` — an ancestor symlink inside the destination, a pre-existing symlink at the leaf, and an injected write failure proving the cleanup pass removes exactly this run's files and leaves everything else. |
 | `crates/openkrx-cli/tests/failures.rs` | Every exit-status category end to end: a failing check (3) for `validate-structure` only, malformed and truncated images (6), a ZIP64 extra field (7), an over-limit entry count with its numbers (8), a missing file, a directory and both an over-cap file and an over-cap standard input (5), one stderr line in human mode, and exactly one object on stdout in JSON mode even when the run failed. |
-| `crates/openkrx-cli/tests/privacy.rs` | The content-free-diagnostic rule, by canary: a canary path segment, a canary entry name and a canary metadata value are searched for on stderr in every case and on stdout in every failing case, and a declared value is shown to reach stdout for `inspect` alone. |
+| `crates/openkrx-cli/tests/privacy.rs` | The content-free-diagnostic rule, by canary: a canary path segment, a canary entry name and a canary metadata value are searched for on stderr in every case and on stdout in every failing case, a declared value is shown to reach stdout for `inspect` alone, and `extract` is held to the same rule with its one documented exception — a successful report names the files it created, and still never the destination or a declared value. |
 | `crates/openkrx-cli/tests/support/mod.rs` | Subprocess helpers and the synthetic packages the command tests read, not tests: a scratch directory that removes itself, a standard-input runner, and one builder per package shape. |
 
 Each rejection test asserts a **stable code**, not merely that an error
@@ -58,9 +59,22 @@ platform-specific assumptions — no shell, no Unix path shape, no text-mode
 standard input — because CI runs the same tests on Linux, macOS and Windows,
 which is the only check on the platform-specific parts of input handling.
 
-What the suite does **not** provide evidence about: extraction output, which
-does not exist — the planner is covered above, but nothing writes, so no
-test can hold a no-clobber rule, a destination boundary or a cleanup policy;
+Three tests need a platform primitive that is not portable. The two symbolic
+link tests and the injected write failure are behind `cfg(unix)`: Windows
+cannot create a symbolic link without developer mode or elevation and cannot
+create a junction without a reparse-point call this workspace forbids
+(`unsafe_code = "forbid"`), and its ACL model does not make a directory
+unwritable through one `set_permissions` call. The reparse-point rule is held
+by the same code path — `FILE_ATTRIBUTE_REPARSE_POINT` in
+`cli::extract::preflight::is_link` — rather than by a test on that platform,
+and the injection test skips itself, loudly, when the process can write into
+a read-only directory anyway. Everything else in `extract.rs` runs on all
+three operating systems.
+
+What the suite does **not** provide evidence about: package creation, which
+does not exist; extraction under a concurrent writer at the destination,
+which is outside the threat model and stated as a residual risk in
+[SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer);
 conformance, which cannot be claimed while
 [profile.md](profile.md#unresolved-essential-rules) lists unresolved rules;
 and agreement with a real service, for which no sample or reference

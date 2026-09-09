@@ -106,3 +106,61 @@ fn a_declared_value_reaches_standard_output_only_for_inspect() {
         );
     }
 }
+
+#[test]
+fn extract_never_carries_a_canary_in_a_diagnostic() {
+    // `extract` writes, so it is the one command whose *successful* report
+    // names files: `items[].path` is the destination-relative path of each
+    // file it created, which is what the caller asked it to produce. That is
+    // the whole exception, and it is one-directional. Standard error is
+    // canary-free in every case, a failing run's standard output is too, and
+    // neither ever carries the destination the caller named.
+    let scratch = Scratch::new("privacy-extract");
+    let package = scratch.canary_file("package.krx", &canary_package());
+    let package = package.to_str().expect("a UTF-8 temporary path");
+
+    let missing = scratch.path().join(CANARY_PATH).join("no-such-destination");
+    let missing = missing.to_str().expect("a UTF-8 temporary path");
+    for json in [true, false] {
+        let mut args = vec!["extract", package, "--into", missing];
+        if json {
+            args.push("--json");
+        }
+        let output = run(&args);
+        assert_eq!(status(&output), 9);
+        clean(&stderr(&output), "a refused extract's stderr");
+        clean(&stdout(&output), "a refused extract's stdout");
+    }
+
+    let destination = scratch.dir("destination");
+    let destination = destination.to_str().expect("a UTF-8 temporary path");
+    let output = run(&["extract", package, "--into", destination, "--json"]);
+    assert_eq!(status(&output), 0, "{}", stderr(&output));
+    clean(&stderr(&output), "a successful extract's stderr");
+    let report = stdout(&output);
+    assert!(
+        report.contains(CANARY_ENTRY),
+        "the report names the file it created, which is what was asked for"
+    );
+    assert!(
+        !report.contains(CANARY_PATH),
+        "but never the destination, and never the input path: {report}"
+    );
+    assert!(
+        !report.contains(CANARY_VALUE),
+        "and never a declared metadata value: {report}"
+    );
+
+    // A second run into the same destination is refused, and that refusal
+    // says nothing about which file was in the way.
+    for json in [true, false] {
+        let mut args = vec!["extract", package, "--into", destination];
+        if json {
+            args.push("--json");
+        }
+        let output = run(&args);
+        assert_eq!(status(&output), 9);
+        clean(&stderr(&output), "a no-clobber refusal's stderr");
+        clean(&stdout(&output), "a no-clobber refusal's stdout");
+    }
+}

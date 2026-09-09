@@ -8,8 +8,11 @@
 //! network access, and none resolves anything external.
 //!
 //! The three reader commands `inspect`, `list` and `validate-structure` expose
-//! these layers, and [`capabilities`] names them. No extraction and no writing
-//! exists. Nothing here asserts that an archive is a KRX package:
+//! these layers, and [`capabilities`] names them beside `extract`, the one
+//! command that writes: `openkrx-cli` joins [`extract::plan`] onto a
+//! caller-selected destination under a no-clobber, no-link, undo-on-failure
+//! policy. Package creation still does not exist.
+//! Nothing here asserts that an archive is a KRX package:
 //! `docs/profile.md` lists essential rules as unresolved, and each of them maps
 //! to a distinct [`profile::CheckOutcome::Unresolved`] outcome rather than to a
 //! pass or a failure.
@@ -50,12 +53,14 @@ pub struct Capabilities {
 /// Return the current implementation status without I/O or side effects.
 ///
 /// The list names the package operations a command actually performs. Reading
-/// is implemented; extraction and creation are not, and a structural report is
-/// not a conformance verdict whichever command produced it.
+/// and protected extraction are implemented; creation is not, and a structural
+/// report is not a conformance verdict whichever command produced it.
+/// `extract` appears here only because every filesystem property
+/// `SECURITY.md` requires of it is held by a test on each supported platform.
 pub const fn capabilities() -> Capabilities {
     Capabilities {
         project: "openKRX",
         stage: "reader",
-        operations: &["inspect", "list", "validate-structure"],
+        operations: &["inspect", "list", "validate-structure", "extract"],
     }
 }

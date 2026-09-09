@@ -32,11 +32,13 @@ what it observed and reports an undecidable rule as undecided. See
 | Bounded metadata parsing (`openkrx_core::metadata::parse`) | Implemented, library only |
 | Structural check inventory (`openkrx_core::profile::check`) | Implemented, library only |
 | Reader commands: `inspect`, `list`, `validate-structure` | Implemented |
-| `extract`, `create` | Not implemented |
+| Extraction planning (`openkrx_core::extract::plan`) and the `extract` command | Implemented |
+| `create` | Not implemented |
 | Signature handling of any kind | Not implemented, and not planned |
 
 The three reader commands render the three library layers and add no rule of
-their own. The implementation sequence is in the
+their own; `extract` writes what the planner decided, and adds no rule of its
+own either. The implementation sequence is in the
 [roadmap](docs/roadmap.md).
 
 ## What exists today
@@ -58,10 +60,21 @@ nothing external.
 - **The structural checks** relate the two: eleven named checks in a fixed
   order, each reported as a pass, a failure with a stable code, an
   unresolved rule, or not applicable.
+- **The extraction planner** decides what an extraction would create, before
+  anything is created: a symlink, a special file, an unsafe path component, a
+  Unicode or case collision or an exceeded output ceiling refuses the whole
+  package. It is a pure function and touches no filesystem.
 
-Every failure carries a stable dotted code — 73 of them — and a diagnostic
+`openkrx-cli` adds the only filesystem writing in the project, in `extract`,
+and it is deliberately narrow: the destination must already exist and be a
+real directory, nothing is ever overwritten, no symbolic link or reparse
+point is followed out of the destination, no permission bit or timestamp is
+copied, and a run that fails part-way removes everything it created and
+nothing that was already there.
+
+Every failure carries a stable dotted code — 102 of them — and a diagnostic
 prints the code, an entry index and numeric limit values only, never an
-entry name, document text or attribute value.
+entry name, document text, attribute value or filesystem path.
 
 **Structural checking is not signature verification and not delivery
 evidence.** openKRX performs no cryptography. Attachments, including `.es3`
@@ -78,6 +91,7 @@ cargo build --release -p openkrx-cli
 target/release/openkrx list               package.krx
 target/release/openkrx inspect            package.krx
 target/release/openkrx validate-structure package.krx
+target/release/openkrx extract            package.krx --into ./out
 ```
 
 Each command takes one file, or `-` to read standard input, and each accepts
@@ -103,6 +117,31 @@ Structural summary: unresolved
 that the package is a valid or conforming KRX file.
 ```
 
+`extract` writes the package's files into a directory you name. That
+directory must already exist — `extract` never creates it — and it must be a
+real directory rather than a symbolic link; it need not be empty. **Nothing
+is ever overwritten:** if any file the package would create is already there,
+the whole extraction is refused before anything is written, and the command
+exits 9.
+
+```text
+entry         bytes  path
+    0            19  mimetype
+    1          1003  KRX/OCD/Metalayer/KULDEMENY_META.xml
+    2            19  KRX/OCD/Payload/ID-1/synthetic.pdf
+
+3 files written, 5 directories created, 1041 bytes.
+```
+
+While a run is in progress the destination holds `.openkrx-extract.partial`,
+which is removed when it finishes, so a destination that still contains that
+file was interrupted and its contents are incomplete. If a write fails
+part-way, every file and directory the run created is removed again and
+nothing that was already there is touched. No permission bits and no
+timestamps are copied from the package, and no symbolic link, special file or
+nested archive is ever created or unpacked. Extracting a file is not a
+statement that it is authentic or safe to open.
+
 `--json` writes exactly one object on stdout and leaves stderr empty on
 success:
 
@@ -114,7 +153,7 @@ success:
   "data": {
     "project": "openKRX",
     "stage": "reader",
-    "operations": ["inspect", "list", "validate-structure"]
+    "operations": ["inspect", "list", "validate-structure", "extract"]
   },
   "verified": false
 }

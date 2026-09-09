@@ -59,12 +59,39 @@ and such a change is recorded here explicitly.
   `extract.*` codes are catalogued in
   [docs/codes.md](docs/codes.md#extraction-planning-codes), the rules in
   [docs/architecture.md](docs/architecture.md#extraction-planning), and the
-  threat-model rows, marked planning only with filesystem output pending,
-  in [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer).
-  Nothing writes and no command reaches the planner:
-  `capabilities().operations` still names the three reader commands only.
+  threat-model rows in
+  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer).
   `unicode-normalization` (MIT OR Apache-2.0) is a new dependency of the
   core crate, for NFC alone.
+- **Protected filesystem output and the `extract` command (KRX-05, output
+  half).** `openkrx extract <FILE|-> --into <DIR> [--json]` writes what the
+  planner decided into a directory the caller names, and is the only code in
+  openKRX that writes anywhere. The destination must already exist, must be
+  a directory, and must not be a symbolic link or a Windows reparse point —
+  `extract` never creates it — and it need not be empty. **Nothing is ever
+  overwritten:** a planned path that exists in any form, or an existing
+  ancestor inside the destination that is a link rather than a real
+  directory, refuses the whole extraction before a byte is written. Files are
+  created with `create_new` and directories one level at a time with
+  `create_dir`, each re-checked after creation; no permission bit and no
+  timestamp is copied from the package. A `.openkrx-extract.partial` marker
+  exists for the length of a run, so an interrupted one is detectable and the
+  next run into that destination is refused rather than mixed into it. Any
+  failure after the first write removes every file, directory and marker
+  **this run created**, newest first, and never anything that was already
+  there; the report carries `removed` and `left_in_place` counts. A new exit
+  status, `9` (`output`), and eight `output.*` codes are catalogued in
+  [docs/codes.md](docs/codes.md#output-codes), the policy and the race
+  assumptions in
+  [docs/architecture.md](docs/architecture.md#extraction-output), and the
+  threat-model rows and residual risks in
+  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-output-layer).
+  `capabilities().operations` gains `"extract"`. The successful JSON `data`
+  is `{files_written, directories_created, bytes_written, items[],
+  marker_removed}`, and a failed `extract` response gains a `cleanup` object;
+  both are additive, so `schema_version` stays `1`. No runtime dependency was
+  added. Extracting a file is not a statement that it is authentic or safe to
+  open, and a crash still leaves partial output behind the marker.
 - **A bounded, profile-agnostic archive inventory (KRX-02).**
   `openkrx_core::archive::inventory` reads a caller-supplied ZIP byte slice
   and reports what the archive contains. It performs no filesystem, clock,

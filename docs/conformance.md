@@ -76,21 +76,22 @@ functions under `crates/openkrx-core/tests/`.
 ## Extraction
 
 Extraction is not a rule of [profile.md](profile.md); it is a requirement of
-[SECURITY.md](../SECURITY.md#required-threat-model-for-package-support). The
-planning half is implemented in `openkrx_core::extract`, and every row below
-is **planning only; filesystem output pending**: the checks decide what an
-extraction would create and refuse everything that could not be created
-safely, but nothing writes, and no command reaches the layer. The full
-mapping, with the code prefix and test for each check, is in
-[SECURITY.md](../SECURITY.md#threat-model-mapping-extraction-planning-layer).
+[SECURITY.md](../SECURITY.md#required-threat-model-for-package-support). Both
+halves are implemented: `openkrx_core::extract` decides what an extraction
+would create and refuses everything that could not be created safely, and
+`crates/openkrx-cli/src/extract/` writes it into a destination the caller
+names. The full mappings, with the code prefix and test for each check, are
+in [SECURITY.md](../SECURITY.md#threat-model-mapping-extraction-planning-layer)
+and [SECURITY.md](../SECURITY.md#threat-model-mapping-extraction-output-layer).
 
 | Requirement | Implemented by | Outcome semantics | Test | Status |
 | --- | --- | --- | --- | --- |
-| No traversal, absolute or platform-ambiguous destination path | `extract::paths`, through `extract::plan` | Each unsafe component class rejects the whole plan with its own `extract.unsafe_path.*` code | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_unsafe_component_class_is_refused` | Asserted; planning only, filesystem output pending |
-| No symlink or reparse-point escape, and no special files | `archive::kind`, through `extract::plan` | `extract.unsupported.link` and `extract.unsupported.special_file`; a directory marker produces no item | `a_symlink_entry_rejects_the_whole_plan`, `a_special_file_entry_rejects_the_whole_plan` | Asserted; planning only, filesystem output pending |
-| Specified Unicode and case collisions, refused rather than resolved | `extract::collisions` | `extract.ambiguous.collision` and `.file_directory_conflict`; a shared file name under different directories is not a collision | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_file_that_is_also_a_directory_prefix_is_refused` | Asserted; planning only, filesystem output pending |
-| Documented output limits with checked arithmetic | `extract::ExtractLimits` | Each ceiling rejects the plan with its own `extract.over_limit.*` code | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary` | Asserted; planning only, filesystem output pending |
-| Confinement to a caller-selected destination, no overwrite, cleanup after an interrupted write | Nothing. A plan holds no absolute path and no separator, and joining it onto a destination is the follow-up ticket's work | No outcome | — | Not implemented |
+| No traversal, absolute or platform-ambiguous destination path | `extract::paths`, through `extract::plan` | Each unsafe component class rejects the whole plan with its own `extract.unsafe_path.*` code | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_unsafe_component_class_is_refused` | Asserted |
+| No symlink or reparse-point escape, and no special files | `archive::kind`, through `extract::plan` | `extract.unsupported.link` and `extract.unsupported.special_file`; a directory marker produces no item | `a_symlink_entry_rejects_the_whole_plan`, `a_special_file_entry_rejects_the_whole_plan` | Asserted |
+| Specified Unicode and case collisions, refused rather than resolved | `extract::collisions` | `extract.ambiguous.collision` and `.file_directory_conflict`; a shared file name under different directories is not a collision | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_file_that_is_also_a_directory_prefix_is_refused` | Asserted |
+| Documented output limits with checked arithmetic | `extract::ExtractLimits` | Each ceiling rejects the plan with its own `extract.over_limit.*` code | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary` | Asserted |
+| Confinement to a caller-selected destination, no overwrite, no link escape | `cli::extract::preflight`, through `extract` | `output.destination_*`, `output.exists`, `output.symlink_in_path`, `output.not_a_directory`; exit status 9, and nothing written | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `an_ancestor_symlink_inside_the_destination_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused` | Asserted |
+| Interrupted-write detection and cleanup that never deletes pre-existing data | `cli::extract::writer`, `cli::extract::cleanup` | `output.partial_marker_present`; a failed run removes only what it created and reports the counts | `a_marker_left_by_an_interrupted_run_refuses_the_next_one`, `a_failed_write_removes_this_runs_files_and_leaves_everything_else` | Asserted; a crash still leaves the marker, by design |
 
 ## Known gaps
 

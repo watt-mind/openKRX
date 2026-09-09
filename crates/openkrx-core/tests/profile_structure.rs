@@ -626,10 +626,11 @@ fn the_summary_is_consistent_only_when_nothing_failed_or_stayed_open() {
     assert_eq!(report.summary(), StructureSummary::Consistent);
     // And Consistent is still not a conformance claim; it says only that no
     // check failed and none was left unresolved. The crate advertises reading
-    // and nothing else: no verdict, no writer and no verification anywhere.
+    // and protected extraction, and nothing else: no verdict, no package
+    // writer and no verification anywhere.
     assert_eq!(
         openkrx_core::capabilities().operations,
-        ["inspect", "list", "validate-structure"]
+        ["inspect", "list", "validate-structure", "extract"]
     );
 }
 

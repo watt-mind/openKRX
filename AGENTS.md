@@ -2,13 +2,15 @@
 
 Read [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 [SECURITY.md](SECURITY.md), and [docs/architecture.md](docs/architecture.md)
-before changing code. The CLI offers help, version, capabilities, and the
-three reader commands `inspect`, `list` and `validate-structure`, which render
-the core crate's bounded archive inventory, bounded metadata parsing and
-structural check inventory over one bounded input. Nothing extracts a file,
-creates a package, or writes anywhere, and structural validation is not
-signature verification: openKRX performs no cryptography, so no output means
-that anything was verified. Never describe planned operations as implemented.
+before changing code. The CLI offers help, version, capabilities, the three
+reader commands `inspect`, `list` and `validate-structure`, which render the
+core crate's bounded archive inventory, bounded metadata parsing and
+structural check inventory over one bounded input, and `extract`, which
+writes a package's files into a directory the caller names under a
+no-clobber, no-link, undo-on-failure policy. Nothing creates a package, and
+structural validation is not signature verification: openKRX performs no
+cryptography, so no output means that anything was verified. Never describe
+planned operations as implemented.
 
 ## Scope and ownership
 

@@ -4,7 +4,7 @@ mod support;
 use support::{one_object, run, status, stderr, stdout};
 
 #[test]
-fn capabilities_names_exactly_the_implemented_reader_commands() {
+fn capabilities_names_exactly_the_implemented_operations() {
     let output = run(&["capabilities", "--json"]);
     assert_eq!(status(&output), 0);
     assert!(output.stderr.is_empty());
@@ -17,7 +17,7 @@ fn capabilities_names_exactly_the_implemented_reader_commands() {
             "data": {
                 "project": "openKRX",
                 "stage": "reader",
-                "operations": ["inspect", "list", "validate-structure"],
+                "operations": ["inspect", "list", "validate-structure", "extract"],
             },
             "verified": false,
         })
@@ -31,7 +31,7 @@ fn human_capabilities_state_the_boundary_rather_than_a_verdict() {
     assert!(output.stderr.is_empty());
     let text = stdout(&output);
     assert!(text.contains("openKRX: reader"));
-    assert!(text.contains("inspect, list, validate-structure"));
+    assert!(text.contains("inspect, list, validate-structure, extract"));
     assert!(text.contains("not signature verification"));
     assert!(text.contains("Nothing is verified"));
 }
@@ -41,7 +41,13 @@ fn help_lists_every_command_and_the_exit_statuses() {
     let output = run(&["--help"]);
     assert_eq!(status(&output), 0);
     let text = stdout(&output);
-    for command in ["capabilities", "inspect", "list", "validate-structure"] {
+    for command in [
+        "capabilities",
+        "inspect",
+        "list",
+        "validate-structure",
+        "extract",
+    ] {
         assert!(text.contains(command), "help must mention {command}");
     }
     assert!(text.contains("Exit statuses"));
@@ -49,7 +55,7 @@ fn help_lists_every_command_and_the_exit_statuses() {
 
 #[test]
 fn each_command_documents_its_file_argument_and_json_flag() {
-    for command in ["inspect", "list", "validate-structure"] {
+    for command in ["inspect", "list", "validate-structure", "extract"] {
         let output = run(&[command, "--help"]);
         assert_eq!(status(&output), 0);
         let text = stdout(&output);
@@ -71,6 +77,10 @@ fn the_help_says_which_statuses_belong_to_which_command() {
     assert!(top.contains("validate-structure only: a structural check failed"));
     assert!(top.contains("validate-structure only: nothing failed"));
     assert!(top.contains("inspect and list exit 0 whenever they produce"));
+    assert!(
+        top.contains("extract only: the destination could not be used"),
+        "status 9 belongs to extract alone"
+    );
     assert!(
         top.contains("`ok` says only that the command produced a report"),
         "the envelope's `ok` field is explained where it can be misread"
