@@ -16,6 +16,21 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **An embedded agent skill, and the `skill` command.**
+  `crates/openkrx-cli/skills/openkrx/SKILL.md` states the rules an AI agent
+  follows when driving openkrx: bounded local reading, no conformance,
+  validity or authenticity claim, attachments treated as opaque bytes,
+  nothing uploaded, and `verified` always `false`. It states the boundary
+  once — structural checks are not signature verification, `consistent` is
+  not conformance, and nine rules are unresolved — documents the JSON
+  envelope and all nine exit statuses, and gives the
+  `capabilities` → `inspect` → `list` → `validate-structure` → `extract`
+  workflow with how to read `checks[]`, `unresolved_rules`, `items` and
+  `cleanup`. `openkrx skill` writes that document to stdout byte for byte,
+  by `include_str!`, so it ships inside the binary and cannot drift from it.
+  The command bypasses the JSON envelope, takes no `FILE` and no `--json`,
+  exits 0, and exits 2 on either; it is not a package operation and
+  `capabilities().operations` is unchanged.
 - An unpublished Rust workspace, `openkrx-core` and `openkrx-cli`, on
   edition 2024 with a minimum supported Rust version of 1.88. The
   executable offers `--help`, `--version` and `capabilities [--json]`; the

@@ -131,6 +131,7 @@ as a failure rather than as a success.
 | --- | --- |
 | `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the two core entry points, and hands the result to a renderer. |
 | `src/input.rs` | The only I/O in openKRX: opening a file exactly as named, or reading standard input as binary, bounded by the input cap. |
+| `src/skill.rs` | The agent skill document, embedded with `include_str!`, and the `skill` command that writes it to stdout outside the envelope. |
 | `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*` diagnostic explains itself with. |
 | `src/commands/mod.rs` | The shared check, outcome and name views every command's report is built from. |
 | `src/commands/inspect.rs` | The `inspect` report: observations, the declared document, and every check. |
@@ -603,14 +604,36 @@ filesystem equates cannot both be created with `create_new`.
 ## Command contract and JSON envelope
 
 The supported surface is `openkrx --help`, `openkrx --version`,
-`openkrx capabilities [--json]`, the three reader commands, and `extract`:
+`openkrx capabilities [--json]`, the three reader commands, `extract`, and
+`skill`:
 
 ```text
 openkrx inspect            <FILE|-> [--json]
 openkrx list               <FILE|-> [--json]
 openkrx validate-structure <FILE|-> [--json]
 openkrx extract            <FILE|-> --into <DIR> [--json]
+openkrx skill
 ```
+
+| Command | Input | Output | Envelope | Exit statuses |
+| --- | --- | --- | --- | --- |
+| `capabilities` | none | stdout | yes, with `--json` | 0, 2 |
+| `inspect` | one package | stdout | yes, with `--json` | 0, 2, 5, 6, 7, 8 |
+| `list` | one package | stdout | yes, with `--json` | 0, 2, 5, 6, 7, 8 |
+| `validate-structure` | one package | stdout | yes, with `--json` | 0, 2, 3, 4, 5, 6, 7, 8 |
+| `extract` | one package | stdout and `--into <DIR>` | yes, with `--json` | 0, 2, 5, 6, 7, 8, 9 |
+| `skill` | none | stdout | **no: it bypasses the envelope** | 0, 2 |
+
+**`skill` is outside the envelope.** It writes the agent skill document
+embedded in the binary — the same bytes as
+`crates/openkrx-cli/skills/openkrx/SKILL.md`, by `include_str!` — to stdout
+byte for byte, and nothing else: no `schema_version`, no `ok`, no `verified`,
+and nothing on stderr. It reads no package, so it takes no `FILE` and no
+`--json`, and passing either is a usage error that exits 2; a successful run
+exits 0. It is not a package operation and does not appear in
+`capabilities().operations`. Wrapping a Markdown document in a JSON string
+would only make the one thing a caller wants harder to reach, and there is no
+package for a `command`, `data` or `verified` field to be about.
 
 The three reader commands write nothing anywhere. `extract` writes exactly
 the files the package declares, into the directory `--into` names, under the

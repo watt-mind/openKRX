@@ -7,9 +7,11 @@ reader commands `inspect`, `list` and `validate-structure`, which render the
 core crate's bounded archive inventory, bounded metadata parsing and
 structural check inventory over one bounded input, and `extract`, which
 writes a package's files into a directory the caller names under a
-no-clobber, no-link, undo-on-failure policy. Nothing creates a package, and
-structural validation is not signature verification: openKRX performs no
-cryptography, so no output means that anything was verified. Never describe
+no-clobber, no-link, undo-on-failure policy, and `skill`, which writes the
+embedded agent skill document to stdout outside the JSON envelope. Nothing
+creates a package, and structural validation is not signature verification:
+openKRX performs no cryptography, so no output means that anything was
+verified. Never describe
 planned operations as implemented.
 
 ## Scope and ownership
@@ -20,6 +22,9 @@ planned operations as implemented.
   needed.
 - `crates/openkrx-cli/`: arguments, human/JSON output, bounded input and safe
   output handling. Keep package semantics in the core crate.
+- `crates/openkrx-cli/skills/openkrx/SKILL.md`: the agent skill embedded in
+  the binary and written out by `openkrx skill`. Update it in the same pull
+  request as any change to a command, an exit status or the envelope.
 - `docs/`: architecture, evidence, work package specifications, and roadmap.
 - `tests/fixtures/`: independently authored synthetic data only.
 
@@ -89,7 +94,7 @@ afterwards. The full table is the maintenance map in
 | A limit or its default | `docs/architecture.md` limit table, `CHANGELOG.md` |
 | A stable code | `docs/codes.md`, `SECURITY.md` mapping, `CHANGELOG.md` |
 | A profile rule's status | `docs/profile.md`, `docs/conformance.md`, `CHANGELOG.md` |
-| The CLI contract | `docs/architecture.md`, `README.md`, `CHANGELOG.md` |
+| The CLI contract | `docs/architecture.md`, `README.md`, `crates/openkrx-cli/skills/openkrx/SKILL.md`, `CHANGELOG.md` |
 | Tests or fixtures | `docs/testing.md`, `tests/fixtures/README.md` |
 | A dependency | `docs/architecture.md`, `docs/research.md`, `CHANGELOG.md` |
 | A security control | `SECURITY.md`, `docs/architecture.md`, `docs/testing.md` |
