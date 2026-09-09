@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "openKRX capability model (development scaffold)"
+description = "Bounded KRX (OCD+ZIP) package reading, structural checks and extraction planning"
 
 [lints]
 workspace = true

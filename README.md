@@ -4,10 +4,12 @@ An open-source Rust library and command-line tool for Hungarian KRX
 document packages: the ZIP-based container used in Hungarian
 administrative correspondence.
 
-**It reads; it does not write.** `openkrx inspect`, `openkrx list` and
-`openkrx validate-structure` read a package locally and report what is in it.
-Nothing is extracted, nothing is created, nothing is uploaded and nothing is
-verified. There are no releases or published Cargo packages yet.
+**It reads packages, and it writes only where you point it.**
+`openkrx inspect`, `openkrx list` and `openkrx validate-structure` read a
+package locally and report what is in it; `openkrx extract` writes its files
+into a directory you name, and nothing else in the project writes anywhere.
+No package is ever created, nothing is uploaded, and nothing is verified.
+There are no releases or published Cargo packages yet.
 
 ## Who it is for
 
@@ -33,6 +35,7 @@ what it observed and reports an undecidable rule as undecided. See
 | Structural check inventory (`openkrx_core::profile::check`) | Implemented, library only |
 | Reader commands: `inspect`, `list`, `validate-structure` | Implemented |
 | Extraction planning (`openkrx_core::extract::plan`) and the `extract` command | Implemented |
+| `capabilities`, reporting the stage and the implemented operations | Implemented |
 | `create` | Not implemented |
 | Signature handling of any kind | Not implemented, and not planned |
 
@@ -92,10 +95,12 @@ target/release/openkrx list               package.krx
 target/release/openkrx inspect            package.krx
 target/release/openkrx validate-structure package.krx
 target/release/openkrx extract            package.krx --into ./out
+target/release/openkrx capabilities
 ```
 
-Each command takes one file, or `-` to read standard input, and each accepts
-`--json`. `list` prints what the archive holds:
+Each of the four package commands takes one file, or `-` to read standard
+input; `capabilities` takes none. Every command accepts `--json`. `list`
+prints what the archive holds:
 
 ```text
 index  method   compressed    declared     decoded  crc32     name
@@ -143,7 +148,8 @@ nested archive is ever created or unpacked. Extracting a file is not a
 statement that it is authentic or safe to open.
 
 `--json` writes exactly one object on stdout and leaves stderr empty on
-success:
+success. `cargo run -p openkrx-cli -- capabilities --json` prints this
+object, on a single line; it is indented here for reading:
 
 ```json
 {

@@ -9,6 +9,8 @@ and a link to the applicable evidence.
 
 ## KRX-01: Establish the first profile
 
+Status: implemented, as evidence rather than code.
+
 Dependencies: none. Owner: format-research contributor; `docs/references.md`
 and a new profile specification under `docs/`.
 
@@ -36,9 +38,9 @@ supported methods and peak-memory behavior are published in
 mapping is in [SECURITY.md](../SECURITY.md#threat-model-mapping-archive-layer).
 The `inventory` fuzz target exists and runs in a bounded CI lane
 ([testing.md](testing.md#fuzzing)); the truncation and mutation sweeps in
-[testing.md](testing.md#sweeps) remain the exhaustive complement to it. No
-CLI command exposes the inventory, so `capabilities().operations` remains
-empty.
+[testing.md](testing.md#sweeps) remain the exhaustive complement to it. The
+inventory is a library layer; `list` and `inspect` (KRX-04) render it, and
+`extract` (KRX-05) plans from it.
 
 Dependencies: KRX-01's archive-level rules. Owner: core reader contributor;
 `crates/openkrx-core/` archive/limits/errors modules and synthetic tests.
@@ -74,8 +76,8 @@ unresolved rule maps to a distinct `Unresolved(rule)` outcome, so no
 conformance verdict exists and the reported summary `Consistent` is explicitly
 not one. The `xml_metadata` fuzz target exists and runs in the same
 bounded CI lane; the truncation and mutation sweeps in
-[testing.md](testing.md#sweeps) remain its exhaustive complement. No CLI
-command exposes the checks, so `capabilities().operations` remains empty.
+[testing.md](testing.md#sweeps) remain its exhaustive complement. `inspect`
+and `validate-structure` (KRX-04) render the checks; neither adds a rule.
 
 Dependencies: KRX-01 and KRX-02. Owner: profile contributor; core metadata
 and validation modules, profile fixtures, and specification updates.
@@ -106,11 +108,13 @@ adding any package semantics. The command contract, the data shapes and the
 eight exit statuses are published in
 [architecture.md](architecture.md#command-contract-and-json-envelope) and
 [Exit statuses](architecture.md#exit-statuses); the two `input.*` codes are in
-[codes.md](codes.md). `capabilities().operations` now names exactly those
-three commands and the stage is `reader`. `validate-structure` renders every
+[codes.md](codes.md). `capabilities()` reports the stage `reader`, and its
+`operations` named exactly those three commands until KRX-05 added
+`extract`. `validate-structure` renders every
 check as its own outcome and never collapses one into a verdict: `consistent`
-means only that nothing failed and nothing was left undecided. No limit
-override, no extraction and no write of any kind exists.
+means only that nothing failed and nothing was left undecided. No
+command-line limit override exists; writing arrived with KRX-05 and is
+confined to `extract`.
 
 Dependencies: KRX-02 and KRX-03, both implemented; the CLI renders
 `openkrx_core::archive::inventory` and `openkrx_core::profile::check` and adds
@@ -131,7 +135,7 @@ diagnostics. Exercise Linux, macOS, and Windows CI.
 
 ## KRX-05: Protected extraction
 
-**Implemented, in two parts.** The planning half is in the core crate:
+Status: implemented, in two parts. The planning half is in the core crate:
 `openkrx_core::extract::plan` decides what an extraction would create and
 refuses everything that could not be created safely, as a pure function of
 the archive inventory, with no filesystem access at all. See
@@ -168,6 +172,13 @@ defended and is stated as a residual risk rather than tested.
 
 ## KRX-06: Deterministic profile writer
 
+Status: blocked on evidence, not on engineering. Nine of the thirty-seven
+profile rules are unresolved, and A19 to A22 decide the layout a writer would
+have to emit, so building one now would mean inventing a specification. The
+two requests that would settle them are recorded in
+[profile.md](profile.md#what-the-2026-09-09-search-added) and are for a
+person to make.
+
 Dependencies: KRX-01, KRX-03, and KRX-05's safe output layer. Owner: writer
 contributor; core authoring modules, CLI create, writer tests and contract.
 
@@ -182,6 +193,8 @@ identity, and output failure/no-clobber cases on all supported OSes.
 
 ## KRX-07: Consumer contract and first release review
 
+Status: planned, after KRX-06.
+
 Dependencies: KRX-04, KRX-05, and KRX-06. Owner: integration contributor;
 consumer examples, public contract documentation, and release checklist.
 
@@ -195,8 +208,9 @@ build; all [release gates](releasing.md) have recorded outcomes.
 
 ## Dispatch policy
 
-KRX-01 is first. After the reader core is ready, CLI presentation and future
-extraction planning can be split only with explicit module ownership and
-agreed interfaces. Keep one issue/branch per bounded change. File newfound
+KRX-01 to KRX-05 are implemented; KRX-06 is blocked on the evidence gap
+above and KRX-07 follows it. Independent work on the remaining packages is
+split only with explicit module ownership and agreed interfaces. Keep one
+issue/branch per bounded change. File newfound
 profile gaps and safety follow-ups separately; do not relax a check to
 increase compatibility. Security findings use the private reporting flow.
