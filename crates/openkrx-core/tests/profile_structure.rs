@@ -662,3 +662,101 @@ fn no_truncation_of_a_krx_shaped_archive_ever_panics() {
         }
     }
 }
+
+// ------------------------------------- each half of the M11 completeness rule
+
+#[test]
+fn an_absent_test_flag_alone_leaves_the_optional_field_check_undecided() {
+    // M11 is undecided when *any* element one official example omits is
+    // missing. Here every attachment is complete and only `TESZT` is absent,
+    // so a check that required both conditions and one that required either
+    // would disagree: this holds it to both.
+    let document = Document {
+        test: None,
+        ..document_at("KRX/OCD/Payload/ID-1")
+    };
+    let report = report(&krx(
+        "KRX/OCD/",
+        METADATA_FILE,
+        &document.bytes(),
+        &["KRX/OCD/Payload/ID-1/synthetic.pdf"],
+    ));
+    assert_eq!(
+        report.outcome(CheckId::SchemaOptionalFields),
+        CheckOutcome::Unresolved(RuleId::M11)
+    );
+}
+
+#[test]
+fn an_attachment_missing_either_optional_element_leaves_the_check_undecided() {
+    // The two halves of the per-attachment condition, one at a time: a
+    // reference with no description, and one whose MERET carries no number.
+    // Each on its own must leave M11 undecided.
+    for attachment in [
+        Attachment {
+            description: None,
+            ..Attachment::new(1, "synthetic.pdf", "KRX/OCD/Payload/ID-1")
+        },
+        Attachment {
+            size: "not a number".to_owned(),
+            ..Attachment::new(1, "synthetic.pdf", "KRX/OCD/Payload/ID-1")
+        },
+    ] {
+        let document = Document {
+            attachments: vec![attachment],
+            ..Document::default()
+        };
+        let report = report(&krx(
+            "KRX/OCD/",
+            METADATA_FILE,
+            &document.bytes(),
+            &["KRX/OCD/Payload/ID-1/synthetic.pdf"],
+        ));
+        assert_eq!(
+            report.outcome(CheckId::SchemaOptionalFields),
+            CheckOutcome::Unresolved(RuleId::M11),
+            "an incomplete reference leaves M11 undecided"
+        );
+    }
+
+    // The complete document is the control: both halves present is the only
+    // combination that passes.
+    let complete = report(&krx(
+        "KRX/OCD/",
+        METADATA_FILE,
+        &document_at("KRX/OCD/Payload/ID-1").bytes(),
+        &["KRX/OCD/Payload/ID-1/synthetic.pdf"],
+    ));
+    assert_eq!(
+        complete.outcome(CheckId::SchemaOptionalFields),
+        CheckOutcome::Pass
+    );
+}
+
+#[test]
+fn a_reference_resolves_through_a_root_prefix_other_than_the_observed_one() {
+    // The observed root prefix is `KRX/OCD/`, and the declared path uses it,
+    // but the entry is stored under `OCD/`. Resolution must try the other
+    // known prefixes as well as the observed one, or this reference reads as
+    // missing rather than as the prefix variant rule M14 describes.
+    let document = document_at("KRX/OCD/Payload/ID-1");
+    let image = Archive::of(vec![
+        Entry::stored(b"mimetype", MARKER_CONTENT),
+        Entry::deflated(
+            format!("KRX/OCD/Metalayer/{METADATA_FILE}").as_bytes(),
+            &document.bytes(),
+        ),
+        Entry::stored(b"OCD/Payload/ID-1/synthetic.pdf", b"synthetic payload 0"),
+    ])
+    .build();
+    let report = report(&image);
+    assert_eq!(
+        report.attachments()[0].resolution,
+        ReferenceResolution::PrefixVariant { entry: 2 },
+        "the entry is found under a known prefix that is not the observed one"
+    );
+    assert_eq!(
+        report.outcome(CheckId::AttachmentReferences),
+        CheckOutcome::Unresolved(RuleId::M14)
+    );
+}

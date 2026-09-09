@@ -1,0 +1,45 @@
+# Configuration for `cargo mutants` (see docs/testing.md, "Mutation testing").
+#
+# Mutation testing measures whether the suite would *notice* a behaviour
+# change, which is the property line coverage cannot show. Everything below
+# either bounds the run's cost or removes code that is not part of the
+# shipped contract. Nothing here silences a survivor found by running the
+# tool: a survivor is a prompt to strengthen a test.
+#
+# `cargo mutants` already skips `#[cfg(test)]` modules, derived impls and
+# functions marked `#[mutants::skip]`, so none of that is restated here.
+
+# Paths excluded from mutation, each with the reason it is not shipped
+# behaviour:
+#
+# - `crates/openkrx-core/src/synthetic/**` is the test-only ZIP and metadata
+#   writer behind the non-default `synthetic-writer` feature. It exists to
+#   *build* fixtures for the tests, so mutating it mostly makes a fixture
+#   malformed in a way some test happens to reject and another does not; it
+#   is scaffolding for the suite, never a code path a caller reaches.
+# - `crates/openkrx-core/examples/**` holds `golden_fixtures.rs`, the
+#   generator that writes the committed golden-contract packages. It is a
+#   build-time tool, not shipped behaviour, and the packages it produces are
+#   themselves committed and compared byte for byte by `scripts/golden.py`,
+#   which is where a change to it would be caught.
+# - `fuzz/**` is a separate package with its own workspace and lockfile on a
+#   nightly toolchain (see fuzz/Cargo.toml). `cargo mutants --workspace`
+#   never reaches it; the entry documents that this is deliberate.
+exclude_globs = [
+    "crates/openkrx-core/src/synthetic/**",
+    "crates/openkrx-core/examples/**",
+    "fuzz/**",
+]
+
+# A mutant is killed once it runs past this multiple of the unmutated
+# baseline's test time, which is how a mutant that loops forever is caught
+# rather than left hanging. The suite is dominated by many small bounded
+# parses, so a mutated build that takes more than five times the baseline is
+# not "slightly slower", it is stuck.
+timeout_multiplier = 5.0
+
+# ...but the baseline here is short enough that a bare multiple would be a
+# few seconds, and a loaded CI runner can exceed that without any mutant
+# being at fault. This floor keeps a slow runner from reporting timeouts
+# where the tests would have finished.
+minimum_test_timeout = 120

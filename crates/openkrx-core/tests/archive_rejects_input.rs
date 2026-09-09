@@ -439,3 +439,63 @@ fn the_entry_count_limit_is_checked_before_the_directory_is_walked() {
         "archive.over_limit.entries",
     );
 }
+
+#[test]
+fn a_ratio_exactly_at_the_limit_is_accepted_and_one_above_it_is_not() {
+    // Past the grace window the ratio is compared against the limit, and the
+    // comparison is strict: a ratio equal to the limit is inside it. The
+    // limit is set from what this payload actually achieves, so the boundary
+    // is the measured value rather than a guess about the deflate stream.
+    let payload = vec![0_u8; 4 * Limits::RATIO_GRACE_BYTES as usize];
+    let entry = Entry::deflated(b"zeros.bin", &payload);
+    let ratio = payload.len() as u64 / entry.data.len() as u64;
+    assert!(ratio > 1, "the payload compresses at all");
+    let image = Archive::of(vec![entry]).build();
+
+    accepts(
+        &image,
+        &Limits {
+            max_compression_ratio: ratio,
+            max_entry_decoded_bytes: payload.len() as u64,
+            max_total_decoded_bytes: payload.len() as u64,
+            ..Limits::DEFAULT
+        },
+    );
+    rejects_with(
+        &image,
+        &Limits {
+            max_compression_ratio: ratio - 1,
+            max_entry_decoded_bytes: payload.len() as u64,
+            max_total_decoded_bytes: payload.len() as u64,
+            ..Limits::DEFAULT
+        },
+        "archive.over_limit.compression_ratio",
+    );
+}
+
+#[test]
+fn an_end_record_declaring_the_zip64_entry_sentinel_is_refused_as_zip64() {
+    // 0xFFFF in the end record's entry count is the sentinel that says the
+    // real count lives in a ZIP64 end record. It is not an entry count of
+    // 65 535, and it must not be read as one: the archive is refused as an
+    // unsupported ZIP64 image rather than as one over the entry limit.
+    // Sibling sentinels for the directory size and offset are the same rule,
+    // but reaching them needs a 4 GiB image; see docs/testing.md.
+    let image = Archive::of(vec![Entry::stored(b"a.txt", b"payload")]).build();
+    let (body, directory) = split_directory(&image);
+    rejects(
+        &assemble(&body, &directory, u16::MAX),
+        "archive.unsupported.zip64",
+    );
+}
+
+#[test]
+fn a_directory_name_carrying_a_compressed_payload_is_refused() {
+    // A name ending in `/` may only be a directory marker with nothing in it.
+    // "Nothing in it" is either declared size being zero — and a deflate
+    // stream of no bytes is still two bytes long, so an entry can declare a
+    // compressed size while declaring no content at all. Both readings must
+    // refuse it, or a directory marker could smuggle a payload.
+    let image = Archive::of(vec![Entry::deflated(b"dir/", b"")]).build();
+    rejects(&image, "archive.unsafe_name.directory_with_data");
+}

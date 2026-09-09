@@ -1,0 +1,23 @@
+# Per-crate mutation-testing floors, enforced by scripts/mutants_gate.py.
+#
+# One crate per line: its package name and its floor, separated by a tab.
+# The floor is the minimum caught-mutant percentage, computed as
+# caught / (caught + missed) over that crate; timeouts and unviable mutants
+# are reported by the gate but counted on neither side. The scheduled
+# workflow (.github/workflows/mutants.yml) fails when a crate is below its
+# floor. Nothing in CI ever rewrites this file.
+#
+# Seeded from the full workspace run of 2026-09-09 with cargo-mutants 27.1.0:
+# one `cargo mutants --workspace --jobs 2` invocation covering both crates,
+# all 937 mutants, in 7 minutes 39 seconds of wall time. Not a per-crate
+# figure and not a shard. Measured after that run's survivors were triaged:
+#
+#   openkrx-core  567 caught, 16 missed, 84 unviable, 1 timeout -> 97.26 %
+#   openkrx-cli   219 caught, 21 missed, 28 unviable, 1 timeout -> 91.25 %
+#
+# Each floor is the measured percentage less two points, rounded down, so
+# that a mutant which times out on a loaded runner instead of being caught
+# does not fail the lane on its own. Raising a floor to hide a survivor is
+# never the right move; see docs/testing.md, "Mutation testing".
+openkrx-core	95
+openkrx-cli	89

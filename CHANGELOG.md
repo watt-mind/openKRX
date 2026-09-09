@@ -31,6 +31,26 @@ and such a change is recorded here explicitly.
   The command bypasses the JSON envelope, takes no `FILE` and no `--json`,
   exits 0, and exits 2 on either; it is not a package operation and
   `capabilities().operations` is unchanged.
+- **Mutation testing, with a per-crate caught-mutant floor.**
+  `cargo mutants` rewrites one expression at a time and reruns the suite
+  against each mutated copy, which measures whether a test would notice a
+  behaviour change rather than only that a line ran.
+  [.cargo/mutants.toml](.cargo/mutants.toml) bounds the run and excludes the
+  test-only synthetic writer, the examples directory and the separate fuzz
+  package; `scripts/mutants_gate.py` reads the report and enforces the
+  per-crate floors in `scripts/mutants-floors.txt`, counting a timeout or an
+  unviable mutant on neither side; and `.github/workflows/mutants.yml` runs
+  both weekly and on demand, uploading the report and, by design, gating no
+  pull request. The first run's survivors were triaged in the same change:
+  the genuine gaps became boundary and rendering tests — central-directory
+  accessors, both halves of the M11 completeness rule, resolution through a
+  root prefix other than the observed one, the compression ratio at exactly
+  its limit, the ZIP64 entry sentinel in the end record, a directory marker
+  carrying a compressed payload, the optional sibling blocks one at a time,
+  the human renderer line by line, and the sentence each `output.*` code is
+  given — and the rest are listed with their reasons in
+  [docs/testing.md](docs/testing.md#mutation-testing).
+
 - An unpublished Rust workspace, `openkrx-core` and `openkrx-cli`, on
   edition 2024 with a minimum supported Rust version of 1.88. The
   executable offers `--help`, `--version` and `capabilities [--json]`; the

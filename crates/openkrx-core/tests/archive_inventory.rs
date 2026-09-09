@@ -211,3 +211,63 @@ fn archive_scoped_errors_carry_no_entry_index() {
     assert_eq!(error.entry_index(), None);
     assert_eq!(error.to_string(), "archive.malformed.eocd_missing");
 }
+
+#[test]
+fn every_declared_central_directory_field_is_reported_as_it_was_written() {
+    // The accessors below are the whole of what a caller can learn about an
+    // entry's record, and three of them — the raw flags, the declared
+    // compressed size and the local-header offset — were only ever read
+    // indirectly by other assertions. Each is pinned here against a value the
+    // test itself computes, so an accessor that returned a constant, its
+    // neighbour's field, or zero could not pass.
+    let payload = b"synthetic payload";
+    let image = Archive::of(vec![
+        Entry::stored(b"first.bin", payload),
+        Entry::deflated(b"second.bin", payload).with_descriptor(true),
+    ])
+    .build();
+    let inventory = read(&image);
+    let entries = inventory.entries();
+    assert_eq!(entries.len(), 2);
+
+    // The writer sets no general-purpose bit of its own, so an entry that
+    // declares nothing has flags of zero; a data descriptor sets bit 3, and
+    // bit 11 is the one that declares the name to be UTF-8.
+    assert_eq!(entries[0].flags(), 0);
+    assert_eq!(entries[1].flags(), 0x0008);
+    assert!(!entries[0].utf8_flag() && !entries[1].utf8_flag());
+    let flagged = Archive::of(vec![{
+        let mut entry = Entry::stored(b"third.bin", payload);
+        entry.flags |= FLAG_UTF8;
+        entry
+    }])
+    .build();
+    let flagged = read(&flagged);
+    assert_eq!(flagged.entries()[0].flags(), FLAG_UTF8);
+    assert!(flagged.entries()[0].utf8_flag());
+
+    // A stored entry declares its payload length; a deflated one declares
+    // what deflating it produced, which is a different, smaller number.
+    assert_eq!(entries[0].method(), STORED);
+    assert_eq!(entries[0].compressed_size(), payload.len() as u64);
+    assert_eq!(entries[0].uncompressed_size(), payload.len() as u64);
+    assert_eq!(entries[1].method(), DEFLATE);
+    assert_eq!(entries[1].uncompressed_size(), payload.len() as u64);
+    assert!(
+        entries[1].compressed_size() > 0 && entries[1].compressed_size() != payload.len() as u64,
+        "a deflated entry declares its compressed length, not its payload length"
+    );
+
+    // The first local header is at the start of the image, and each following
+    // one sits past the previous entry's header and data.
+    assert_eq!(entries[0].local_header_offset(), 0);
+    assert!(
+        entries[1].local_header_offset() >= entries[0].compressed_size(),
+        "the second header follows the first entry's data"
+    );
+    assert!(
+        (entries[1].local_header_offset() as usize) < image.len(),
+        "every offset stays inside the image"
+    );
+    assert_eq!(entries[0].crc32(), crc32(payload));
+}

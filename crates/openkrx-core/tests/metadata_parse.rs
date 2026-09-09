@@ -335,3 +335,50 @@ fn the_default_metadata_limits_are_the_documented_ones() {
     assert_eq!(limits.max_attributes_per_element, 32);
     assert_eq!(limits.max_text_bytes, 1024 * 1024);
 }
+
+#[test]
+fn each_optional_sibling_block_is_observed_on_its_own_and_not_for_its_neighbours() {
+    // The three presence flags are set independently. A document carrying all
+    // three cannot tell them apart, so each is presented alone here: the one
+    // block present must be the only flag set.
+    let cases = [
+        ("<ns2:ERKEZTETES/>", [true, false, false]),
+        ("<ns2:BONTASOK/>", [false, true, false]),
+        ("<ns2:TERTIVEVENY/>", [false, false, true]),
+    ];
+    for (element, expected) in cases {
+        // TERTIVEVENY follows the dispatch blocks in the schema sequence, so
+        // it is appended rather than inserted with the other two.
+        let xml = if element == "<ns2:TERTIVEVENY/>" {
+            Document::default()
+                .xml()
+                .replace("</ns2:KULDEMENY>", "<ns2:TERTIVEVENY/></ns2:KULDEMENY>")
+        } else {
+            Document {
+                extra_body: element.to_owned(),
+                ..Document::default()
+            }
+            .xml()
+        };
+        let parsed = metadata::parse(xml.as_bytes(), &MetadataLimits::DEFAULT).expect("accepted");
+        assert_eq!(
+            [
+                parsed.receipt_present,
+                parsed.openings_present,
+                parsed.return_receipt_present,
+            ],
+            expected,
+            "{element} sets its own flag and no other"
+        );
+    }
+
+    // And a document carrying none of them sets none.
+    let parsed = metadata::parse(
+        Document::default().xml().as_bytes(),
+        &MetadataLimits::DEFAULT,
+    )
+    .expect("accepted");
+    assert!(!parsed.receipt_present);
+    assert!(!parsed.openings_present);
+    assert!(!parsed.return_receipt_present);
+}
