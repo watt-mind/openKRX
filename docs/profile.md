@@ -47,8 +47,8 @@ specification, 2017-01-16), `HK-2019` (Hivatali kapu technical guide,
 | A2 | The archive must begin with a `mimetype` entry (first ZIP entry) whose content is `application/OCD+ZIP` | Normative | `KRX-SPEC` §4 (p. 2), §6 (p. 3); `HK-2019` schema annotation |
 | A3 | Validation checks the `mimetype` content, then reads attachment locations from the metadata and verifies that each listed attachment exists | Normative | `KRX-SPEC` §6 (p. 3) |
 | A4 | Descriptive metadata lives in a `Metalayer` directory; today exactly one document, `KULDEMENY_META.xml`, is expected there | Normative | `KRX-SPEC` §4, §5 (p. 2); `HK-2019` schema annotation |
-| A5 | Attachments live under `Payload/` in `ID-<n>` subdirectories, one arbitrary-format file per subdirectory; the attachment count is otherwise unbounded | Normative | `KRX-SPEC` §3, §5 (p. 2); `HK-2019` schema annotation |
-| A6 | Two attachments may share a file name if they sit in different `ID-` subdirectories | Normative | `MKR-2.27` §3.1.2 (p. 24); `BKSZ-2.1` §3.8.2 (p. 26) |
+| A5 | Attachments live under `Payload/` in one subdirectory per attachment, each holding one arbitrary-format file; the attachment count is otherwise unbounded. The subdirectory naming is not settled: see A22 | Normative | `KRX-SPEC` §3, §5 (p. 2); `HK-2019` schema annotation |
+| A6 | Two attachments may share a file name if they sit in different payload subdirectories | Service | `MKR-2.27` §3.1.2 (p. 24); `BKSZ-2.1` §3.8.2 (p. 26) |
 | A7 | An optional `signatures.xml` may accompany the metadata; it carries per-attachment digests (SHA-256/384/512) in XAdES form and is not required on every package | Normative | `KRX-SPEC` §5 (p. 2), §7 (p. 3) |
 | A8 | ZIP entry names must use `/` separators per APPNOTE and must not carry a root-directory marker; archives from producers that violate this are not accepted and surface as "attachments not found" | Service | `MKR-2.27` §3.1.2 (p. 24) |
 | A9 | The container may carry further descriptive information, which the hybrid conversion ignores | Service | `MKR-2.27` §3.1.2 (p. 24) |
@@ -64,6 +64,7 @@ specification, 2017-01-16), `HK-2019` (Hivatali kapu technical guide,
 | A19 | Directory nesting and the location of `mimetype` | **Unresolved** | Three primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
 | A20 | Compression method, extra fields, and byte-exactness required for the `mimetype` entry | **Unresolved** | No source states them |
 | A21 | ZIP entry name character encoding (UTF-8 general-purpose flag versus CP437) and case sensitivity | **Unresolved** | No source states them |
+| A22 | Payload subdirectory naming: `ID-<n>`, `ID<n>` and `ID_<n>` all appear, as does the numbering base and whether the names must be contiguous | **Unresolved** | Primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
 
 ## Metadata rules
 
@@ -108,11 +109,13 @@ reconcile with a path that is nested two levels deep, and A8 forbids a
 root-directory marker, which is difficult to reconcile with a mandatory
 `KRX/` root directory. No retrievable source resolves this.
 
-Payload directory naming is similarly unsettled: `ID-1`, `ID-2` in
+A22, payload subdirectory naming, is similarly unsettled: `ID-1`, `ID-2` in
 `KRX-SPEC` §5 and in both metadata examples, `ID1…IDn` in `MKR-2.27`
 §3.1.2 (p. 24) and in `HK-2019`, and `Payload/ID_1` in `MKR-2.27` (p. 71).
+`BKSZ-2.1` §3.8.2 (p. 26) adds a maximum of 10 as a service rule (A10), so
+even the permitted range is only known for one service.
 
-Because A19, A20, A21, M11, M12, M13 and M14 are open, openKRX cannot
+Because A19, A20, A21, A22, M11, M12, M13 and M14 are open, openKRX cannot
 claim structural conformance (KRX-03) or produce a package that can be
 asserted to conform (KRX-06). A reader may report what it observed; it may
 not report that an archive is a valid KRX package, and a writer must not be
@@ -121,13 +124,14 @@ authoritative statement obtained from the format owner.
 
 ## What is nevertheless usable now
 
-KRX-02 needs only archive-level facts that all sources agree on: the
-container is a ZIP archive (A1), entry names use `/` and are not
-root-anchored (A8), a marker entry names the format (A2), and real
-packages carry a small number of entries (A5, A10). Those support a
-bounded, profile-agnostic inventory with concrete limits, provided the
-inventory reports observations only and never labels an archive a
-conforming KRX package.
+KRX-02 needs only archive-level facts that no source contradicts: the
+container is a ZIP archive (A1), entry names use `/` separators (A8), a
+marker entry names the format (A2), and real packages carry a small number
+of entries (A5, A10). Whether entry names carry a `KRX/` root prefix is
+unresolved (A19), so the inventory must not assume either shape. Those
+facts support a bounded, profile-agnostic inventory with concrete limits,
+provided the inventory reports observations only and never labels an
+archive a conforming KRX package.
 
 KRX-03 may implement the metadata grammar in M1–M8 as *schema-shaped
 parsing of `KER_META_V0_9`* and must treat M11–M15 as unknown: mismatched
