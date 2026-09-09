@@ -22,8 +22,8 @@ component classes — `..` and a C0 control — are already impossible in an
 accepted inventory, so the only way to hold the planner's own defence in
 depth is to call it. The one in `crates/openkrx-cli/src/exit.rs` holds one
 test per exit-status category and reads every code out of `docs/codes.md` to
-assert that each classifies: a subprocess can reach only the codes an
-archive can be built to produce, and
+assert that each classifies, with no head list of its own: a subprocess can
+reach only the codes an archive can be built to produce, and
 the contract covers every code the crates define.
 
 | File | Covers |
@@ -121,7 +121,7 @@ Three checks are Python, standard library only, and run offline:
 | --- | --- |
 | `scripts/check-doc-links.py` | Every relative Markdown link resolves, and every heading anchor it names exists. External links are never fetched, so the check stays deterministic. |
 | `scripts/check-file-length.py` | Tracked Rust files stay under 800 lines, or 1 500 for test files. |
-| `scripts/check-codes.py` | Every `archive.*` and `metadata.*` code literal in `crates/*/src/**` appears in [codes.md](codes.md), and every code that document lists still exists in the sources. |
+| `scripts/check-codes.py` | Every stable code literal in `crates/*/src/**` appears in [codes.md](codes.md), every code that document lists still exists in the sources, and the heads the catalogue documents are exactly the heads the script's `HEADS` line names. |
 
 `scripts/check-codes.py` is the maintenance gate for the code catalogue. It
 fails in both directions and names the offending code and the file that
@@ -129,6 +129,22 @@ defines it, so adding a code without cataloguing it, or renaming one and
 leaving a stale row behind, both stop the build. Run it alone with
 `python3 scripts/check-codes.py`; on success it prints one line naming how
 many codes are catalogued.
+
+The head list — `archive`, `extract`, `input`, `metadata`, `output` — is
+written once, in the `HEADS` line of that script, and two gates hold the rest
+of the tree to it. The script builds its extraction patterns from `HEADS` and
+fails when the heads [codes.md](codes.md) documents in backticks are not
+exactly those. The CLI catalogue test
+`every_catalogued_code_classifies_to_a_category` in
+`crates/openkrx-cli/src/exit.rs` fixes no head list at all: it takes every
+backticked dotted lower-case token of the catalogue as a code, asserts that
+`Category::of_code` classifies each one, and then asserts that the heads it
+saw equal the heads it parses from that same `HEADS` line. A new head added
+to the script alone leaves the catalogue and the test disagreeing with it, and
+a new head documented in the catalogue alone is not extracted and reaches
+`of_code` unclassified; either way `bash scripts/check.sh` or
+`cargo test -p openkrx-cli` fails, so a head can never be added in one place
+only.
 
 ## Sweeps
 

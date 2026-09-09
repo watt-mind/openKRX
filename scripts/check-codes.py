@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Keep docs/codes.md in step with the stable codes the crates define.
 
-Every failure openKRX reports carries a dotted `archive.*`, `extract.*`,
-`input.*`, `metadata.*` or `output.*` code, and those codes are part of the
-public contract. This check extracts
+Every failure openKRX reports carries a dotted code whose head is one of the
+heads the HEADS line below names, and those codes are part of the public
+contract. This check extracts
 each such string literal from the crate sources and compares the set with the
 codes docs/codes.md lists in backticks. A code that exists in the sources but
 not in the catalogue, or in the catalogue but not in the sources, fails the
-check. No source is executed and no private data is read.
+check. It also fails when the catalogue names a head HEADS does not, so that
+a new head cannot be documented without being extracted. No source is executed
+and no private data is read.
 """
 
 from pathlib import Path
@@ -16,9 +18,19 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOGUE = ROOT / "docs" / "codes.md"
+# The single source of truth for the stable-code heads. The CLI catalogue test
+# `every_catalogued_code_classifies_to_a_category` in
+# crates/openkrx-cli/src/exit.rs parses this exact line — one flat tuple of
+# double-quoted names on one line — to learn the head set, so a head added here
+# alone, or there alone, fails one of the two gates.
+HEADS = ("archive", "extract", "input", "metadata", "output")
+
 SEGMENT = r"[a-z0-9_]+"
-SOURCE_CODE = re.compile(rf'"((?:archive|extract|input|metadata|output)(?:\.{SEGMENT})+)"')
-DOC_CODE = re.compile(rf"`((?:archive|extract|input|metadata|output)(?:\.{SEGMENT})+)`")
+HEAD = "|".join(HEADS)
+SOURCE_CODE = re.compile(rf'"((?:{HEAD})(?:\.{SEGMENT})+)"')
+DOC_CODE = re.compile(rf"`((?:{HEAD})(?:\.{SEGMENT})+)`")
+# Head-agnostic: any backticked dotted lower-case token in the catalogue.
+ANY_DOC_CODE = re.compile(rf"`([a-z]+(?:\.{SEGMENT})+)`")
 
 
 def source_codes() -> dict[str, set[str]]:
@@ -47,6 +59,23 @@ def main() -> int:
     catalogue = CATALOGUE.relative_to(ROOT)
 
     problems = 0
+    documented_heads = {
+        code.split(".", 1)[0]
+        for code in ANY_DOC_CODE.findall(CATALOGUE.read_text(encoding="utf-8"))
+    }
+    for head in sorted(documented_heads - set(HEADS)):
+        print(
+            f"{catalogue}: documents {head}.* codes, but HEADS in "
+            f"{Path(__file__).name} does not name {head}; add it there and the "
+            f"catalogue test in crates/openkrx-cli/src/exit.rs will follow"
+        )
+        problems += 1
+    for head in sorted(set(HEADS) - documented_heads):
+        print(
+            f"{catalogue}: HEADS names {head}, but the catalogue documents no "
+            f"{head}.* code; remove the head or catalogue its codes"
+        )
+        problems += 1
     for code in sorted(set(sources) - documented):
         where = ", ".join(sorted(sources[code]))
         print(f"{catalogue}: undocumented code {code} (defined in {where})")
