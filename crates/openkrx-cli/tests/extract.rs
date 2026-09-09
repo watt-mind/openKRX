@@ -17,8 +17,8 @@ use std::path::Path;
 
 use support::{
     ATTACHMENT_PACKAGE_DIRECTORIES, Scratch, attachment_package, attachment_package_contents,
-    consistent_package, malformed_image, one_object, run, status, stderr, stdout,
-    symlink_entry_package,
+    consistent_package, malformed_image, marker_named_entry_package, one_object, run, status,
+    stderr, stdout, symlink_entry_package,
 };
 
 /// The marker an interrupted run leaves in the destination.
@@ -177,6 +177,27 @@ fn a_target_file_that_already_exists_refuses_the_whole_extraction() {
         "no other file was written before the refusal"
     );
     assert!(!std::fs::exists(destination.join(MARKER)).expect("check the marker"));
+}
+
+#[test]
+fn an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code() {
+    // The marker is created before the first file, so an entry carrying its
+    // name is a clash with this run's own bookkeeping. The planner has no
+    // opinion about the name, so preflight must catch it — and report it as
+    // the no-clobber refusal it is, not as an I/O failure part-way through.
+    let scratch = Scratch::new("extract-marker-entry");
+    let destination = scratch.dir("out");
+    let output = extract(&marker_named_entry_package(), &destination, true);
+    assert_eq!(status(&output), 9);
+    let error = diagnostic(&output);
+    assert_eq!(error["code"], "output.exists");
+    assert_eq!(error["entry_index"], 2);
+    assert_eq!(one_object(&output)["cleanup"]["removed"], 0);
+    assert_eq!(
+        tree(&destination),
+        Vec::<String>::new(),
+        "nothing was written, and no marker was left behind"
+    );
 }
 
 #[test]

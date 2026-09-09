@@ -72,7 +72,7 @@ point is followed out of the destination, no permission bit or timestamp is
 copied, and a run that fails part-way removes everything it created and
 nothing that was already there.
 
-Every failure carries a stable dotted code — 101 of them — and a diagnostic
+Every failure carries a stable dotted code — 102 of them — and a diagnostic
 prints the code, an entry index and numeric limit values only, never an
 entry name, document text, attribute value or filesystem path.
 

@@ -45,8 +45,9 @@ struct Failed<'a> {
     ok: bool,
     command: &'a str,
     error: Diagnostic<'a>,
-    /// What the extraction undo pass removed, present for `extract` alone and
-    /// only once it had created something. Counts, never a path.
+    /// What the extraction undo pass removed, present for `extract` alone.
+    /// `removed` is `0` when nothing had been written, which is every refusal
+    /// decided before the first write. Counts, never a path.
     #[serde(skip_serializing_if = "Option::is_none")]
     cleanup: Option<Cleanup>,
     verified: bool,

@@ -11,7 +11,10 @@
 //! - **No overwrite.** A planned file path must not exist in any form —
 //!   file, directory, link or anything else. `symlink_metadata` answers that
 //!   without following a link, so a dangling symlink counts as existing rather
-//!   than as free space.
+//!   than as free space. A planned file that *is* the partial marker is
+//!   refused under the same rule: the marker is created first, so the two
+//!   would otherwise collide as an I/O failure part-way through a run rather
+//!   than as the no-clobber refusal it is.
 //! - **No link in the path.** Every existing ancestor of a planned path,
 //!   inside the destination, must be a real directory. A symbolic link or a
 //!   Windows reparse point in that position would place output outside the
@@ -31,6 +34,8 @@ use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 
 use openkrx_core::ExtractionPlan;
+
+use super::MARKER_NAME;
 
 use crate::exit::{
     Failure, OUTPUT_DESTINATION_MISSING, OUTPUT_DESTINATION_NOT_A_DIRECTORY,
@@ -136,6 +141,13 @@ pub fn marker(path: &Path) -> Result<(), Failure> {
 /// the directories too, and each check is attributed to the entry whose output
 /// it concerns.
 ///
+/// A package may perfectly well declare an entry named
+/// `.openkrx-extract.partial` at its root. The marker is created before the
+/// first file, so such an entry is a clash with this run's own bookkeeping.
+/// It is reported as `output.exists` — the no-clobber code, decided before
+/// anything is written — rather than being left to surface as an `output.io`
+/// failure part-way through, which would say nothing about what happened.
+///
 /// # Errors
 ///
 /// `output.symlink_in_path`, `output.not_a_directory` or `output.exists`, each
@@ -147,6 +159,9 @@ pub fn plan_paths(destination: &Path, plan: &ExtractionPlan) -> Result<(), Failu
         let (leaf, ancestors) = components
             .split_last()
             .expect("a planned path has at least one component");
+        if ancestors.is_empty() && leaf == MARKER_NAME {
+            return Err(Failure::output_at(OUTPUT_EXISTS, entry));
+        }
         let mut path = destination.to_path_buf();
         for ancestor in ancestors {
             path.push(ancestor);

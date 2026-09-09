@@ -194,7 +194,7 @@ const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this
 
 /// The sentence one particular code deserves instead of its category's.
 ///
-/// Nine codes share [`Category::Output`], and the one sentence that covers
+/// Eight codes share [`Category::Output`], and the one sentence that covers
 /// all of them tells a caller with a missing destination about overwriting,
 /// which is noise at the moment they need one instruction. Each `output.*`
 /// code therefore names its own condition and what to do about it. Every

@@ -242,6 +242,26 @@ pub fn symlink_entry_package() -> Vec<u8> {
     .build()
 }
 
+/// A package whose third entry is named exactly like the extraction marker.
+///
+/// The planner has no opinion about the name — nothing is unsafe about it —
+/// so it reaches the filesystem layer, where the marker this run creates
+/// occupies the same path. The no-clobber rule must refuse it before any
+/// write, rather than leaving it to fail as an I/O error part-way through.
+#[must_use]
+pub fn marker_named_entry_package() -> Vec<u8> {
+    let document = Document::header_only();
+    Archive::of(vec![
+        Entry::stored(b"mimetype", MARKER_CONTENT),
+        Entry::deflated(
+            format!("KRX/OCD/Metalayer/{METADATA_FILE}").as_bytes(),
+            &document.bytes(),
+        ),
+        Entry::stored(b".openkrx-extract.partial", b"not this run's marker"),
+    ])
+    .build()
+}
+
 /// A package declaring an attachment the archive does not hold.
 #[must_use]
 pub fn missing_attachment_package() -> Vec<u8> {
