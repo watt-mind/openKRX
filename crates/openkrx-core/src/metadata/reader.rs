@@ -16,6 +16,8 @@
 //! Leaf text is concatenated and trimmed of ASCII whitespace, so a value split
 //! by a character reference or a CDATA section reads the same as a plain one.
 
+use core::mem;
+
 use super::error::{MetadataError, XmlMalformedKind, XmlUnsupportedKind};
 use super::field::MetadataField;
 use super::limits::MetadataLimits;
@@ -150,6 +152,7 @@ impl Parser<'_> {
     fn dispatch(&mut self) -> Result<Dispatch, MetadataError> {
         let mut declared_attachment_count = None;
         let mut attachments = Vec::new();
+        let mut attachments_present = false;
         let mut handling_instructions_unqualified = false;
         while let Some(child) = self.child()? {
             match known_field(&child) {
@@ -164,7 +167,19 @@ impl Parser<'_> {
                     declared_attachment_count =
                         Some(integer(&text, MetadataField::MellekletekSzama)?);
                 }
-                Some(MetadataField::Mellekletek) => attachments.extend(self.attachments()?),
+                Some(MetadataField::Mellekletek) => {
+                    // M7: one list per dispatch. A second one is a repeated
+                    // element like any other, not a count to merge into the
+                    // first: merging would report the document as a count
+                    // mismatch and hide the real defect.
+                    if mem::replace(&mut attachments_present, true) {
+                        return Err(MetadataError::about(
+                            XmlMalformedKind::DuplicateElement,
+                            MetadataField::Mellekletek,
+                        ));
+                    }
+                    attachments = self.attachments()?;
+                }
                 _ => {
                     // M8: the schema declares this one element unqualified, so
                     // only the unbound spelling counts as the real thing.

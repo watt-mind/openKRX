@@ -262,7 +262,20 @@ general-purpose ZIP reader would accept.
 | `max_depth` | 32 | element nesting, counting the root as depth 1 |
 | `max_elements` | 10 000 | element start events produced |
 | `max_attributes_per_element` | 32 | attributes on one element |
-| `max_text_bytes` | 1 MiB | character data produced across the whole document |
+| `max_text_bytes` | 1 MiB | character data and attribute values produced across the whole document |
+
+`max_text_bytes` bounds one event as well as the document. Before a text or
+CDATA event is unescaped and copied, and before an attribute value is
+normalised, the event's raw byte length is checked against the headroom left
+under the limit, so the copy materialised from a single event is bounded by
+`max_text_bytes`. The raw event itself is read into the reader's buffer
+before that check and stays bounded by `max_document_bytes`. Unescaping and
+end-of-line normalisation never grow a value, so a raw length inside the
+headroom guarantees the materialised one is too; the converse does not hold,
+and an event whose raw form exceeds the headroom is refused even where its
+materialised form would have fitted. A general entity reference needs no such
+probe: only the five XML predefines and numeric character references resolve
+at all, and each yields at most one character.
 
 `max_document_bytes` matches `max_entry_decoded_bytes` because the document
 reaches the parser through `ArchiveInventory::entry_bytes` and cannot be

@@ -193,6 +193,11 @@ pub struct Dispatch {
 /// A value of this type is an observation about bytes, not a statement that the
 /// enclosing archive is a conforming KRX package: `docs/profile.md` leaves
 /// rules A19 to A22 and M11 to M15 open.
+///
+/// Every field is package content — identifiers, file names and free text. The
+/// `Debug` representation prints it verbatim and must never be logged,
+/// persisted or sent through telemetry; error codes and `Display` carry no
+/// document content and are what diagnostics may report.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Metadata {

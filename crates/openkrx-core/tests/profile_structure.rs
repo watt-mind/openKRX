@@ -290,6 +290,41 @@ fn a_marker_under_a_directory_prefix_is_unresolved_rather_than_wrong() {
 }
 
 #[test]
+fn a_root_marker_is_inspected_even_when_a_prefixed_one_also_exists() {
+    // A2 describes a first entry named exactly `mimetype`. When there is one,
+    // it is the entry inspected, whatever else ends in the same segment.
+    let document = Document::header_only().bytes();
+    let image = Archive::of(vec![
+        Entry::stored(b"mimetype", MARKER_CONTENT),
+        Entry::stored(b"KRX/OCD/mimetype", MARKER_CONTENT),
+        Entry::deflated(b"KRX/OCD/Metalayer/KULDEMENY_META.xml", &document),
+    ])
+    .build();
+    assert_eq!(
+        report(&image).outcome(CheckId::MarkerEntry),
+        CheckOutcome::Pass
+    );
+}
+
+#[test]
+fn a_prefixed_marker_ahead_of_a_root_marker_stays_unresolved() {
+    // The reverse ordering: the root marker is not the first entry, so A19 --
+    // which leaves the marker's location open -- still prevents a conclusion.
+    // A layout no source settles is never reported as a failure.
+    let document = Document::header_only().bytes();
+    let image = Archive::of(vec![
+        Entry::stored(b"KRX/OCD/mimetype", MARKER_CONTENT),
+        Entry::stored(b"mimetype", MARKER_CONTENT),
+        Entry::deflated(b"KRX/OCD/Metalayer/KULDEMENY_META.xml", &document),
+    ])
+    .build();
+    assert_eq!(
+        report(&image).outcome(CheckId::MarkerEntry),
+        CheckOutcome::Unresolved(RuleId::A19)
+    );
+}
+
+#[test]
 fn a_deflated_marker_is_not_treated_as_a_finding() {
     // A20 is never asserted: no source states the marker's storage method.
     let document = Document::header_only().bytes();
