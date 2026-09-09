@@ -11,3 +11,6 @@ Repository policies: [contributing](../CONTRIBUTING.md),
 [security](../SECURITY.md), [agent instructions](../AGENTS.md),
 [changelog](../CHANGELOG.md), and
 [synthetic fixtures](../tests/fixtures/README.md).
+
+- [Master orchestrator instructions](orchestrator.md)
+- [Factory and runner setup](factory.md)
