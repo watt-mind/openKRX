@@ -7,10 +7,13 @@ rules for fixtures and for any private corpus.
 
 ## Test layout
 
-Every test is an integration test. There are no unit tests inside the crate
-sources beyond the doctests in the public API documentation, because the
-contract worth testing is the public one: a byte slice goes in, a typed value
-or a stable code comes out.
+Almost every test is an integration test, because the contract worth testing
+is the public one: a byte slice goes in, a typed value or a stable code comes
+out. The exceptions are the doctests in the public API documentation and one
+`#[cfg(test)]` module in `crates/openkrx-core/src/archive/inflate.rs`, which
+pins the CRC-32 implementation against its published check value, the empty
+input, and chunk ordering — an internal helper with no public surface to
+exercise it through.
 
 | File | Covers |
 | --- | --- |
@@ -48,7 +51,7 @@ That is the gate. It runs, in order: `cargo fmt --all --check`;
 `cargo test --workspace --locked`; `cargo doc --workspace --no-deps --locked`
 with `RUSTDOCFLAGS="-D warnings"`; `cargo machete`;
 `cargo deny --all-features check`; `python3 scripts/check-doc-links.py`;
-`python3 scripts/check-file-length.py`; `python3 scripts/check-codes.py`;
+`python3 scripts/check-codes.py`; `python3 scripts/check-file-length.py`;
 markdownlint; and `actionlint`.
 
 To run one part by hand:

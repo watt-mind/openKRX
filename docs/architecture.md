@@ -88,7 +88,7 @@ as a failure rather than as a success.
 | `src/metadata/error.rs` | `MetadataError` and its three category enums; `Display` prints the code and limit numbers only, never document content. |
 | `src/metadata/limits.rs` | `MetadataLimits`, the XML ceilings, with `DEFAULT`. |
 | `src/metadata/scanner.rs` | Bounded XML event source over `quick-xml`: refuses DTDs, non-predefined entities and stray processing instructions, and counts depth, elements, attributes and text while streaming. |
-| `src/metadata/reader.rs` | The `KER_META_V0_9` grammar (rules M1 to M8) re-expressed as code, with the two leniencies rule M11 forces. |
+| `src/metadata/reader.rs` | The `KER_META_V0_9` grammar (rules M1 to M8) re-expressed as code, with the order rule M2 confines and the two leniencies M11 forces. |
 | `src/metadata/model.rs` | Typed shape of a parsed document; open values such as `MERET` keep their verbatim text beside an optional numeric reading. |
 | `src/metadata/field.rs` | `MetadataField`, the schema-fixed element identities an error may name without disclosing content. |
 | `src/profile/mod.rs` | `check()`, the fixed check inventory, the `codes` module of structural failure codes, and `ProfileError`. |
@@ -268,8 +268,11 @@ Six of the eleven can report `Unresolved`, citing exactly five rules: M12
 (check 2), A19 (checks 3 and 4), M11 (check 6), M14 (check 8) and M13
 (check 11). No other check can. A check whose input is absent reports
 `NotApplicable`: checks 7 to 11 do so when the document declares no
-dispatch, no attachment or no count, and every check after the first
-reports `NotApplicable` when no metadata document could be located.
+dispatch, no attachment or no count, or when none of its dispatches carries
+an unqualified handling instruction; and every check after the first — except
+check 4 `marker_entry`, which is decided from the entry names alone and runs
+regardless — reports `NotApplicable` when no metadata document could be
+located.
 
 A candidate metadata entry is any entry whose last path segment equals
 `KULDEMENY_META.xml` and whose parent segment equals `Metalayer`, both
