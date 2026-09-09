@@ -14,6 +14,12 @@
 
 use super::error::UnsafeComponentKind;
 
+/// Characters no Windows filesystem accepts in a name.
+///
+/// `\` is not listed: the archive layer refuses a name holding one before it
+/// can reach the planner, and `:` and `/` have codes of their own.
+const RESERVED_CHARACTERS: [char; 6] = ['*', '?', '<', '>', '|', '"'];
+
 /// Windows reserved device names, upper case, without an extension.
 const RESERVED_DEVICE_NAMES: [&str; 22] = [
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
@@ -32,8 +38,9 @@ pub(crate) fn components(name: &str) -> Vec<&str> {
 ///
 /// The order of the checks is fixed so that a given component always produces
 /// the same code: emptiness, the two relative names, control characters, the
-/// two trailing characters that filesystems strip, the reserved device names,
-/// and finally the colon.
+/// two trailing characters that filesystems strip, a leading space, the
+/// reserved device names, the colon, and finally the six characters Windows
+/// refuses outright.
 pub(crate) fn check_component(component: &str) -> Result<(), UnsafeComponentKind> {
     if component.is_empty() {
         return Err(UnsafeComponentKind::Empty);
@@ -53,11 +60,17 @@ pub(crate) fn check_component(component: &str) -> Result<(), UnsafeComponentKind
     if component.ends_with(' ') {
         return Err(UnsafeComponentKind::TrailingSpace);
     }
+    if component.starts_with(' ') {
+        return Err(UnsafeComponentKind::LeadingSpace);
+    }
     if is_reserved_device_name(component) {
         return Err(UnsafeComponentKind::ReservedDeviceName);
     }
     if component.contains(':') {
         return Err(UnsafeComponentKind::Colon);
+    }
+    if component.contains(RESERVED_CHARACTERS) {
+        return Err(UnsafeComponentKind::ReservedCharacter);
     }
     Ok(())
 }
@@ -104,10 +117,32 @@ mod tests {
         refuses("a\u{85}b", UnsafeComponentKind::ControlCharacter);
         refuses("a.", UnsafeComponentKind::TrailingDot);
         refuses("a ", UnsafeComponentKind::TrailingSpace);
+        refuses(" a", UnsafeComponentKind::LeadingSpace);
         refuses("CON", UnsafeComponentKind::ReservedDeviceName);
         refuses("con.txt", UnsafeComponentKind::ReservedDeviceName);
         refuses("LPT9.tar.gz", UnsafeComponentKind::ReservedDeviceName);
         refuses("a:b", UnsafeComponentKind::Colon);
+        for character in ['*', '?', '<', '>', '|', '"'] {
+            refuses(
+                &format!("a{character}b"),
+                UnsafeComponentKind::ReservedCharacter,
+            );
+        }
+    }
+
+    #[test]
+    fn the_class_no_archive_can_carry_reports_its_stable_code() {
+        // Every other class is asserted by code in `tests/extract_rejects.rs`,
+        // over an archive that reaches the planner. A `..` component is refused
+        // by the archive layer first, so its literal is pinned here.
+        assert_eq!(
+            check_component(".."),
+            Err(UnsafeComponentKind::ParentComponent)
+        );
+        assert_eq!(
+            UnsafeComponentKind::ParentComponent.code(),
+            "extract.unsafe_path.parent_component"
+        );
     }
 
     #[test]

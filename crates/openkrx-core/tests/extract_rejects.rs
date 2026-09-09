@@ -13,6 +13,8 @@ use support::{Archive, Entry};
 const MODE_SYMLINK: u32 = 0o120_777;
 /// Unix `st_mode` for a character device.
 const MODE_CHARACTER_DEVICE: u32 = 0o020_666;
+/// Host system 19: OS X (Darwin), which carries `st_mode` as host 3 does.
+const HOST_DARWIN: u16 = 19;
 
 #[track_caller]
 fn rejects_with(image: &[u8], limits: &ExtractLimits, code: &str) -> u32 {
@@ -52,6 +54,22 @@ fn a_symlink_entry_rejects_the_whole_plan() {
     let image = Archive::of(vec![
         Entry::stored(b"mimetype", b"application/OCD+ZIP"),
         Entry::stored(b"Payload/link", b"../../etc/passwd").with_unix_mode(MODE_SYMLINK),
+    ])
+    .build();
+
+    assert_eq!(rejects(&image, "extract.unsupported.link"), 1);
+}
+
+#[test]
+fn a_darwin_host_symlink_is_refused_like_a_unix_one() {
+    // Host 19 stores `st_mode` in the high attribute bits exactly as host 3
+    // does, so a link written on macOS must be read as a link rather than as
+    // an unmapped host planned as an ordinary file holding its target text.
+    let image = Archive::of(vec![
+        Entry::stored(b"mimetype", b"application/OCD+ZIP"),
+        Entry::stored(b"Payload/link", b"../../etc/passwd")
+            .with_unix_mode(MODE_SYMLINK)
+            .with_host_system(HOST_DARWIN),
     ])
     .build();
 
@@ -100,9 +118,29 @@ fn every_unsafe_component_class_reachable_from_an_archive_is_refused() {
             "extract.unsafe_path.reserved_device_name",
         ),
         (&b"a/b:c"[..], "extract.unsafe_path.colon"),
+        (&b"a/ b"[..], "extract.unsafe_path.leading_space"),
+        (&b"a/b*c"[..], "extract.unsafe_path.reserved_character"),
     ] {
         assert_eq!(rejects(&one_file(name), code), 0, "{code}");
     }
+}
+
+#[test]
+fn every_character_windows_refuses_outright_is_one_reserved_character_class() {
+    for character in *b"*?<>|\"" {
+        let name = [b"Payload/x".as_slice(), &[character], b".pdf"].concat();
+        assert_eq!(
+            rejects(&one_file(&name), "extract.unsafe_path.reserved_character"),
+            0,
+            "{}",
+            char::from(character)
+        );
+    }
+    // `\` is refused by the archive layer as `archive.unsafe_name.backslash`
+    // before a plan is attempted, so the planner never sees one.
+    let image = one_file(b"Payload/x\\y.pdf");
+    let error = archive::inventory(&image, &Limits::DEFAULT).expect_err("a backslash is refused");
+    assert_eq!(error.code(), "archive.unsafe_name.backslash");
 }
 
 #[test]
@@ -149,6 +187,23 @@ fn a_file_that_is_also_a_directory_prefix_is_refused() {
     let image = Archive::of(vec![
         Entry::stored(b"Payload", b"a file called Payload"),
         Entry::stored(b"Payload/x.pdf", b"attachment"),
+    ])
+    .build();
+
+    assert_eq!(
+        rejects(&image, "extract.ambiguous.file_directory_conflict"),
+        1
+    );
+}
+
+#[test]
+fn a_directory_prefix_that_arrives_before_its_file_is_refused_the_same_way() {
+    // The mirror of the test above: the deeper name comes first, so the
+    // conflict is only visible once the shallow one is planned. The reported
+    // entry is the later of the two either way.
+    let image = Archive::of(vec![
+        Entry::stored(b"Payload/x.pdf", b"attachment"),
+        Entry::stored(b"Payload", b"a file called Payload"),
     ])
     .build();
 

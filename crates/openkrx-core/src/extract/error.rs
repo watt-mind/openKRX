@@ -60,12 +60,18 @@ pub enum UnsafeComponentKind {
     TrailingDot,
     /// A component ends with a space, which several filesystems silently strip.
     TrailingSpace,
+    /// A component starts with a space, which Windows Explorer and several
+    /// tools silently strip, so two entries could become one file.
+    LeadingSpace,
     /// A component is a Windows reserved device name such as `CON` or `LPT1`,
     /// with or without an extension.
     ReservedDeviceName,
     /// A component holds `:`, which names an alternate data stream on NTFS and
     /// a volume elsewhere.
     Colon,
+    /// A component holds one of `*`, `?`, `<`, `>`, `|` or `"`, none of which
+    /// a Windows filesystem accepts in a name.
+    ReservedCharacter,
 }
 
 impl UnsafeComponentKind {
@@ -79,8 +85,10 @@ impl UnsafeComponentKind {
             Self::ControlCharacter => "extract.unsafe_path.control_character",
             Self::TrailingDot => "extract.unsafe_path.trailing_dot",
             Self::TrailingSpace => "extract.unsafe_path.trailing_space",
+            Self::LeadingSpace => "extract.unsafe_path.leading_space",
             Self::ReservedDeviceName => "extract.unsafe_path.reserved_device_name",
             Self::Colon => "extract.unsafe_path.colon",
+            Self::ReservedCharacter => "extract.unsafe_path.reserved_character",
         }
     }
 }
