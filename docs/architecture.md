@@ -525,10 +525,15 @@ For each planned file, every ancestor inside the destination that exists must
 be a real directory (`output.symlink_in_path`, `output.not_a_directory`) and
 the file path itself must not exist **in any form** — file, directory, link,
 or a link whose target is missing (`output.exists`). A package may declare an
-entry named `.openkrx-extract.partial`; the planner has no opinion about it,
-so preflight refuses it under the same code rather than letting it collide
+entry named `.openkrx-extract.partial`, as a file or as a root directory
+holding entries beneath it; the planner has no opinion about it, so preflight
+refuses either under the same code rather than letting it collide
 with this run's own marker as an I/O failure part-way through. A preflight refusal
 means nothing was written, and the JSON report says so with `removed: 0`.
+A *nested* `x/.openkrx-extract.partial` is extracted normally, with the side
+effect that a later `extract --into <dest>/x` is refused with
+`output.partial_marker_present`: the marker name is fixed, so any package may
+place one where a future run would read it as its own.
 
 **3. Write.** A `.openkrx-extract.partial` marker is created in the
 destination with `create_new`, before anything else. Then each planned

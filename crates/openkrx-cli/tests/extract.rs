@@ -24,6 +24,30 @@ use support::{
 /// The marker an interrupted run leaves in the destination.
 const MARKER: &str = ".openkrx-extract.partial";
 
+/// A package whose third entry lives under a root directory named like the
+/// marker, so the plan's directory list holds `.openkrx-extract.partial`.
+///
+/// The file leaf is not the marker path, so the leaf rule does not catch it;
+/// the directory the run would have to create is the marker's own path.
+fn marker_named_directory_package() -> Vec<u8> {
+    use openkrx_core::synthetic::meta::{Document, MARKER_CONTENT, METADATA_FILE};
+    use openkrx_core::synthetic::{Archive, Entry};
+
+    let document = Document::header_only();
+    Archive::of(vec![
+        Entry::stored(b"mimetype", MARKER_CONTENT),
+        Entry::deflated(
+            format!("KRX/OCD/Metalayer/{METADATA_FILE}").as_bytes(),
+            &document.bytes(),
+        ),
+        Entry::stored(
+            b".openkrx-extract.partial/a.txt",
+            b"beneath the marker name",
+        ),
+    ])
+    .build()
+}
+
 /// Run `extract` on `image`, into `destination`, in one of the two modes.
 fn extract(image: &[u8], destination: &Path, json: bool) -> std::process::Output {
     let scratch = Scratch::new("extract-input");
@@ -192,6 +216,29 @@ fn an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code() {
     let error = diagnostic(&output);
     assert_eq!(error["code"], "output.exists");
     assert_eq!(error["entry_index"], 2);
+    assert_eq!(one_object(&output)["cleanup"]["removed"], 0);
+    assert_eq!(
+        tree(&destination),
+        Vec::<String>::new(),
+        "nothing was written, and no marker was left behind"
+    );
+}
+
+#[test]
+fn a_directory_named_like_the_marker_is_refused_under_the_no_clobber_code() {
+    // The same clash one level up: nothing is planned *at* the marker path,
+    // but a directory of that name would have to be created there. Preflight
+    // must refuse it under the no-clobber code, before any write, rather than
+    // letting `create_dir` collide with the marker and report
+    // `output.not_a_directory` after the marker is already on disk.
+    let scratch = Scratch::new("extract-marker-directory");
+    let destination = scratch.dir("out");
+    let output = extract(&marker_named_directory_package(), &destination, true);
+    assert_eq!(status(&output), 9);
+    let error = diagnostic(&output);
+    assert_eq!(error["code"], "output.exists");
+    assert_eq!(error["category"], "output");
+    assert_eq!(error["entry_index"], 2, "the first entry beneath it");
     assert_eq!(one_object(&output)["cleanup"]["removed"], 0);
     assert_eq!(
         tree(&destination),

@@ -142,17 +142,22 @@ pub fn marker(path: &Path) -> Result<(), Failure> {
 /// it concerns.
 ///
 /// A package may perfectly well declare an entry named
-/// `.openkrx-extract.partial` at its root. The marker is created before the
-/// first file, so such an entry is a clash with this run's own bookkeeping.
-/// It is reported as `output.exists` — the no-clobber code, decided before
-/// anything is written — rather than being left to surface as an `output.io`
-/// failure part-way through, which would say nothing about what happened.
+/// `.openkrx-extract.partial` at its root, or a root *directory* of that name
+/// holding entries beneath it. The marker is created before the first file, so
+/// either is a clash with this run's own bookkeeping. Both are reported as
+/// `output.exists` — the no-clobber code, decided before anything is written —
+/// rather than being left to surface as an `output.io` or
+/// `output.not_a_directory` failure part-way through, which would say nothing
+/// about what happened.
 ///
 /// # Errors
 ///
 /// `output.symlink_in_path`, `output.not_a_directory` or `output.exists`, each
 /// carrying the entry index and no path.
 pub fn plan_paths(destination: &Path, plan: &ExtractionPlan) -> Result<(), Failure> {
+    if let Some(entry) = marker_named_directory(plan) {
+        return Err(Failure::output_at(OUTPUT_EXISTS, entry));
+    }
     for item in plan.items() {
         let entry = item.entry_index();
         let components = item.components();
@@ -171,6 +176,31 @@ pub fn plan_paths(destination: &Path, plan: &ExtractionPlan) -> Result<(), Failu
         absent(&path, entry)?;
     }
     Ok(())
+}
+
+/// The first entry beneath a root directory named like the marker, if any.
+///
+/// The plan's directory list holds every implicit parent, so a package whose
+/// entries live under `.openkrx-extract.partial/` shows up here as a
+/// single-component directory. The refusal is attributed to the first entry
+/// that would be written beneath it, which is the one a caller can look up in
+/// the central directory.
+fn marker_named_directory(plan: &ExtractionPlan) -> Option<u32> {
+    let clashes = plan
+        .directories()
+        .iter()
+        .any(|components| components.len() == 1 && components[0] == MARKER_NAME);
+    if !clashes {
+        return None;
+    }
+    plan.items()
+        .iter()
+        .find(|item| {
+            item.components()
+                .first()
+                .is_some_and(|first| first == MARKER_NAME)
+        })
+        .map(|item| item.entry_index())
 }
 
 /// An ancestor inside the destination: absent, or a real directory.
