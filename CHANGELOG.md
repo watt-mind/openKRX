@@ -75,6 +75,37 @@ and such a change is recorded here explicitly.
   failed and none was left open. There is deliberately no `valid`,
   `conforming` or `is_krx` field anywhere in the API. No CLI command
   exposes any of this either.
+- **The three reader commands (KRX-04).** `openkrx inspect`, `openkrx list`
+  and `openkrx validate-structure` each read one package — a named file, or
+  `-` for standard input, read as binary on every platform — and report what
+  is in it. `list` reports every archive entry in central-directory order
+  with its declared and its decoded size side by side; `inspect` adds the
+  declared metadata document and every structural check; `validate-structure`
+  reports the check inventory outcome by outcome. `--json` writes exactly one
+  object on stdout, `schema_version` 1, and leaves stderr empty on success.
+  Input is bounded before parsing: at most
+  `Limits::DEFAULT.max_archive_bytes + 1` bytes are ever buffered and
+  anything larger is refused with `input.over_limit.archive_bytes`. Eight
+  exit statuses — 0 success, 2 usage, 3 a check failed, 4 a rule could not be
+  decided, 5 input, 6 malformed package, 7 unsupported feature, 8 resource
+  limit — are published in
+  [docs/architecture.md](docs/architecture.md#exit-statuses) and classified in
+  one place. `capabilities` now reports stage `reader` and names exactly
+  these three operations. **No verdict is emitted:** there is no `valid`,
+  `conforming` or `is_krx` field, `verified` stays `false` everywhere, and a
+  summary of `consistent` means only that no check failed and none was left
+  undecided. A diagnostic carries a stable code, a category, an entry index
+  and numbers, and never the input path, an entry name or a metadata value;
+  human output escapes control, invisible and undecodable bytes and cuts a
+  name longer than 200 characters, and each diagnostic line names its status
+  and says what its category means. `openkrx --help` publishes the exit-status
+  table, marking the two statuses that belong to `validate-structure` alone,
+  and states that the envelope's `ok` reports only that a report was produced:
+  it stays `true` when a structural check failed, so a consumer reads
+  `summary`, or the exit status, to act on the checks. Two stable codes,
+  `input.unreadable` and `input.over_limit.archive_bytes`, were added, and
+  `scripts/check-codes.py` now catalogues the `input.*` prefix as well.
+  Nothing is extracted, created, cached, logged or written anywhere.
 - **The documentation set and its maintenance gate.**
   [docs/index.md](docs/index.md) describes every document and carries a
   maintenance map saying which documents each kind of change must update in

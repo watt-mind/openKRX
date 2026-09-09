@@ -2,12 +2,14 @@
 
 ## Current surface
 
-The CLI supports only help, version, and capability reporting. The core
-library additionally implements a bounded ZIP inventory
-(`openkrx_core::archive::inventory`), bounded metadata parsing
-(`openkrx_core::metadata::parse`) and a structural check inventory
-(`openkrx_core::profile::check`) over caller-supplied byte slices; no command
-exposes them. Nothing extracts files, uses keys, or accesses government
+The CLI supports help, version, capability reporting, and the three reader
+commands `inspect`, `list` and `validate-structure`. They render the core
+library's bounded ZIP inventory (`openkrx_core::archive::inventory`), bounded
+metadata parsing (`openkrx_core::metadata::parse`) and structural check
+inventory (`openkrx_core::profile::check`), which still operate on
+caller-supplied byte slices only. Reading the one input a command takes is
+the whole of openKRX's I/O, and it is bounded before parsing begins. Nothing
+extracts files, writes anywhere, uses keys, or accesses government
 services. The requirements below remain implementation gates for package
 support, not claims that a complete secure KRX parser exists. A successful
 inventory, parse or structural report is an observation, never a conformance
@@ -109,6 +111,33 @@ Neither layer is fuzzed yet. The exhaustive truncation sweeps and the
 single-byte mutation sweeps are the compensating checks until a fuzz target
 lands; an `xml_metadata` target belongs in that work alongside the archive
 one.
+
+## Threat-model mapping: command-line input layer
+
+The core crate performs no I/O, so reading the one input a reader command
+takes is the only failure the command-line crate can produce on its own, and
+the only place a private path could be disclosed. Test names in this table
+are in `crates/openkrx-cli/tests/`. The command contract, the data shapes and
+the eight exit statuses are in
+[architecture.md](docs/architecture.md#command-contract-and-json-envelope) and
+[Exit statuses](docs/architecture.md#exit-statuses); the two codes are
+catalogued in [codes.md](docs/codes.md). No extraction, output or writer row
+exists yet; those checks are unimplemented, not passing.
+
+| Required check | Error code prefix | Test |
+| --- | --- | --- |
+| Bounded input before parsing: at most `Limits::DEFAULT.max_archive_bytes + 1` bytes are buffered, and an input reaching that cap is refused before any parsing begins, from a file or from standard input alike | `input.over_limit.archive_bytes`, exit status 5 | `an_input_past_the_cap_is_refused_before_parsing`, `standard_input_past_the_cap_is_refused_too` |
+| An input that cannot be opened or read is a content-free refusal, not a panic and not a path disclosure | `input.unreadable`, exit status 5 | `an_unreadable_input_is_status_five`, `a_directory_named_as_the_input_is_an_input_error_not_a_panic` |
+| Diagnostics never carry the input path, an entry name or a metadata value: on standard error in every case, and on standard output whenever a run failed | every code; the diagnostic carries the code, its category, an entry index and numbers only | `standard_error_never_carries_a_canary_whatever_happened`, `a_failed_run_never_carries_a_canary_on_standard_output_either`, `the_input_path_is_absent_from_a_successful_report_as_well`, `a_declared_value_reaches_standard_output_only_for_inspect` |
+| Attacker-controlled names and values reach a terminal escaped and bounded | not applicable: a rendering rule, not a refusal | `a_name_that_is_not_utf8_is_reported_as_bytes_rather_than_guessed`, `an_invisible_character_in_a_name_never_reaches_the_terminal`, `a_long_name_is_cut_and_the_remainder_is_counted` |
+| A parsing failure keeps its category: the input cap is an input problem, and a package problem stays distinguishable from an unsupported feature and from a resource limit | `archive.*`, `metadata.*`, exit statuses 6, 7 and 8 | `a_malformed_image_is_status_six`, `an_unsupported_feature_is_status_seven`, `an_over_limit_archive_is_status_eight_with_its_numbers`, `every_catalogued_code_classifies_to_a_category` |
+| No implicit execution, nested extraction, or remote access | not applicable: the executable opens the path it was given, reads it, and writes nothing anywhere | reviewed by construction; nothing is logged, cached or persisted |
+
+The file argument is opened exactly as written, with no path normalisation,
+globbing, symlink resolution or extension inference on any platform, and `-`
+reads standard input as binary. Attachments are never decoded, and no
+declared metadata value is printed except by `inspect`, on standard output,
+because that is what it was asked for.
 
 ## Data and key policy
 

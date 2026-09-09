@@ -1,64 +1,127 @@
-//! Executable contract tests use synthetic arguments only.
-use std::process::Command;
+//! The executable's argument surface and its capability report.
+mod support;
 
-fn run(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openkrx"))
-        .args(args)
-        .output()
-        .expect("run bootstrap CLI")
-}
+use support::{one_object, run, status, stderr, stdout};
 
 #[test]
-fn capabilities_are_honest_and_machine_readable() {
+fn capabilities_names_exactly_the_implemented_reader_commands() {
     let output = run(&["capabilities", "--json"]);
-    assert!(output.status.success());
+    assert_eq!(status(&output), 0);
     assert!(output.stderr.is_empty());
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(text.lines().count(), 1);
-    let actual: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
-        actual,
+        one_object(&output),
         serde_json::json!({
-            "schema_version": 1, "ok": true, "command": "capabilities",
-            "data": {"project": "openKRX", "stage": "scaffold", "operations": []},
-            "verified": false
+            "schema_version": 1,
+            "ok": true,
+            "command": "capabilities",
+            "data": {
+                "project": "openKRX",
+                "stage": "reader",
+                "operations": ["inspect", "list", "validate-structure"],
+            },
+            "verified": false,
         })
     );
 }
 
 #[test]
-fn human_status_does_not_promise_processing() {
+fn human_capabilities_state_the_boundary_rather_than_a_verdict() {
     let output = run(&["capabilities"]);
-    assert!(output.status.success());
+    assert_eq!(status(&output), 0);
     assert!(output.stderr.is_empty());
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert!(text.contains("none implemented"));
+    let text = stdout(&output);
+    assert!(text.contains("openKRX: reader"));
+    assert!(text.contains("inspect, list, validate-structure"));
+    assert!(text.contains("not signature verification"));
     assert!(text.contains("Nothing is verified"));
 }
 
 #[test]
-fn help_and_version_are_available() {
-    let help = run(&["--help"]);
-    assert!(help.status.success());
+fn help_lists_every_command_and_the_exit_statuses() {
+    let output = run(&["--help"]);
+    assert_eq!(status(&output), 0);
+    let text = stdout(&output);
+    for command in ["capabilities", "inspect", "list", "validate-structure"] {
+        assert!(text.contains(command), "help must mention {command}");
+    }
+    assert!(text.contains("Exit statuses"));
+}
+
+#[test]
+fn each_command_documents_its_file_argument_and_json_flag() {
+    for command in ["inspect", "list", "validate-structure"] {
+        let output = run(&[command, "--help"]);
+        assert_eq!(status(&output), 0);
+        let text = stdout(&output);
+        assert!(text.contains("FILE"), "{command} help names its argument");
+        assert!(text.contains("--json"), "{command} help offers --json");
+        assert!(
+            text.contains("standard input"),
+            "{command} help explains `-`"
+        );
+    }
+}
+
+#[test]
+fn the_help_says_which_statuses_belong_to_which_command() {
+    // A blanket "3 means a check failed" would be read as true of `inspect`
+    // too, and a reader checking `$?` after `inspect` would take a broken
+    // package for a clean one.
+    let top = stdout(&run(&["--help"]));
+    assert!(top.contains("validate-structure only: a structural check failed"));
+    assert!(top.contains("validate-structure only: nothing failed"));
+    assert!(top.contains("inspect and list exit 0 whenever they produce"));
     assert!(
-        String::from_utf8(help.stdout)
-            .unwrap()
-            .contains("capabilities")
+        top.contains("`ok` says only that the command produced a report"),
+        "the envelope's `ok` field is explained where it can be misread"
     );
-    let version = run(&["--version"]);
-    assert!(version.status.success());
+
+    let inspect = stdout(&run(&["inspect", "--help"]));
+    assert!(inspect.contains("exits 0 whenever it produces its report"));
+    assert!(inspect.contains("the check table it prints"));
+    assert!(
+        inspect.contains("Use\nvalidate-structure") || inspect.contains("Use validate-structure")
+    );
+
+    // `list` runs no structural check, so its note must not claim a failed
+    // check is somewhere in its report: the report is the entry listing.
+    let list = stdout(&run(&["list", "--help"]));
+    assert!(list.contains("runs no structural check"));
+    assert!(list.contains("Use inspect to see the checks"));
+    assert!(
+        !list.contains("the outcome is in the report"),
+        "list must not describe a check outcome it never prints"
+    );
+
+    let validate = stdout(&run(&["validate-structure", "--help"]));
+    assert!(validate.contains("3 when a check failed"));
+    assert!(validate.contains("stays true when a check failed"));
+}
+
+#[test]
+fn version_is_the_package_version() {
+    let output = run(&["--version"]);
+    assert_eq!(status(&output), 0);
     assert_eq!(
-        String::from_utf8(version.stdout).unwrap().trim(),
+        stdout(&output).trim(),
         concat!("openkrx ", env!("CARGO_PKG_VERSION"))
     );
 }
 
 #[test]
-fn missing_or_unimplemented_commands_fail() {
-    for args in [&[][..], &["create"][..], &["capabilities", "--unknown"][..]] {
+fn argument_errors_exit_with_the_usage_status() {
+    let cases: [&[&str]; 6] = [
+        &[],
+        &["extract"],
+        &["capabilities", "--unknown"],
+        &["inspect"],
+        &["list", "--json"],
+        &["validate-structure", "a", "b"],
+    ];
+    for args in cases {
         let output = run(args);
-        assert_eq!(output.status.code(), Some(2));
-        assert!(output.stdout.is_empty());
-        assert!(!output.stderr.is_empty());
+        assert_eq!(status(&output), 2, "usage status for {args:?}");
+        assert!(output.stdout.is_empty(), "no report for {args:?}");
+        assert!(!stderr(&output).is_empty(), "a message for {args:?}");
     }
 }

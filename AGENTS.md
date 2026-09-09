@@ -2,10 +2,13 @@
 
 Read [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 [SECURITY.md](SECURITY.md), and [docs/architecture.md](docs/architecture.md)
-before changing code. The CLI offers only help, version, and capabilities;
-the core crate additionally implements a bounded archive inventory, bounded
-metadata parsing and a structural check inventory, none of which any command
-exposes. Never describe planned operations as implemented.
+before changing code. The CLI offers help, version, capabilities, and the
+three reader commands `inspect`, `list` and `validate-structure`, which render
+the core crate's bounded archive inventory, bounded metadata parsing and
+structural check inventory over one bounded input. Nothing extracts a file,
+creates a package, or writes anywhere, and structural validation is not
+signature verification: openKRX performs no cryptography, so no output means
+that anything was verified. Never describe planned operations as implemented.
 
 ## Scope and ownership
 
@@ -89,10 +92,11 @@ afterwards. The full table is the maintenance map in
 | The release process | `docs/releasing.md`, `CHANGELOG.md` |
 
 `scripts/check-codes.py` enforces the code row automatically: it extracts
-every `archive.*` and `metadata.*` literal from `crates/*/src/**` and fails
-when one is missing from `docs/codes.md`, or when that document lists a code
-no source defines. It runs inside `bash scripts/check.sh`. The other rows
-are a review obligation, and a missing update is an incomplete change.
+every `archive.*`, `metadata.*` and `input.*` literal from `crates/*/src/**`
+and fails when one is missing from `docs/codes.md`, or when that document
+lists a code no source defines. It runs inside `bash scripts/check.sh`. The
+other rows are a review obligation, and a missing update is an incomplete
+change.
 
 Every behaviour-changing PR adds an entry under `[Unreleased]` in
 `CHANGELOG.md`. Never write "valid KRX", "conforming" or an equivalent as a

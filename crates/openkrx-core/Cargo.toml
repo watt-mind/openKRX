@@ -11,7 +11,17 @@ description = "openKRX capability model (development scaffold)"
 [lints]
 workspace = true
 
+[features]
+# Test-only synthetic ZIP and metadata writers, used by this crate's own tests
+# and by the command-line crate's subprocess tests. Never enabled by a binary.
+synthetic-writer = []
+
 [dependencies]
 miniz_oxide.workspace = true
 quick-xml.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+# The crate's own integration tests build synthetic archives with the
+# test-only writer, which no default build compiles.
+openkrx-core = { path = ".", features = ["synthetic-writer"] }

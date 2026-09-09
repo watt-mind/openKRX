@@ -11,12 +11,11 @@ package, and no output may claim anything cryptographic at all.
 
 ## Not yet implemented
 
-Three library layers exist and no command exposes them, so
-`capabilities().operations` is empty and the executable performs no package
-operation whatsoever. The authoritative, code-level version of this list is
+The three reader commands expose the three library layers, so
+`capabilities().operations` names them. Reading is the only package operation
+that exists. The authoritative, code-level version of this list is
 [architecture.md](architecture.md#not-yet-implemented).
 
-- Every reader command: `inspect`, `list`, `validate-structure`.
 - Extraction of any kind, and with it every filesystem control the security
   policy requires: no-clobber publication, path sanitisation, symlink and
   reparse-point defence, and interrupted-write cleanup.
@@ -28,9 +27,8 @@ operation whatsoever. The authoritative, code-level version of this list is
   than stored and deflate. These are refused with stable codes, not
   deferred.
 - Fuzz targets for either parser.
-- A CLI agent skill. It is deferred deliberately: a skill describes a
-  workflow, and there is no user-completable workflow to describe until a
-  reader command ships. It belongs with KRX-04.
+- A CLI agent skill. Now that a reader command ships there is a workflow to
+  describe, and it is a separate change rather than part of KRX-04.
 - Configurable limits from the command line. `Limits` and `MetadataLimits`
   are library values a Rust caller can tighten; nothing on the command line
   reaches them.
@@ -48,13 +46,13 @@ criteria and verification.
 | [KRX-01: establish the first profile](work-packages.md#krx-01-establish-the-first-profile) | **Done** | [profile.md](profile.md): rules A1 to A22 and M1 to M15 with section-level citations, an evidence class per rule, the unresolved list, and recorded redistribution terms. |
 | [KRX-02: bounded archive inventory](work-packages.md#krx-02-bounded-archive-inventory) | **Done** | `openkrx_core::archive::inventory`: a bounded, profile-agnostic ZIP reader with published limits, exact byte coverage, ambiguity refusal and 43 stable codes. No CLI exposure. |
 | [KRX-03: metadata and structural validation](work-packages.md#krx-03-metadata-and-structural-validation) | **Done** | `openkrx_core::metadata::parse` and `openkrx_core::profile::check`: bounded `KER_META_V0_9`-shaped parsing and the eleven-check structural inventory, with each unresolved rule reported as `Unresolved(rule)`. No verdict, no CLI exposure. |
-| [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | Planned | `inspect`, `list` and `validate-structure` over the existing layers, with stable exit statuses and a one-object JSON contract. The first milestone that makes any of this usable without writing Rust. |
+| [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | **Done** | `inspect`, `list` and `validate-structure` over the existing layers, with bounded input, eight stable exit statuses, a one-object JSON contract and content-free diagnostics. The first milestone that makes any of this usable without writing Rust. |
 | [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | Planned | `extract`, planned before any write, with the full filesystem threat model held by tests on every supported OS. |
 | [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | Planned, and blocked on evidence | `create`. Cannot be built while the container layout is unresolved: see [Known gaps](conformance.md#known-gaps). |
 | [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |
 
-KRX-04 is next, and it is the only planned milestone that needs no new
-format evidence: it renders layers that already exist. KRX-06 is the one
+KRX-05 is next: it is the first milestone that writes to a filesystem, so
+the whole extraction threat model becomes live with it. KRX-06 is the one
 that cannot start, whatever the engineering appetite, until a citable source
 or an authoritative statement settles the layout.
 
@@ -74,7 +72,10 @@ Unordered, and independent of the milestone sequence.
 - **A compatibility-report format**, so that a strictness rule can be
   discussed against a specific producer rather than in the abstract. See
   [testing.md](testing.md#compatibility-testing-later).
-- **Command-line limit overrides**, once a command exists that reads bytes.
+- **Command-line limit overrides.** The reader commands enforce
+  `Limits::DEFAULT` and `MetadataLimits::DEFAULT` with no flag reaching
+  them, so a package above a ceiling is refused with an over-limit code and
+  no way to reconsider it from the command line.
 - **Benchmarks** for the inventory's peak memory and throughput, to hold the
   streaming claims in
   [architecture.md](architecture.md#peak-memory-and-streaming) as measured
@@ -109,9 +110,16 @@ Stated plainly, because the tests that would remove them do not exist yet.
   format description implies, not from a corpus. A real package larger than
   a ceiling would be refused as over-limit, correctly by the contract and
   unhelpfully in practice, until the ceiling is revisited with evidence.
-- **No filesystem code exists, so none of its risks are mitigated — they are
-  absent.** The moment KRX-05 starts, the whole extraction threat model in
-  [SECURITY.md](../SECURITY.md) becomes live at once.
+- **No filesystem code exists beyond reading one input, so none of the
+  extraction risks are mitigated — they are absent.** The reader opens the
+  path it was given and writes nothing anywhere. The moment KRX-05 starts,
+  the whole extraction threat model in [SECURITY.md](../SECURITY.md) becomes
+  live at once.
+- **The exit-status classifier keys on a code's category segment.** The core
+  error enums are `#[non_exhaustive]`, so a new code cannot be made to fail
+  compilation in the command-line crate. A test over
+  [codes.md](codes.md) closes that gap only as far as the catalogue is
+  complete, which `scripts/check-codes.py` enforces.
 
 ## Private-corpus policy for maintainers
 

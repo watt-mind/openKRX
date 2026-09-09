@@ -20,3 +20,9 @@ openkrx-core = { path = "../openkrx-core" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+# The subprocess tests build every package they read from the core crate's
+# test-only writer. No binary fixture is committed and no released build
+# enables that feature.
+openkrx-core = { path = "../openkrx-core", features = ["synthetic-writer"] }
