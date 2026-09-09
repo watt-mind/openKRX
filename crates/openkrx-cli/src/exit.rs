@@ -140,6 +140,13 @@ limit allows; the limits are not configurable from the command line"
     }
 }
 
+/// What a diagnostic says when the code's category segment is unknown.
+///
+/// The fallback category is [`Category::Package`], which is the fail-safe
+/// reading — never a success — but its explanation would describe a damaged
+/// package, which an unclassified code is no evidence of.
+const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this build does not classify; see docs/codes.md for what it means";
+
 /// A run that ended before a report could be produced.
 ///
 /// The fields are exactly what a diagnostic may carry: a stable code, its
@@ -157,17 +164,25 @@ pub struct Failure {
     pub limit: Option<u64>,
     /// The value that reached the ceiling, when it is known.
     pub observed: Option<u64>,
+    /// Whether the code's category segment is one this build knows.
+    ///
+    /// An unclassified code still fails, as [`Category::Package`], because a
+    /// code openKRX cannot read must never become a success. The flag only
+    /// keeps the human explanation honest about which of the two happened.
+    pub classified: bool,
 }
 
 impl Failure {
     /// Classify `code`, treating an unknown shape as a package problem.
     fn new(code: &'static str) -> Self {
+        let category = Category::of_code(code);
         Self {
             code,
-            category: Category::of_code(code).unwrap_or(Category::Package),
+            category: category.unwrap_or(Category::Package),
             entry_index: None,
             limit: None,
             observed: None,
+            classified: category.is_some(),
         }
     }
 
@@ -210,10 +225,14 @@ impl Failure {
     /// input, so it stays safe to log.
     #[must_use]
     pub fn line(&self) -> String {
+        let explanation = if self.classified {
+            self.category.explanation()
+        } else {
+            UNCLASSIFIED_EXPLANATION
+        };
         format!(
-            "openkrx: {} — {} (exit {})",
+            "openkrx: {} — {explanation} (exit {})",
             self.message(),
-            self.category.explanation(),
             self.category.status()
         )
     }
@@ -405,12 +424,14 @@ mod tests {
 
     /// Whether a backticked span of the catalogue is a code rather than prose.
     ///
-    /// The document also writes `archive.*` and `metadata.` in running text,
-    /// so a span counts only when it is a full dotted code: two or more
-    /// segments of lower-case letters, digits and underscores.
+    /// The heads are the three `scripts/check-codes.py` extracts, so the test
+    /// covers exactly the codes that checker forces into the catalogue. The
+    /// document also writes `archive.*` and `metadata.` in running text, so a
+    /// span counts only when it is a full dotted code: two or more segments of
+    /// lower-case letters, digits and underscores.
     fn code_shaped(piece: &str) -> bool {
         let mut segments = piece.split('.');
-        if !matches!(segments.next(), Some("archive" | "metadata")) {
+        if !matches!(segments.next(), Some("archive" | "input" | "metadata")) {
             return false;
         }
         let rest: Vec<&str> = segments.collect();
@@ -426,6 +447,7 @@ mod tests {
     #[test]
     fn every_catalogued_code_classifies_to_a_category() {
         let mut seen = 0_usize;
+        let mut inputs: Vec<&str> = Vec::new();
         for line in CATALOGUE.lines() {
             for piece in line.split('`').skip(1).step_by(2) {
                 if !code_shaped(piece) {
@@ -437,9 +459,39 @@ mod tests {
                     "docs/codes.md lists {piece}, which this build cannot \
 classify; add its category segment to Category::of_code"
                 );
+                if piece.starts_with("input.") && !inputs.contains(&piece) {
+                    inputs.push(piece);
+                }
             }
         }
         assert!(seen > 60, "the catalogue was read, {seen} codes found");
+        inputs.sort_unstable();
+        assert_eq!(
+            inputs,
+            ["input.over_limit.archive_bytes", "input.unreadable"],
+            "the input codes are read by this test, not skipped as prose"
+        );
+    }
+
+    #[test]
+    fn an_unclassified_code_still_fails_but_is_not_called_damage() {
+        // Reached only if a code outside the catalogue ever escapes; the
+        // status must stay a failure, and the sentence must not claim the
+        // package was truncated, which nothing here establishes.
+        let failure = Failure::new("archive");
+        assert_eq!(failure.category, Category::Package);
+        assert_eq!(failure.category.status(), 6);
+        assert!(!failure.classified);
+        let line = failure.line();
+        assert!(line.contains("does not classify"));
+        assert!(!line.contains("truncated in transit"));
+
+        let known = Failure::from(ArchiveError::Malformed {
+            kind: MalformedKind::CrcMismatch,
+            entry: None,
+        });
+        assert!(known.classified);
+        assert!(known.line().contains("truncated in transit"));
     }
 
     #[test]

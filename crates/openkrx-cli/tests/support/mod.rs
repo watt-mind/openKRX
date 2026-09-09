@@ -9,6 +9,14 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Distinguishes two scratch directories created in the same process.
+///
+/// A timestamp is not enough on its own: Windows' `FILETIME` has 100 ns
+/// resolution, so two threads asking for the time inside the same tick get
+/// the same number, and two test binaries use the same labels.
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 use openkrx_core::synthetic::meta::{Attachment, Document, MARKER_CONTENT, METADATA_FILE, krx};
 use openkrx_core::synthetic::{Archive, Entry};
@@ -85,14 +93,25 @@ pub struct Scratch {
 
 impl Scratch {
     /// Create a uniquely named directory under the platform temporary root.
+    ///
+    /// The name carries the process id and a per-process counter as well as a
+    /// timestamp, because the labels are command names and several test
+    /// binaries run in parallel: on Windows the clock's 100 ns resolution lets
+    /// two of them read the same nanosecond, and two tests sharing a directory
+    /// would delete each other's package when the first one finished.
+    /// `create_dir` rather than `create_dir_all` makes any remaining collision
+    /// a loud failure instead of a silently shared directory.
     #[must_use]
     pub fn new(label: &str) -> Self {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("a clock after 1970")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("openkrx-{label}-{unique}"));
-        std::fs::create_dir_all(&path).expect("create the scratch directory");
+        let process = std::process::id();
+        let sequence = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("openkrx-{label}-{process}-{sequence}-{unique}"));
+        std::fs::create_dir(&path).expect("create a scratch directory of this test's own");
         Self { path }
     }
 
