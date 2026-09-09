@@ -220,6 +220,9 @@ and such a change is recorded here explicitly.
   [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer)
   record all three decisions. Nothing writes: the planner is still a pure
   function no command reaches.
+- `miniz_oxide` moved from 0.8.9 to 0.9.1, with the root `Cargo.lock` and
+  `fuzz/Cargo.lock` refreshed together so both resolve the same version;
+  the inflate API in use, the licence and the MSRV are unchanged.
 
 ### Removed
 
