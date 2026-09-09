@@ -166,6 +166,23 @@ fn a_missing_required_header_element_is_reported_with_its_field() {
 }
 
 #[test]
+fn a_repeated_attachment_list_in_one_dispatch_is_refused() {
+    // M7: two MELLEKLETEK lists under one EXPEDIALAS are a repeated element,
+    // like every sibling field, and never two halves of one list.
+    let xml = Document::default().xml();
+    let start = xml
+        .find("<ns2:MELLEKLETEK>")
+        .expect("the synthetic document lists attachments");
+    let end = xml.find("</ns2:MELLEKLETEK>").expect("the list closes") + "</ns2:MELLEKLETEK>".len();
+    let list = &xml[start..end];
+    let repeated = xml.replace(list, &format!("{list}{list}"));
+    let error = metadata::parse(repeated.as_bytes(), &MetadataLimits::DEFAULT)
+        .expect_err("document should be refused");
+    assert_eq!(error.code(), "metadata.malformed.duplicate_element");
+    assert_eq!(error.field(), Some(MetadataField::Mellekletek));
+}
+
+#[test]
 fn a_document_without_a_header_at_all_is_refused() {
     let xml = format!(
         "<KULDEMENY xmlns=\"{}\"></KULDEMENY>",
@@ -349,6 +366,46 @@ fn the_text_limit_holds_at_its_boundary() {
 }
 
 #[test]
+fn a_text_event_is_measured_raw_before_it_is_materialised() {
+    // Each CRLF pair becomes one line feed, so the raw event is longer than
+    // the value it produces. The raw length is what has to fit the headroom,
+    // which is what bounds the allocation for one event.
+    let lines = 512;
+    let document = Document {
+        consignment_id: Some("A\r\n".repeat(lines)),
+        ..Document::default()
+    }
+    .bytes();
+    let raw = count_text_bytes(&document);
+    let materialised = raw - lines as u64;
+    let mut limits = MetadataLimits::DEFAULT;
+    limits.max_text_bytes = materialised;
+    assert_eq!(
+        code_with(&document, &limits),
+        "metadata.over_limit.text_bytes"
+    );
+    limits.max_text_bytes = raw;
+    assert!(accepted_with(&document, &limits));
+}
+
+#[test]
+fn an_attribute_value_is_charged_against_the_text_limit() {
+    let value = "v".repeat(256);
+    let xml = Document::default()
+        .xml()
+        .replace("<ns2:FEJRESZ>", &format!("<ns2:FEJRESZ a=\"{value}\">"));
+    let charged = count_text_bytes(xml.as_bytes());
+    let mut limits = MetadataLimits::DEFAULT;
+    limits.max_text_bytes = charged;
+    assert!(accepted_with(xml.as_bytes(), &limits));
+    limits.max_text_bytes = charged - 1;
+    assert_eq!(
+        code_with(xml.as_bytes(), &limits),
+        "metadata.over_limit.text_bytes"
+    );
+}
+
+#[test]
 fn a_deeply_nested_unknown_subtree_still_meets_the_depth_limit() {
     let nesting = 40;
     let body = format!(
@@ -454,17 +511,40 @@ fn count_elements(document: &[u8]) -> u32 {
     .expect("test document is small")
 }
 
-/// Count character data between tags, independently of the crate under test.
+/// Count charged character data, independently of the crate under test.
+///
+/// That is the text between tags plus every attribute value of a start tag,
+/// counted raw: both are charged against `max_text_bytes`.
 fn count_text_bytes(document: &[u8]) -> u64 {
     let text = core::str::from_utf8(document).expect("synthetic document is UTF-8");
     let mut total = 0_u64;
-    let mut inside = false;
-    for character in text.chars() {
-        match character {
-            '<' => inside = true,
-            '>' => inside = false,
-            _ if !inside => total += character.len_utf8() as u64,
-            _ => {}
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        total += open as u64;
+        let close = open + rest[open..].find('>').expect("every tag closes");
+        let tag = &rest[open..=close];
+        if !tag.starts_with("<?") && !tag.starts_with("<!") && !tag.starts_with("</") {
+            total += count_attribute_bytes(tag);
+        }
+        rest = &rest[close + 1..];
+    }
+    total + rest.len() as u64
+}
+
+/// Count the bytes inside the quoted attribute values of one start tag.
+fn count_attribute_bytes(tag: &str) -> u64 {
+    let mut total = 0_u64;
+    let mut opened: Option<usize> = None;
+    for (index, character) in tag.char_indices() {
+        if character != '"' {
+            continue;
+        }
+        match opened {
+            Some(start) => {
+                total += (index - start) as u64;
+                opened = None;
+            }
+            None => opened = Some(index + 1),
         }
     }
     total

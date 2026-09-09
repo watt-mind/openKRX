@@ -34,6 +34,10 @@ pub struct MetadataLimits {
     /// Largest accepted number of attributes on one element.
     pub max_attributes_per_element: u32,
     /// Largest accepted total of character data, in bytes, across the document.
+    ///
+    /// Attribute values are charged against it too, and each event's raw
+    /// length is checked against the remaining headroom before the event is
+    /// unescaped, so one event can never allocate more than this bound.
     pub max_text_bytes: u64,
 }
 
