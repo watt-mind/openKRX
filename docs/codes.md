@@ -11,7 +11,7 @@ enum is `#[non_exhaustive]`; a consumer matches on the code string and must
 treat an unknown code as a failure rather than as a success.
 
 `scripts/check-codes.py` keeps this catalogue honest. It extracts every
-`"archive.…"`, `"input.…"` and `"metadata.…"` string literal from
+`"archive.…"`, `"extract.…"`, `"input.…"` and `"metadata.…"` string literal from
 `crates/*/src/**` and fails when a code exists in the sources but not here,
 or here but not in the sources. It runs as part of `bash scripts/check.sh`.
 
@@ -25,7 +25,10 @@ Each code also classifies to one exit status, listed in
 `archive.no_such_entry` to 6, `*.unsupported.*` to 7, and `*.over_limit.*` to
 8 — except `input.over_limit.archive_bytes`, which is an input problem because
 nothing was parsed at all. A structural-check code is never an exit status of
-its own: `validate-structure` reports 3 when any check failed.
+its own: `validate-structure` reports 3 when any check failed. The
+`extract.*` codes have no exit status yet: no command reaches them, because
+the extraction planner is a library function and the `extract` command does
+not exist.
 
 ## Reading a diagnostic
 
@@ -240,6 +243,76 @@ them carries a numeric field. Tests are in `profile_structure.rs`.
 | `metadata.reference.missing_entry` | Reference | A declared attachment names no entry, with or without a plausible root prefix (M5, M10). | `a_reference_to_a_missing_entry_fails` |
 | `metadata.reference.duplicate` | Reference | Two references share an attachment number, or a joined declared path (A6). | `two_references_sharing_an_attachment_number_fail` |
 | `metadata.count_mismatch` | Count | `MELLEKLETEK_SZAMA` disagrees with the number of listed references (M7). | `a_declared_count_disagreeing_with_the_list_fails` |
+
+## Extraction planning codes
+
+`PlanError`, defined in `crates/openkrx-core/src/extract/error.rs`. These are
+the codes `openkrx_core::extract::plan` produces when an inventory cannot be
+turned into an extraction plan. Every one of them rejects the **whole** plan:
+nothing is skipped, renamed or partially planned, because a caller handed a
+quietly reduced plan would extract a package that is not the package it was
+given. Fields: `entry`, always present except on the two whole-plan limits,
+plus `limit_value` and `observed` on a limit.
+
+No code here describes writing, because nothing writes: planning is a pure
+function of the inventory and touches no filesystem. The filesystem half of
+KRX-05 — a destination, no-clobber creation, cleanup after an interrupted
+write — is a later ticket and will add codes of its own.
+
+Tests are in `crates/openkrx-core/tests/extract_rejects.rs`, except the two
+classes an accepted inventory can no longer carry, whose tests are the
+`#[cfg(test)]` module in `crates/openkrx-core/src/extract/paths.rs`.
+
+### `extract.unsupported.*`
+
+An entry this crate refuses to plan output for.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `extract.unsupported.link` | The entry declares a symbolic link (Unix `S_IFLNK`). No link is created, and its target text is not written as a file either. | `a_symlink_entry_rejects_the_whole_plan` |
+| `extract.unsupported.special_file` | The entry declares a Unix mode that is neither a regular file, a directory nor a link: a device node, socket or FIFO, or a mode stating no file type at all. | `a_special_file_entry_rejects_the_whole_plan` |
+| `extract.unsupported.non_utf8_name` | The entry name is not valid UTF-8. Rule A21 leaves the intended encoding unresolved, so no code page is guessed and no destination is invented. | `a_name_that_is_not_utf8_is_refused_rather_than_decoded` |
+
+### `extract.unsafe_path.*`
+
+A destination path component that must never reach a filesystem layer. The
+component itself is never reported. The classes are checked in the order
+below, so a component violating two of them always reports the first.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `extract.unsafe_path.empty_component` | A component is empty, as in `a//b`. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.current_component` | A component is `.`. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.parent_component` | A component is `..`. The archive layer already refuses such a name as `archive.unsafe_name.parent_component`, so this is defence in depth over the planner's own output. | `every_unsafe_component_class_is_refused` |
+| `extract.unsafe_path.control_character` | A component holds a NUL, another C0 control, or a C1 control character. The C0 half is already refused by the archive layer; the C1 half is not, because those bytes are valid UTF-8 name bytes. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.trailing_dot` | A component ends with `.`, which Windows silently strips, so two entries could become one file. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.trailing_space` | A component ends with a space, stripped the same way. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.reserved_device_name` | A component is a Windows reserved device name — `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` — with or without an extension, compared ASCII case-insensitively. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.colon` | A component holds `:`, which names an alternate data stream on NTFS. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+
+### `extract.ambiguous.*`
+
+Two planned outputs that cannot both exist; refused, never resolved by
+renaming or skipping. The reported `entry` is the later of the two.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `extract.ambiguous.collision` | Two destination paths are equal after NFC normalisation and simple case folding, so a normalising or case-insensitive filesystem would see one path written twice. | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision` |
+| `extract.ambiguous.file_directory_conflict` | One entry's destination path is a directory prefix of another's, so one name would have to be a file and a directory at once. | `a_file_that_is_also_a_directory_prefix_is_refused` |
+
+### `extract.over_limit.*`
+
+A documented extraction ceiling was exceeded. Fields: `limit_value`,
+`observed` where meaningful, and `entry`. The defaults are in
+[architecture.md](architecture.md#extraction-planning-limits).
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `extract.over_limit.files` | More files would be created than `max_files`. Directory markers do not count: they produce no file. | `the_file_count_limit_holds_at_its_boundary` |
+| `extract.over_limit.total_bytes` | The decoded bytes of all planned files together exceed `max_total_bytes`, summed with checked arithmetic. | `the_total_size_limit_holds_at_its_boundary` |
+| `extract.over_limit.path_bytes` | One destination path is longer than `max_path_bytes`, separators included. | `the_path_length_limit_holds_at_its_boundary` |
+| `extract.over_limit.component_bytes` | One path component is longer than `max_component_bytes`. | `the_component_length_limit_holds_at_its_boundary` |
+| `extract.over_limit.depth` | A destination path has more components than `max_depth`. | `the_depth_limit_holds_at_its_boundary` |
 
 ## What is deliberately absent
 

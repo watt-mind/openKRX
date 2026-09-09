@@ -20,6 +20,7 @@ synthetic-writer = []
 miniz_oxide.workspace = true
 quick-xml.workspace = true
 serde.workspace = true
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 # The crate's own integration tests build synthetic archives with the

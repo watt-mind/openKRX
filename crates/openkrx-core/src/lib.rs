@@ -20,6 +20,7 @@ use serde::Serialize;
 
 pub mod archive;
 mod error;
+pub mod extract;
 mod limits;
 pub mod metadata;
 pub mod profile;
@@ -30,6 +31,7 @@ pub use error::{
     AmbiguityKind, ArchiveError, LimitKind, MalformedKind, Structure, UnsafeNameKind,
     UnsupportedKind,
 };
+pub use extract::{ExtractLimits, ExtractionPlan, PlanError, PlanItem};
 pub use limits::Limits;
 pub use metadata::{MetadataError, MetadataLimits};
 pub use profile::{ProfileError, StructureReport, StructureSummary};

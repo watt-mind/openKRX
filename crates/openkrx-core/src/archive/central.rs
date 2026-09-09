@@ -46,6 +46,10 @@ pub(crate) struct CentralRecord<'a> {
     pub(crate) uncompressed_size: u64,
     /// Offset of the matching local file header.
     pub(crate) local_offset: u64,
+    /// `version made by`: the high byte names the host system.
+    pub(crate) version_made_by: u16,
+    /// `external file attributes`, interpreted per host system.
+    pub(crate) external_attributes: u32,
 }
 
 impl CentralRecord<'_> {
@@ -101,7 +105,7 @@ fn parse_one<'a>(
     image_bytes: usize,
 ) -> Result<CentralRecord<'a>, ArchiveError> {
     cursor.signature(CENTRAL_SIGNATURE)?;
-    let _version_made_by = cursor.u16()?;
+    let version_made_by = cursor.u16()?;
     let _version_needed = cursor.u16()?;
     let flags = cursor.u16()?;
     let method = cursor.u16()?;
@@ -115,7 +119,7 @@ fn parse_one<'a>(
     let comment_bytes = cursor.u16()?;
     let disk = cursor.u16()?;
     let _internal_attributes = cursor.u16()?;
-    let _external_attributes = cursor.u32()?;
+    let external_attributes = cursor.u32()?;
     let local_offset = cursor.u32()?;
 
     check_flags(flags, index)?;
@@ -172,6 +176,8 @@ fn parse_one<'a>(
         compressed_size: u64::from(compressed_size),
         uncompressed_size: u64::from(uncompressed_size),
         local_offset: u64::from(local_offset),
+        version_made_by,
+        external_attributes,
     })
 }
 

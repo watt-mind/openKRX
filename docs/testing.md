@@ -9,14 +9,21 @@ rules for fixtures and for any private corpus.
 
 Almost every test is an integration test, because the contract worth testing
 is the public one: a byte slice goes in, a typed value or a stable code comes
-out. The exceptions are the doctests in the public API documentation and two
+out. The exceptions are the doctests in the public API documentation and four
 `#[cfg(test)]` modules. The one in
 `crates/openkrx-core/src/archive/inflate.rs` pins the CRC-32 implementation
 against its published check value, the empty input, and chunk ordering — an
-internal helper with no public surface to exercise it through. The one in
-`crates/openkrx-cli/src/exit.rs` holds one test per exit-status category and
-reads every code out of `docs/codes.md` to assert that each classifies: a
-subprocess can reach only the codes an archive can be built to produce, and
+internal helper with no public surface to exercise it through. The ones in
+`crates/openkrx-core/src/archive/kind.rs`,
+`crates/openkrx-core/src/extract/paths.rs` and
+`crates/openkrx-core/src/extract/collisions.rs` cover the host-system kind
+mapping, the path-component classes and the path folding directly: two
+component classes — `..` and a C0 control — are already impossible in an
+accepted inventory, so the only way to hold the planner's own defence in
+depth is to call it. The one in `crates/openkrx-cli/src/exit.rs` holds one
+test per exit-status category and reads every code out of `docs/codes.md` to
+assert that each classifies: a subprocess can reach only the codes an
+archive can be built to produce, and
 the contract covers every code the crates define.
 
 | File | Covers |
@@ -24,6 +31,8 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/archive_inventory.rs` | Archives the inventory accepts and the observations it reports: central-directory ordering, declared metadata beside counted decoded size, the UTF-8 flag reported independently of whether the name decodes, empty and zero-length and directory entries, `entry_bytes` re-decoding one entry, data descriptors with and without their signature, tolerated comments and extra fields, that `Limits::DEFAULT` is the documented table, and that `Display` prints codes and numbers but never an entry name. |
 | `crates/openkrx-core/tests/archive_rejects_structure.rs` | Archives that contradict themselves: a missing, duplicated or displaced end record, a wrong declared record count, a missing signature, local headers and data descriptors disagreeing with their record, prefix, trailing, unclaimed and overlapping bytes, CRC and declared-size mismatches, corrupt and truncated deflate streams, ZIP64 markers and multi-disk end records. Holds the truncation sweep and the single-byte mutation sweep. |
 | `crates/openkrx-core/tests/archive_rejects_input.rs` | Input the limits and name rules refuse: every limit at its boundary (below, at, above), deflate bombs stopped by the ratio, per-entry and total ceilings, the ratio grace window, every unsafe-name class, byte-identical and case-folded name collisions, unsupported methods, encryption and patched-data flags, ZIP64 records, and a record on another disk. |
+| `crates/openkrx-core/tests/extract_plan.rs` | Plans the extraction planner produces: a KRX-shaped package planned in inventory order, declared beside counted sizes, directory markers producing no item while their children produce deduplicated sorted parent directories, an empty directory never materialised, a plan free of separators and roots, determinism over one inventory, every `EntryKind` read from the central-directory fields, that `ExtractLimits::DEFAULT` is the documented table, and the fixture and name-mutation sweeps that hold "no panic on any input". |
+| `crates/openkrx-core/tests/extract_rejects.rs` | Everything the planner refuses, each by its stable code: symlink and special-file entries, a name that is not UTF-8, every unsafe component class an archive can carry, NFC and case collisions, a file that is also a directory prefix, every extraction limit at its boundary, and the content-free `Display` assertion. |
 | `crates/openkrx-core/tests/metadata_parse.rs` | Documents the parser accepts and the facts it reports: prefixed and default namespace bindings, every enumeration token the schema lists, optional header and attachment elements present and absent, the joined attachment path and its edge cases, and the values the sources leave open — an absent `TESZT`, an absent `MELLEKLET_LEIRASA`, a non-numeric or infinite `MERET` — which are recorded rather than rejected. Also pins `MetadataLimits::DEFAULT` and the target-namespace constant. |
 | `crates/openkrx-core/tests/metadata_rejects.rs` | Every refused XML feature (DTD, undeclared entity, forbidden character reference, stray processing instruction, non-UTF-8 declaration and non-UTF-8 bytes, unbound prefix, repeated attribute), every grammar violation (wrong root, wrong namespace, missing, repeated and misordered elements, unexpected child, enumeration, integer and boolean values), and every metadata limit at its boundary. Holds its own truncation and mutation sweeps, and the content-free `Display` assertion. |
 | `crates/openkrx-core/tests/profile_structure.rs` | The check inventory over synthetic KRX-shaped archives: the canonical layout, all three observed root prefixes, both metadata file-name spellings, a lower-case `Metalayer`, missing and ambiguous metadata, a missing, misplaced, mismatched and prefixed marker, a deflated marker producing no finding, missing, prefix-variant and duplicate references, a shared file name in different payload directories, count agreement and its absence, an omitted schema-required element, a document that does not parse, caller-tightened limits, and that every check is reported exactly once in the documented order. |
@@ -49,8 +58,10 @@ platform-specific assumptions — no shell, no Unix path shape, no text-mode
 standard input — because CI runs the same tests on Linux, macOS and Windows,
 which is the only check on the platform-specific parts of input handling.
 
-What the suite does **not** provide evidence about: extraction, which does
-not exist; conformance, which cannot be claimed while
+What the suite does **not** provide evidence about: extraction output, which
+does not exist — the planner is covered above, but nothing writes, so no
+test can hold a no-clobber rule, a destination boundary or a cleanup policy;
+conformance, which cannot be claimed while
 [profile.md](profile.md#unresolved-essential-rules) lists unresolved rules;
 and agreement with a real service, for which no sample or reference
 implementation exists.
