@@ -1,9 +1,10 @@
 name: Mutation testing
 
 # Deliberately NOT a required check, and deliberately not on pull requests.
-# A full workspace run rebuilds and reruns the suite once per mutant, which
-# is tens of minutes even at `--jobs 2` — far past what a pull-request build
-# should cost, and a cost that grows with every function added. The weekly
+# A full workspace run rebuilds and reruns the suite once per mutant: 937
+# rebuilds for about eight minutes of wall time at `--jobs 2`, and a cost that
+# grows with every function added. That is far past what a pull-request build
+# should cost, on top of every job ci.yml already runs. The weekly
 # schedule tracks test *strength* the way ci.yml's coverage job tracks line
 # coverage, but on its own budget: a failure here is a signal to strengthen
 # tests, not a merge block, so this workflow must not be added to the
@@ -33,9 +34,12 @@ jobs:
   mutants:
     name: Mutation test (workspace)
     runs-on: ubuntu-latest
-    # The local seeding run took about 40 minutes for the whole workspace at
-    # `--jobs 2`; a colder, slower runner plus checkout and toolchain setup
-    # still leaves margin under this bound without letting the job run away.
+    # The local seeding run tested all 937 workspace mutants in 7 minutes
+    # 39 seconds at `--jobs 2` — most mutants rebuild incrementally in under a
+    # second and the suite itself runs in about one. Two mutants that loop
+    # forever spend `minimum_test_timeout` (120 s) each, and that floor is
+    # what a cold, slower runner pays for too, so the bound below is generous
+    # rather than tight: it exists to stop a runaway job, not to model the run.
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

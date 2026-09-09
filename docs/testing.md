@@ -221,13 +221,20 @@ measuring.
 
 `.github/workflows/mutants.yml` runs it weekly and on manual dispatch, and it
 is deliberately **not** a required check. A full workspace run rebuilds and
-reruns the suite 935 times; the seeding run took 7 minutes 42 seconds at
-`--jobs 2` on the machine it was measured on, and a shared runner is slower.
-A failure there is a prompt to strengthen a test, not a merge block.
+reruns the suite once per mutant. The seeding run — the whole workspace, both
+crates, all 937 mutants, in one `cargo mutants --workspace --jobs 2`
+invocation — took **7 minutes 39 seconds** of wall time on the machine it was
+measured on. That is short because most mutants rebuild incrementally in under
+a second and this suite runs in about one; the two mutants that make the
+parser loop forever cost `minimum_test_timeout` — 120 seconds each — which is
+a quarter of the total on its own. A shared runner is slower, and every
+function added makes the run longer, which is why it does not belong in a
+pull-request build. A failure there is a prompt to strengthen a test, not a
+merge block.
 
 The seeding run scored `openkrx-core` at 567 caught, 16 missed, 84 unviable
 and 1 timeout — 97.26 % of the mutants that both compiled and finished — and
-`openkrx-cli` at 217 caught, 21 missed, 28 unviable and 1 timeout, 91.18 %.
+`openkrx-cli` at 219 caught, 21 missed, 28 unviable and 1 timeout, 91.25 %.
 Those are the numbers `scripts/mutants-floors.txt` was seeded from.
 
 ### Running it locally
@@ -266,7 +273,10 @@ write a test, never a reason to add an exclusion.
 `scripts/mutants_gate.py` prints a per-crate table and then every surviving
 mutant with its file, line and the mutation applied. `unviable` mutants never
 compiled and `timeout` mutants never finished, so neither counts as caught or
-as missed; the caught percentage is `caught / (caught + missed)`.
+as missed; the caught percentage is `caught / (caught + missed)`. A crate for
+which that denominator is zero — every mutant unviable or timed out, which
+means the run measured nothing — is reported as `FAIL (no viable mutants)` and
+fails the gate, rather than dividing into a vacuous 100 %.
 
 A survivor is one of three things, and the difference matters:
 

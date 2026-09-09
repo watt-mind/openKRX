@@ -18,7 +18,10 @@ directory and, for every crate named in `scripts/mutants-floors.txt`:
 - compares that percentage with the crate's floor and prints a table.
 
 It exits 1 when any crate is below its floor, 0 when every crate is at or
-above it, and 2 when the report or the floors file cannot be used at all.
+above it, and 2 when the report or the floors file cannot be used at all. A
+crate whose mutants all went unviable or timed out has no score at all, which
+is reported as `FAIL (no viable mutants)` and exits 1 rather than reading as a
+perfect run.
 
 Preferred input is `outcomes.json`. When it is absent (an interrupted run,
 or an older `cargo mutants`), the `caught.txt` / `missed.txt` /
@@ -210,10 +213,17 @@ def read_report(dir_path):
 
 
 def caught_percent(caught, missed):
-    """Caught share of the mutants that both compiled and finished."""
+    """Caught share of the mutants that both compiled and finished, or None.
+
+    `None` means the crate produced no mutant that both compiled and
+    finished, so there is no score to compare against a floor. That is a
+    failure, not a perfect run: reporting it as 100 % would let a crate whose
+    mutants all went unviable — a build that stopped matching the source, a
+    `--file` filter that matched nothing — pass the gate in silence.
+    """
     denominator = caught + missed
     if denominator == 0:
-        return 100.0
+        return None
     return 100.0 * caught / denominator
 
 
@@ -234,13 +244,19 @@ def build_report(crates, floors, origin, show_survivors):
             )
             continue
         percent = caught_percent(tally["caught"], tally["missed"])
-        below = percent < floor
-        if below:
+        if percent is None:
             failed.append(crate)
+            result = "FAIL (no viable mutants)"
+            score = "-"
+        else:
+            below = percent < floor
+            if below:
+                failed.append(crate)
+            result = "FAIL" if below else "ok"
+            score = f"{percent:.2f}%"
         lines.append(
             f"| {crate} | {tally['caught']} | {tally['missed']} | {tally['timeout']} | "
-            f"{tally['unviable']} | {percent:.2f}% | {floor:.2f}% | "
-            f"{'FAIL' if below else 'ok'} |"
+            f"{tally['unviable']} | {score} | {floor:.2f}% | {result} |"
         )
 
     ungated = sorted(set(crates) - set(floors))
@@ -267,7 +283,7 @@ def build_report(crates, floors, origin, show_survivors):
     lines.append("")
     if failed:
         lines.append(
-            "Below floor: " + ", ".join(f"`{name}`" for name in failed) + "."
+            "Not at their floor: " + ", ".join(f"`{name}`" for name in failed) + "."
         )
     else:
         lines.append("Every gated crate is at or above its floor.")
@@ -337,8 +353,8 @@ def main(argv=None):
 
     if failed:
         print(
-            "error: caught-mutant percentage below the recorded floor for: "
-            + ", ".join(failed),
+            "error: no caught-mutant percentage at or above the recorded floor "
+            "for: " + ", ".join(failed),
             file=sys.stderr,
         )
         return 1

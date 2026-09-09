@@ -161,6 +161,26 @@ or a reparse point, which could place output outside the destination"
         std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o500))
             .expect("make the destination read-only");
 
+        // Whether the injection took is decided by a probe *before* the run,
+        // the way `extract.rs`'s injection test does it, and never by the
+        // command's own exit status: reading a status of zero as "this
+        // process must be root" would turn a genuine regression in the write
+        // path into a silent skip. `println!` rather than `eprintln!` because
+        // libtest shows captured standard output under `--nocapture` and
+        // `--show-output`, and the word SKIPPED is there to be greppable in
+        // a log where a skipped case would otherwise read as a pass.
+        if std::fs::write(destination.join("probe"), b"probe").is_ok() {
+            std::fs::remove_file(destination.join("probe")).expect("remove the probe");
+            std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(mode))
+                .expect("restore the destination");
+            println!(
+                "SKIPPED a_write_that_fails_is_told_to_check_the_destination: \
+this process can write into a read-only directory, so the failure this test \
+needs cannot be injected"
+            );
+            return;
+        }
+
         let output = extract_into(&destination);
 
         // Restored before any assertion, so a failure still leaves a
@@ -168,12 +188,6 @@ or a reparse point, which could place output outside the destination"
         std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(mode))
             .expect("restore the destination");
 
-        if status(&output) == 0 {
-            // A process that ignores the permission bits (a root runner) has
-            // nothing to prove here; say so rather than fail silently.
-            eprintln!("skipped: this process can write into a read-only directory");
-            return;
-        }
         assert_eq!(status(&output), 9);
         let line = line(&output);
         assert!(line.contains("output.io"), "{line}");

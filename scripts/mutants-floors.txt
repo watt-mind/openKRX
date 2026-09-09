@@ -7,11 +7,13 @@
 # workflow (.github/workflows/mutants.yml) fails when a crate is below its
 # floor. Nothing in CI ever rewrites this file.
 #
-# Seeded from the full workspace run of 2026-09-09 with cargo-mutants 27.1.0
-# (935 mutants, 7m42s at --jobs 2), after that run's survivors were triaged:
+# Seeded from the full workspace run of 2026-09-09 with cargo-mutants 27.1.0:
+# one `cargo mutants --workspace --jobs 2` invocation covering both crates,
+# all 937 mutants, in 7 minutes 39 seconds of wall time. Not a per-crate
+# figure and not a shard. Measured after that run's survivors were triaged:
 #
 #   openkrx-core  567 caught, 16 missed, 84 unviable, 1 timeout -> 97.26 %
-#   openkrx-cli   217 caught, 21 missed, 28 unviable, 1 timeout -> 91.18 %
+#   openkrx-cli   219 caught, 21 missed, 28 unviable, 1 timeout -> 91.25 %
 #
 # Each floor is the measured percentage less two points, rounded down, so
 # that a mutant which times out on a loaded runner instead of being caught
