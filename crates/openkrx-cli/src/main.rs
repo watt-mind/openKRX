@@ -23,8 +23,14 @@
 //! `verified` is `false` in every response and a successful run is not
 //! authentication, not proof of delivery and not a legal determination.
 //!
+//! A fifth command reports on no package at all: [`skill`] writes the agent
+//! skill document this binary carries to stdout, so an agent holding nothing
+//! but the executable can read the contract it is about to rely on. It is the
+//! one command outside the JSON envelope.
+//!
 //! [`inspect`]: crate::commands::inspect
 //! [`extract`]: mod@crate::extract
+//! [`skill`]: mod@crate::skill
 
 use clap::{Parser, Subcommand};
 use openkrx_core::{Limits, MetadataLimits, archive, capabilities, profile};
@@ -35,6 +41,7 @@ mod exit;
 mod extract;
 mod input;
 mod render;
+mod skill;
 
 use exit::{Category, Failure};
 use extract::cleanup::Cleanup;
@@ -45,7 +52,8 @@ use std::path::PathBuf;
     name = "openkrx",
     version,
     about = "Read a Hungarian KRX document package locally, and extract one into a \
-directory you name. Nothing is uploaded and nothing is verified.",
+directory you name. Nothing is uploaded and nothing is verified. `skill` \
+writes the agent skill this binary carries.",
     after_help = EXIT_STATUS_HELP
 )]
 struct Args {
@@ -169,6 +177,13 @@ report, and stays true when a check failed."
         #[arg(long)]
         json: bool,
     },
+    /// Write the embedded agent skill document to standard output.
+    #[command(after_help = "The document is written to stdout byte for byte and \
+nothing else is: no JSON envelope, no diagnostic, and no file is read. This \
+command takes no arguments and no flags, so `skill --json` and `skill FILE` \
+are usage errors and exit 2.\n\nSave it where your agent harness looks for \
+skills, for example: openkrx skill > .claude/skills/openkrx/SKILL.md")]
+    Skill,
 }
 
 /// Which reader command is running, and the name its response carries.
@@ -214,7 +229,15 @@ fn run() -> i32 {
             };
         }
     };
+    // `skill` reports on no package, so it never reaches the envelope, the
+    // input reader or a `Category` other than success: it writes the document
+    // it carries and stops.
+    if matches!(parsed.command, Command::Skill) {
+        skill::run();
+        return Category::Success.status();
+    }
     match parsed.command {
+        Command::Skill => unreachable!("skill returned before the dispatch"),
         Command::Capabilities { json } => {
             let data = capabilities();
             let text = if json {

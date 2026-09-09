@@ -83,3 +83,12 @@ fn read_capped(reader: &mut impl Read) -> Result<Vec<u8>, Failure> {
 pub fn line(stream: &mut impl Write, text: &str) {
     let _ = writeln!(stream, "{text}");
 }
+
+/// Write bytes to a stream exactly as they are, adding nothing.
+///
+/// [`line()`] terminates what it writes, which is right for a report and wrong
+/// for a document that already ends as its author wrote it. A closed pipe is
+/// ignored here for the same reason it is there.
+pub fn payload(stream: &mut impl Write, bytes: &[u8]) {
+    let _ = stream.write_all(bytes);
+}

@@ -96,11 +96,23 @@ target/release/openkrx inspect            package.krx
 target/release/openkrx validate-structure package.krx
 target/release/openkrx extract            package.krx --into ./out
 target/release/openkrx capabilities
+target/release/openkrx skill
 ```
 
+### Commands
+
+| Command | What it does | Exit statuses |
+| --- | --- | --- |
+| `capabilities` | Reports the implemented operations and the development stage. Reads no package. | 0, 2 |
+| `inspect` | Prints what the package declares about itself and how every structural check came out. | 0, 2, 5, 6, 7, 8 |
+| `list` | Prints every archive entry in central-directory order; runs no structural check. | 0, 2, 5, 6, 7, 8 |
+| `validate-structure` | Prints the check inventory and puts the structural reading in the exit status. | 0, 2, 3, 4, 5, 6, 7, 8 |
+| `extract` | Writes the package's files into a directory that already exists. | 0, 2, 5, 6, 7, 8, 9 |
+| `skill` | Writes the agent skill document embedded in the binary to stdout. Reads no package. | 0, 2 |
+
 Each of the four package commands takes one file, or `-` to read standard
-input; `capabilities` takes none. Every command accepts `--json`. `list`
-prints what the archive holds:
+input; `capabilities` and `skill` take none. Every command except `skill`
+accepts `--json`. `list` prints what the archive holds:
 
 ```text
 index  method   compressed    declared     decoded  crc32     name
@@ -172,6 +184,17 @@ a judgement of the package, and it stays `true` when a check failed. Read
 
 Every diagnostic carries a stable code; it carries the code, an entry index
 and numbers, and never the input path, an entry name or a metadata value.
+
+`openkrx skill` writes the [agent
+skill](crates/openkrx-cli/skills/openkrx/SKILL.md) the binary carries — the
+workflow, the envelope, every exit status, the boundary and the reporting
+rules an AI agent needs — to stdout, byte for byte and outside the JSON
+envelope. Save it where your harness looks for skills:
+
+```sh
+mkdir -p .claude/skills/openkrx
+openkrx skill > .claude/skills/openkrx/SKILL.md
+```
 
 ## Documentation
 
