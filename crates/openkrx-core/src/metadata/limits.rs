@@ -37,7 +37,9 @@ pub struct MetadataLimits {
     ///
     /// Attribute values are charged against it too, and each event's raw
     /// length is checked against the remaining headroom before the event is
-    /// unescaped, so one event can never allocate more than this bound.
+    /// unescaped, so the copy materialised from one event never exceeds this
+    /// bound. The raw event stays in the reader's buffer, bounded by
+    /// `max_document_bytes`.
     pub max_text_bytes: u64,
 }
 

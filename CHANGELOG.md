@@ -193,8 +193,9 @@ and such a change is recorded here explicitly.
   last path segment is also `mimetype`; a marker only under a directory prefix
   stays an unresolved A19 observation. `max_text_bytes` now covers attribute
   values as well as element text, and each event's raw length is checked
-  against the remaining headroom before the event is unescaped, so one event
-  can never allocate more than that bound. `Metadata`, `StructureReport`,
+  against the remaining headroom before the event is unescaped, so the copy
+  materialised from one event never exceeds that bound; the raw event stays in
+  the reader's buffer, bounded by `max_document_bytes`. `Metadata`, `StructureReport`,
   `Observations` and `AttachmentResolution` document that their `Debug`
   representation carries package content and must not be logged, and
   `RuleId::A20`, `A21`, `A22` and `M15` are documented as reserved identifiers

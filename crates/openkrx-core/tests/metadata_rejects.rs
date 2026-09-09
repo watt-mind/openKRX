@@ -352,6 +352,30 @@ fn the_attribute_count_limit_holds_at_its_boundary() {
 }
 
 #[test]
+fn too_many_attributes_are_reported_before_their_text_is_charged() {
+    // Both bounds are crossed on the same element: the count is the more
+    // precise statement about it, so it is the one reported.
+    let attributes: String = (0..4).map(|index| format!(" a{index}=\"v\"")).collect();
+    let xml = Document::default()
+        .xml()
+        .replace("<ns2:FEJRESZ>", &format!("<ns2:FEJRESZ{attributes}>"));
+    let mut limits = MetadataLimits::DEFAULT;
+    // The root's namespace declaration is the whole text budget, so the first
+    // attribute of FEJRESZ would cross the text bound as well.
+    limits.max_text_bytes = metadata::TARGET_NAMESPACE.len() as u64;
+    limits.max_attributes_per_element = 4;
+    assert_eq!(
+        code_with(xml.as_bytes(), &limits),
+        "metadata.over_limit.text_bytes"
+    );
+    limits.max_attributes_per_element = 3;
+    assert_eq!(
+        code_with(xml.as_bytes(), &limits),
+        "metadata.over_limit.attributes_per_element"
+    );
+}
+
+#[test]
 fn the_text_limit_holds_at_its_boundary() {
     let document = Document::default().bytes();
     let text = count_text_bytes(&document);
