@@ -113,6 +113,47 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.9.1
       - run: cargo llvm-cov --workspace --locked --fail-under-lines 90
+  fuzz:
+    name: Fuzz (build only)
+    # The fuzz package is its own workspace on a nightly toolchain, so nothing
+    # here is covered by the stable jobs above. Each target then runs for a
+    # bounded 30 seconds — long enough to prove the harness executes and to
+    # catch a shallow regression, short enough to keep the pull-request lane
+    # cheap. Deep campaigns are a local or scheduled activity, not this job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FUZZ_TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable @ 2026-09-03
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+        with:
+          tool: cargo-fuzz@0.13.2
+      # cargo-fuzz defaults `--target` to the triple of its own binary, and
+      # install-action falls back to cargo-binstall for this version, which
+      # ships a musl build. AddressSanitizer cannot link against a static
+      # libc, so the target is named explicitly rather than inherited.
+      - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET"
+      - name: Bounded run of each target
+        run: |
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET" \
+            inventory -- -max_total_time=30 -rss_limit_mb=2048
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET" \
+            xml_metadata -- -max_total_time=30 -rss_limit_mb=2048
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   hygiene:
     name: Commit hygiene
     if: github.event_name == 'pull_request'

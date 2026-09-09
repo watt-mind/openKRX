@@ -148,6 +148,21 @@ and such a change is recorded here explicitly.
   records the searches, the design decisions and the evidence gaps.
   `scripts/check-codes.py` fails the build when a code exists in the crate
   sources but not in the catalogue, or the other way round.
+- **Fuzz targets for both readers, and a bounded CI lane.** A `cargo-fuzz`
+  package in [fuzz/](fuzz/README.md), outside the root workspace so its
+  nightly-only dependencies stay out of the dependency policy, the coverage
+  run and the MSRV check. `inventory` drives
+  `openkrx_core::archive::inventory` with `Limits::DEFAULT` and re-decodes
+  every accepted entry through `entry_bytes`; `xml_metadata` drives
+  `openkrx_core::metadata::parse` with `MetadataLimits::DEFAULT`. Neither
+  asserts anything about the result: the property is that the call returns on
+  any byte string. The `Fuzz (build only)` job builds both on nightly and runs
+  each for 30 seconds per pull request, a 60-second budget chosen to catch a
+  shallow regression without turning every pull request into a campaign; a
+  passing lane is explicitly not evidence that a reader is fuzz-clean. No
+  corpus is committed, `fuzz/regressions/<target>/` is reserved for minimised
+  fuzzer-generated artifacts, and the truncation and single-byte mutation
+  sweeps remain the exhaustive compensating control.
 
 ### Changed
 

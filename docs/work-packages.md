@@ -34,10 +34,11 @@ profile-agnostic inventory from a caller-supplied byte slice. Concrete limits,
 supported methods and peak-memory behavior are published in
 [architecture.md](architecture.md#limits); the threat-model
 mapping is in [SECURITY.md](../SECURITY.md#threat-model-mapping-archive-layer).
-A fuzz target is still outstanding and tracked separately; the truncation and
-mutation sweeps in [testing.md](testing.md#sweeps) stand in
-for it. No CLI command exposes the inventory, so `capabilities().operations`
-remains empty.
+The `inventory` fuzz target exists and runs in a bounded CI lane
+([testing.md](testing.md#fuzzing)); the truncation and mutation sweeps in
+[testing.md](testing.md#sweeps) remain the exhaustive complement to it. No
+CLI command exposes the inventory, so `capabilities().operations` remains
+empty.
 
 Dependencies: KRX-01's archive-level rules. Owner: core reader contributor;
 `crates/openkrx-core/` archive/limits/errors modules and synthetic tests.
@@ -49,8 +50,8 @@ filesystem writes or attachment decoding. Document memory behavior.
 
 Verification: limit boundaries, hostile header/stream disagreements,
 duplicate and overlapping entries, compression bombs, and malformed archive
-regressions; update the threat-model mapping. A fuzz target and its CI lane
-remain outstanding.
+regressions; update the threat-model mapping. The `inventory` fuzz target and
+its bounded CI lane exist; a seed corpus and a scheduled long campaign do not.
 
 Must treat as unknown: directory nesting and the location of the `mimetype`
 entry, that entry's compression method and byte-exactness, entry-name
@@ -71,9 +72,9 @@ mapping is in
 [SECURITY.md](../SECURITY.md#threat-model-mapping-metadata-layer). Each
 unresolved rule maps to a distinct `Unresolved(rule)` outcome, so no
 conformance verdict exists and the reported summary `Consistent` is explicitly
-not one. An XML fuzz target is still outstanding and tracked with the archive
-one; the truncation and mutation sweeps in
-[testing.md](testing.md#sweeps) stand in for it. No CLI
+not one. The `xml_metadata` fuzz target exists and runs in the same
+bounded CI lane; the truncation and mutation sweeps in
+[testing.md](testing.md#sweeps) remain its exhaustive complement. No CLI
 command exposes the checks, so `capabilities().operations` remains empty.
 
 Dependencies: KRX-01 and KRX-02. Owner: profile contributor; core metadata
