@@ -394,10 +394,16 @@ system, and `external file attributes`, whose meaning depends on that host.
 | Condition | Kind |
 | --- | --- |
 | The name ends in `/` | `DirectoryMarker`, whatever the attributes say |
-| Host 3 (Unix), `st_mode` in the high 16 attribute bits: `S_IFREG` / `S_IFDIR` / `S_IFLNK` | `RegularFile` / `DirectoryMarker` / `Symlink` |
-| Host 3, any other mode, including a mode of zero | `Special` |
+| Hosts 3 and 19 (Unix, OS X), `st_mode` in the high 16 attribute bits: `S_IFREG` / `S_IFDIR` / `S_IFLNK` | `RegularFile` / `DirectoryMarker` / `Symlink` |
+| Hosts 3 and 19, any other mode, including a mode of zero | `Special` |
 | Hosts 0, 10, 11, 14 (MS-DOS, NTFS, MVS, VFAT), FAT attribute bit `0x10` | `DirectoryMarker`, else `RegularFile` |
 | Any other host system | `Unknown` |
+
+Hosts 3 and 19 are the two APPNOTE names for a host that stores `st_mode` in
+the high attribute bits, and they are read alike: a symlink written on macOS
+must be refused as a link, not classified as `Unknown` and planned as an
+ordinary file holding its target text. No other host is assumed to carry a
+mode, and none is added on a guess.
 
 A `Symlink` and a `Special` entry reject the plan, with
 `extract.unsupported.link` and `extract.unsupported.special_file`: a link is
@@ -419,9 +425,13 @@ not be empty, `.` or `..`, may not hold a NUL, another C0 control or a C1
 control character, may not end with `.` or a space, may not be a Windows
 reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
 `LPT1`–`LPT9`, with or without an extension, compared ASCII
-case-insensitively), and may not hold `:`. Each violation has its own
-`extract.unsafe_path.*` code, and the diagnostic carries the entry index
-only, never the component.
+case-insensitively), may not start with a space, may not hold `:`, and may not
+hold any of the six characters no Windows filesystem accepts in a name — `*`,
+`?`, `<`, `>`, `|` and `"`, which share one
+`extract.unsafe_path.reserved_character` code. A backslash is not among them:
+`archive::names` refuses such a name outright, before a plan is attempted.
+Each violation has its own `extract.unsafe_path.*` code, and the diagnostic
+carries the entry index only, never the component.
 
 Several of those classes — `..`, a C0 control, an absolute first component —
 are already impossible in an accepted inventory, because `archive::names`

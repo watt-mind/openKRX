@@ -14,6 +14,10 @@ use support::{Archive, Entry, marker_archive, pseudo_random};
 const MODE_REGULAR: u32 = 0o100_644;
 /// Unix `st_mode` for a directory.
 const MODE_DIRECTORY: u32 = 0o040_755;
+/// Host system 19: OS X (Darwin), which carries `st_mode` as host 3 does.
+const HOST_DARWIN: u16 = 19;
+/// A host system this reader deliberately does not map.
+const HOST_UNMAPPED: u16 = 7;
 
 #[track_caller]
 fn plan_of(image: &[u8]) -> extract::ExtractionPlan {
@@ -162,7 +166,10 @@ fn entry_kinds_are_read_from_the_central_directory_fields() {
         Entry::stored(b"dos-dir", b"").with_dos_attributes(0x10),
         Entry::stored(b"dos-file", b"x").with_dos_attributes(0x20),
         Entry::stored(b"marker/", b""),
-        Entry::stored(b"foreign", b"x").with_host_system(19),
+        Entry::stored(b"darwin", b"x")
+            .with_unix_mode(MODE_REGULAR)
+            .with_host_system(HOST_DARWIN),
+        Entry::stored(b"foreign", b"x").with_host_system(HOST_UNMAPPED),
     ])
     .build();
     let inventory = archive::inventory(&image, &Limits::DEFAULT).expect("archive is readable");
@@ -176,6 +183,7 @@ fn entry_kinds_are_read_from_the_central_directory_fields() {
             EntryKind::DirectoryMarker,
             EntryKind::RegularFile,
             EntryKind::DirectoryMarker,
+            EntryKind::RegularFile,
             EntryKind::Unknown,
         ]
     );
@@ -186,13 +194,39 @@ fn entry_kinds_are_read_from_the_central_directory_fields() {
     );
 
     let plan = extract::plan(&inventory, &ExtractLimits::DEFAULT).expect("plan is producible");
-    assert_eq!(joined(&plan), ["regular", "dos-file", "foreign"]);
+    assert_eq!(joined(&plan), ["regular", "dos-file", "darwin", "foreign"]);
+}
+
+#[test]
+fn a_darwin_host_entry_is_read_as_a_unix_mode_not_as_an_unknown_host() {
+    // Host 19 carries `st_mode` in the high attribute bits exactly as host 3
+    // does, so its modes are read rather than ignored. The refusal half — a
+    // Darwin-host symlink — is in `extract_rejects.rs`.
+    let image = Archive::of(vec![
+        Entry::stored(b"Payload/x.pdf", b"attachment")
+            .with_unix_mode(MODE_REGULAR)
+            .with_host_system(HOST_DARWIN),
+        Entry::stored(b"Payload/ID-1", b"")
+            .with_unix_mode(MODE_DIRECTORY)
+            .with_host_system(HOST_DARWIN),
+    ])
+    .build();
+    let inventory = archive::inventory(&image, &Limits::DEFAULT).expect("archive is readable");
+    let kinds: Vec<EntryKind> = inventory.entries().iter().map(|e| e.kind()).collect();
+
+    assert_eq!(kinds, [EntryKind::RegularFile, EntryKind::DirectoryMarker]);
+    let plan = plan_of(&image);
+    assert_eq!(
+        joined(&plan),
+        ["Payload/x.pdf"],
+        "a directory mode produces no item, whatever the host wrote it"
+    );
 }
 
 #[test]
 fn an_entry_from_an_unmapped_host_is_planned_as_an_ordinary_file() {
     let image = Archive::of(vec![
-        Entry::stored(b"Payload/x.pdf", b"attachment").with_host_system(19),
+        Entry::stored(b"Payload/x.pdf", b"attachment").with_host_system(HOST_UNMAPPED),
     ])
     .build();
     let plan = plan_of(&image);

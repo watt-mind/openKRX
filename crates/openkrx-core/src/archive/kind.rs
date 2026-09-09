@@ -14,12 +14,19 @@
 //! the point: `SECURITY.md` requires special files and link escapes to be
 //! rejected, and a guess in this function would be a silent hole in that rule.
 
-/// Host system 3: Unix. The high 16 attribute bits carry `st_mode`.
-const HOST_UNIX: u16 = 3;
+/// Host systems whose high 16 attribute bits carry a Unix `st_mode`.
+///
+/// APPNOTE numbers 3 Unix and 19 OS X (Darwin), and both write `st_mode`
+/// there. They are read alike so that a symlink written on macOS is refused as
+/// a link rather than classified as [`EntryKind::Unknown`] and planned as an
+/// ordinary file holding its target text. No other host is assumed to carry a
+/// mode: a host this reader does not know stays `Unknown`.
+const HOSTS_UNIX_MODE: [u16; 2] = [3, 19];
 /// Host systems whose attributes carry MS-DOS/FAT attribute bits.
 ///
-/// 0 is MS-DOS and OS/2 FAT, 10 is Windows NTFS, 11 is MVS/OpenVMS as PKWARE
-/// numbers it, and 14 is VFAT. All four write the FAT attribute byte.
+/// 0 is MS-DOS and OS/2 FAT, 10 is Windows NTFS, 11 is MVS as PKWARE numbers
+/// it (OpenVMS is host 2, which this reader does not map), and 14 is VFAT. All
+/// four write the FAT attribute byte.
 const HOSTS_FAT: [u16; 4] = [0, 10, 11, 14];
 /// FAT attribute bit 4: the entry is a directory.
 const FAT_DIRECTORY: u32 = 0x10;
@@ -69,7 +76,7 @@ pub(crate) fn classify(version_made_by: u16, external_attributes: u32, name: &[u
         return EntryKind::DirectoryMarker;
     }
     let host = version_made_by >> 8;
-    if host == HOST_UNIX {
+    if HOSTS_UNIX_MODE.contains(&host) {
         return match (external_attributes >> 16) & S_IFMT {
             S_IFREG => EntryKind::RegularFile,
             S_IFDIR => EntryKind::DirectoryMarker,
@@ -114,24 +121,30 @@ mod tests {
     }
 
     #[test]
-    fn unix_modes_map_to_their_file_types() {
-        assert_eq!(
-            classify(made_by(3), unix_mode(0o100_644), b"a"),
-            EntryKind::RegularFile
-        );
-        assert_eq!(
-            classify(made_by(3), unix_mode(0o040_755), b"a"),
-            EntryKind::DirectoryMarker
-        );
-        assert_eq!(
-            classify(made_by(3), unix_mode(0o120_777), b"a"),
-            EntryKind::Symlink
-        );
-        assert_eq!(
-            classify(made_by(3), unix_mode(0o020_666), b"a"),
-            EntryKind::Special
-        );
-        assert_eq!(classify(made_by(3), 0, b"a"), EntryKind::Special);
+    fn unix_modes_map_to_their_file_types_on_every_st_mode_host() {
+        for host in [3_u16, 19] {
+            assert_eq!(
+                classify(made_by(host), unix_mode(0o100_644), b"a"),
+                EntryKind::RegularFile,
+                "host {host}"
+            );
+            assert_eq!(
+                classify(made_by(host), unix_mode(0o040_755), b"a"),
+                EntryKind::DirectoryMarker,
+                "host {host}"
+            );
+            assert_eq!(
+                classify(made_by(host), unix_mode(0o120_777), b"a"),
+                EntryKind::Symlink,
+                "host {host}"
+            );
+            assert_eq!(
+                classify(made_by(host), unix_mode(0o020_666), b"a"),
+                EntryKind::Special,
+                "host {host}"
+            );
+            assert_eq!(classify(made_by(host), 0, b"a"), EntryKind::Special);
+        }
     }
 
     #[test]
@@ -143,7 +156,7 @@ mod tests {
                 EntryKind::DirectoryMarker
             );
         }
-        for host in [1_u16, 7, 19, 255] {
+        for host in [1_u16, 2, 7, 255] {
             assert_eq!(classify(made_by(host), 0x10, b"a"), EntryKind::Unknown);
         }
     }
