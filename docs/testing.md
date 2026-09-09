@@ -44,6 +44,8 @@ the contract covers every code the crates define.
 | `crates/openkrx-cli/tests/reader.rs` | Each reader command on a package that can be read, in both modes: the consistent package, the entry listing and its stable ordering, the declared document beside the observed archive, every check rendered as its own outcome, the two other layouts leaving A19 undecided, `-` on all three commands producing the same report as a file, a name that is not UTF-8 reported as bytes, an invisible character escaped, a long name cut with its remainder counted, and that a successful run writes nothing on stderr. |
 | `crates/openkrx-cli/tests/extract.rs` | `extract`, the one command that writes, by subprocess against a destination each test owns and then reads back: a successful extraction with byte-identical payloads and nothing else created, the JSON report and its item order, a target file that already exists, a destination that is missing, a file, or a symbolic link, a marker left by an interrupted run, an entry named like that marker refused under the no-clobber code, a non-empty destination whose contents survive, a planner refusal keeping its own category and naming no path, a malformed and an unreadable package never reaching the destination, the usage errors, and — behind `cfg(unix)` — an ancestor symlink inside the destination, a pre-existing symlink at the leaf, and an injected write failure proving the cleanup pass removes exactly this run's files and leaves everything else. |
 | `crates/openkrx-cli/tests/failures.rs` | Every exit-status category end to end: a failing check (3) for `validate-structure` only, malformed and truncated images (6), a ZIP64 extra field (7), an over-limit entry count with its numbers (8), a missing file, a directory and both an over-cap file and an over-cap standard input (5), one stderr line in human mode, and exactly one object on stdout in JSON mode even when the run failed. |
+| `crates/openkrx-cli/tests/render_text.rs` | The human renderer's own lines, asserted whole rather than by substring: each attachment block with the entry it resolves to and its observed decoded size, a reference that resolves to nothing, one matched only after a root-prefix adjustment, the metadata entry with its index, the format-marker outcome, the failed and undecided check counts in the summary sentence, a check that does not apply reported as such rather than as undecided, the 200-character cut boundary at the limit and one past it, and the declared attachment count taken from the document rather than from the number of references. |
+| `crates/openkrx-cli/tests/diagnostics.rs` | The rest of the diagnostic contract: the one content-free sentence each `output.*` code is given instead of its category's, for a destination that is not a directory, an occupied ancestor, an ancestor symbolic link and a failed write; the cleanup line a refusal reached before any write produces; and that a limit failure keeps its limit and observed numbers whichever command reported it. |
 | `crates/openkrx-cli/tests/privacy.rs` | The content-free-diagnostic rule, by canary: a canary path segment, a canary entry name and a canary metadata value are searched for on stderr in every case and on stdout in every failing case, a declared value is shown to reach stdout for `inspect` alone, and `extract` is held to the same rule with its one documented exception — a successful report names the files it created, and still never the destination or a declared value. |
 | `crates/openkrx-cli/tests/support/mod.rs` | Subprocess helpers and the synthetic packages the command tests read, not tests: a scratch directory that removes itself, a standard-input runner, and one builder per package shape. |
 
@@ -205,6 +207,127 @@ why, and a removed, renamed or redefined envelope field also raises
 `schema_version` and is recorded in [CHANGELOG.md](../CHANGELOG.md). Running
 `update` to make a red build green, without that justification, is the one
 thing this gate exists to prevent.
+
+## Mutation testing
+
+Coverage says a line ran. It does not say a test would notice the line doing
+something else. [cargo-mutants](https://mutants.rs/) answers that instead: it
+rewrites one expression at a time — `>` to `>=`, `&&` to `||`, a match arm
+deleted, a function body replaced by a fixed value — rebuilds, and runs the
+suite against each mutated copy. A mutant the suite still passes against is a
+**survivor**: behaviour changed and nothing caught it. For a reader whose
+safety rests almost entirely on rejection branches, that is the property worth
+measuring.
+
+`.github/workflows/mutants.yml` runs it weekly and on manual dispatch, and it
+is deliberately **not** a required check. A full workspace run rebuilds and
+reruns the suite 935 times; the seeding run took 7 minutes 42 seconds at
+`--jobs 2` on the machine it was measured on, and a shared runner is slower.
+A failure there is a prompt to strengthen a test, not a merge block.
+
+The seeding run scored `openkrx-core` at 567 caught, 16 missed, 84 unviable
+and 1 timeout — 97.26 % of the mutants that both compiled and finished — and
+`openkrx-cli` at 217 caught, 21 missed, 28 unviable and 1 timeout, 91.18 %.
+Those are the numbers `scripts/mutants-floors.txt` was seeded from.
+
+### Running it locally
+
+```sh
+cargo install cargo-mutants --locked
+cargo mutants --workspace --jobs 2 --output tmp
+python3 scripts/mutants_gate.py --dir tmp/mutants.out
+```
+
+`--output tmp` puts the report under the already-ignored `tmp/` directory
+rather than at the repository root, where it would show up as untracked; the
+scheduled workflow omits the flag and uses the default location, which is why
+the gate defaults to `--dir mutants.out`.
+
+`cargo mutants` writes a `mutants.out/` directory: a log per mutant,
+`caught.txt`, `missed.txt`, `timeout.txt` and `unviable.txt` listings, and
+`outcomes.json`, which the gate reads. `--jobs 2` is a memory bound, not a
+speed choice: each job builds its own copy of the workspace. Useful narrowing
+flags are `-p openkrx-core` or `-p openkrx-cli` for one crate,
+`--file crates/openkrx-core/src/archive/eocd.rs` for one file, and
+`--shard 1/4` for a quarter of the mutants; `cargo mutants --list --workspace`
+counts them without running any.
+
+`.cargo/mutants.toml` holds the configuration and the reason for each entry:
+`exclude_globs` drops the test-only synthetic writer, the examples directory
+and the separate fuzz package, none of which is shipped behaviour, and
+`timeout_multiplier` with `minimum_test_timeout` bound a mutant that loops
+forever without turning a slow runner into a false timeout. There is no
+function-name exclusion: the `Display` impls in this workspace are held by
+content-free assertions in the rejection tests, and a survivor is a reason to
+write a test, never a reason to add an exclusion.
+
+### Reading survivors
+
+`scripts/mutants_gate.py` prints a per-crate table and then every surviving
+mutant with its file, line and the mutation applied. `unviable` mutants never
+compiled and `timeout` mutants never finished, so neither counts as caught or
+as missed; the caught percentage is `caught / (caught + missed)`.
+
+A survivor is one of three things, and the difference matters:
+
+1. **A gap.** The mutation changes an observable rejection, limit, ordering or
+   code-mapping decision and no test looks. This is the common case and the
+   only correct response is a test. The seeding run's gaps became the
+   boundary and rendering tests listed in the [test layout](#test-layout)
+   table above.
+2. **An equivalent mutant.** The mutated program behaves identically, so no
+   test can exist. `1 << 0` and `1 >> 0` are the same flag constant; an `|`
+   of disjoint single bits is the same as an `^`; deleting a match arm that
+   falls through to a catch-all producing the same value changes nothing.
+3. **Defence in depth.** Two independent guards refuse the same condition, so
+   removing either leaves the other to refuse it, with the same stable code.
+   Testing one in isolation would mean reaching past the other.
+
+The survivors left after the seeding pass, and why each is left:
+
+| Where | Why it survives |
+| --- | --- |
+| `archive/central.rs` `1 << 0` → `1 >> 0`, and `\|` → `^` between the encryption flag bits | Equivalent. Both spell the same constant: shifting by zero is identity, and the three flags are disjoint single bits, so their union and their symmetric difference are the same value. |
+| `archive/central.rs` `compressed_size > image_bytes` → `>=` or `==` | Defence in depth. This is an early bound on a declared size; an image whose declared size reaches or passes its own length is refused as `archive.truncated.entry_data` by the local-header verification either way, with the same code and the same entry index. |
+| `archive/local.rs` `data_end > bytes.len()` → `>=` or `==` | The same early bound on the other side. Entry data is always followed by the central directory and the end record, so `data_end == bytes.len()` cannot occur in an image that got this far. |
+| `archive/inflate.rs` `bytes_written > 0` → `>=` | Equivalent. The guard skips an accounting call for an empty chunk; accounting an empty chunk adds zero bytes, updates the CRC with nothing and compares the same totals. |
+| `archive/inflate.rs` the `bytes_consumed > 0 \|\| bytes_written > 0` progress guard, in all its forms | This is the anti-stall guard: it refuses a decoder that returns `Ok` while consuming and producing nothing, which would otherwise loop forever. `miniz_oxide` does not enter that state for any input the fixtures can build, so the branch is unreachable from the public API and is kept as a bound on a future decoder change. Mutating it away produces a hang, which the run reports as a timeout rather than a survivor when it does bite. |
+| `metadata/scanner.rs` `Scanner::step` → `Ok(None)` (timeout) | Not a survivor: the mutated scanner never advances, so the run hits `minimum_test_timeout` and is reported as a timeout. Timeouts count on neither side of the gate. |
+| `cli/render/human.rs` `rest.len() - valid` → `+` (timeout) | Equivalent and slow. The expression is the fallback length for an incomplete final UTF-8 sequence; the result is immediately clamped with `.min(rest.len())`, so both spellings produce the same end offset. |
+| `cli/exit.rs` `max_archive_bytes + 1` → `-` or `*` | A gap the fixture cost does not justify. Distinguishing the three requires an input of exactly 64 MiB — the whole point of the cap being one byte past the ceiling — and every test in this suite builds its package in memory. Left for a fixture strategy that can stream one. |
+| `cli/commands/mod.rs` deleting the `StructureSummary::Unresolved` arm, and `cli/commands/inspect.rs` deleting the `ReferenceResolution::Missing` arm | Equivalent. Both enums are `#[non_exhaustive]`, so each match already has a catch-all, and in both cases the catch-all produces exactly the value the deleted arm produced. The arms are there so the intended reading is written down, not because the fallback differs. |
+| `cli/exit.rs` deleting the `ProfileError::Archive` arm of the `Failure` conversion | Not reached by any command. Every command reads the archive inventory before the structural checks, so an archive-layer refusal becomes a `Failure` directly and this arm only matters for an archive error raised *during* checking — which needs an entry that decodes past a limit only when a check re-reads it. `diagnostics.rs` pins the numbers a limit failure carries through `validate-structure`; the wrapped path itself is left until a fixture can produce it. |
+| `cli/render/human.rs` deleting the `(Some(name), None)` arm of `metadata_entry` | The state is unreachable through the commands: a located metadata entry always carries its central-directory index, so a name without one cannot be produced. The arm is defensive. |
+| `cli/extract/preflight.rs` `reparse_point` and its `FILE_ATTRIBUTE_REPARSE_POINT` mask | Windows-only code, not compiled on the platform the run was measured on, so no test could execute it. The Windows CI lane runs the same suite; the rule itself is `is_link`, and `docs/testing.md`'s note on the link tests explains why the reparse-point half is held by the code path rather than by a test. |
+| `cli/extract/preflight.rs::marker` → `Ok(())`, and its `NotFound` guard | Defence in depth. Preflight refuses an existing marker before anything is written, and the writer's `create_new` refuses it again if one appeared in between; removing preflight's copy leaves the writer's to produce `output.partial_marker_present`, which is why the writer's arm *is* caught and this one is not. |
+| `cli/extract/preflight.rs`'s remaining `ErrorKind::NotFound` guards, and `cli/extract/writer.rs`'s `AlreadyExists` guard in `directories` | Treating an unexpected I/O error as the expected one lands on the same stable code by another route: the run continues and the next operation on the same path fails as `output.io`. Producing a non-`NotFound` `lstat` failure at exactly the right path, portably, is what a test here would have to do. |
+| `cli/extract/preflight.rs::marker_named_directory` `&&` → `\|\|` and `==` → `!=` | Equivalent in effect. Widening the clash test only reaches the second half of the function, which then finds no item whose first component is the marker name and returns `None`, exactly as before. |
+| `cli/extract/cleanup.rs::Ledger::forget` | Unobservable. `forget` is called once, for the marker, on the success path — after which nothing else runs and `undo` is never called. Its effect is only visible to a cleanup pass that cannot happen. |
+
+Nothing in that list may be answered by raising a floor. If a survivor is a
+gap, it gets a test; if it is not, it gets a row here saying why.
+
+### Updating the floors
+
+`scripts/mutants-floors.txt` holds one crate per line — its name and its
+floor separated by a tab — where the floor is the caught percentage that
+crate must not fall below. The floors were seeded from
+the first full run, rounded down two points, so ordinary noise — a mutant that
+times out on a loaded runner instead of being caught — does not fail the lane.
+
+Raise a floor when a change genuinely raises the score, in the same pull
+request:
+
+```sh
+cargo mutants --workspace --jobs 2 --output tmp
+python3 scripts/mutants_gate.py --dir tmp/mutants.out
+```
+
+Read the caught percentage out of the table, subtract two points, round down,
+and commit the new value. Never raise a floor to make a survivor disappear,
+and never lower one to make a red lane green: a drop means either a test got
+weaker or a new branch arrived untested, and both are the finding the lane
+exists to produce. CI never writes this file.
 
 ## Sweeps
 
