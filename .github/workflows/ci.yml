@@ -82,8 +82,10 @@ jobs:
           persist-credentials: false
       # This pin is the action's `1.88` version branch: its action.yml hard-codes
       # the toolchain and declares no `toolchain` input, so passing one is
-      # unsupported. The version step below is the evidence that 1.88 is what
-      # actually got installed.
+      # unsupported. The version step below records the toolchain `cargo`
+      # actually resolves to in this job; note that `rust-toolchain.toml`
+      # currently overrides the rustup default, which a separate change
+      # addresses.
       - uses: dtolnay/rust-toolchain@688313b0823df1393bcebb1b4add0438a6d36884 # 1.88 @ 2026-09-03
       - run: rustc --version && cargo --version
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
