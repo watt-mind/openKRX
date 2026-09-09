@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Keep docs/codes.md in step with the stable codes the crates define.
 
-Every failure openKRX reports carries a dotted `archive.*`, `input.*` or
-`metadata.*` code, and those codes are part of the public contract. This check extracts
+Every failure openKRX reports carries a dotted `archive.*`, `extract.*`,
+`input.*` or `metadata.*` code, and those codes are part of the public
+contract. This check extracts
 each such string literal from the crate sources and compares the set with the
 codes docs/codes.md lists in backticks. A code that exists in the sources but
 not in the catalogue, or in the catalogue but not in the sources, fails the
@@ -16,8 +17,8 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 CATALOGUE = ROOT / "docs" / "codes.md"
 SEGMENT = r"[a-z0-9_]+"
-SOURCE_CODE = re.compile(rf'"((?:archive|input|metadata)(?:\.{SEGMENT})+)"')
-DOC_CODE = re.compile(rf"`((?:archive|input|metadata)(?:\.{SEGMENT})+)`")
+SOURCE_CODE = re.compile(rf'"((?:archive|extract|input|metadata)(?:\.{SEGMENT})+)"')
+DOC_CODE = re.compile(rf"`((?:archive|extract|input|metadata)(?:\.{SEGMENT})+)`")
 
 
 def source_codes() -> dict[str, set[str]]:

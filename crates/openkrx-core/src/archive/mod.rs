@@ -26,12 +26,15 @@
 mod central;
 mod eocd;
 mod inflate;
+mod kind;
 mod local;
 mod names;
 mod raw;
 
 use crate::error::{ArchiveError, LimitKind, MalformedKind, Structure};
 use crate::limits::Limits;
+
+pub use kind::EntryKind;
 
 use central::CentralRecord;
 use inflate::{Decode, Sink};
@@ -54,6 +57,8 @@ pub struct ArchiveEntry<'a> {
     crc32: u32,
     local_header_offset: u64,
     decoded_size: u64,
+    version_made_by: u16,
+    external_attributes: u32,
 }
 
 impl<'a> ArchiveEntry<'a> {
@@ -113,6 +118,34 @@ impl<'a> ArchiveEntry<'a> {
     #[must_use]
     pub const fn local_header_offset(&self) -> u64 {
         self.local_header_offset
+    }
+
+    /// The central directory's `version made by` field.
+    ///
+    /// Its high byte names the host system that wrote the record, which decides
+    /// how [`ArchiveEntry::external_attributes`] is to be read.
+    #[must_use]
+    pub const fn version_made_by(&self) -> u16 {
+        self.version_made_by
+    }
+
+    /// The central directory's `external file attributes` field.
+    ///
+    /// Its meaning depends on the host system: a Unix host stores `st_mode` in
+    /// the high 16 bits, and an MS-DOS or NTFS host stores FAT attribute bits.
+    #[must_use]
+    pub const fn external_attributes(&self) -> u32 {
+        self.external_attributes
+    }
+
+    /// What the entry declares itself to be.
+    ///
+    /// This is a reading of the two fields above together with the name, never
+    /// a filesystem fact. [`crate::extract::plan`] refuses a [`EntryKind::Symlink`]
+    /// and a [`EntryKind::Special`] entry rather than planning output for it.
+    #[must_use]
+    pub fn kind(&self) -> EntryKind {
+        kind::classify(self.version_made_by, self.external_attributes, self.name)
     }
 
     /// Bytes actually produced while decoding this entry.
@@ -357,6 +390,8 @@ fn build<'a>(
             crc32: record.crc,
             local_header_offset: record.local_offset,
             decoded_size,
+            version_made_by: record.version_made_by,
+            external_attributes: record.external_attributes,
         });
     }
     Ok(ArchiveInventory {

@@ -32,10 +32,14 @@ The three library layers are reachable from the command line: `inspect`,
 `list` and `validate-structure` render them, and `capabilities().operations`
 names exactly those three. Everything below is still absent.
 
-- Extraction of any kind. Nothing writes to a filesystem, so no no-clobber
-  rule, path sanitisation policy, symlink defence or cleanup policy exists
-  yet; those are requirements in [SECURITY.md](../SECURITY.md), not
-  implemented behaviour.
+- Extraction output. Nothing writes to a filesystem, so no no-clobber rule
+  and no interrupted-write cleanup policy exists yet; those are requirements
+  in [SECURITY.md](../SECURITY.md), not implemented behaviour. The half of
+  extraction that needs no filesystem — deciding what would be written, and
+  refusing everything that could not be written safely — is implemented and
+  described under [Extraction planning](#extraction-planning). No command
+  reaches it: `capabilities().operations` still names the three reader
+  commands only.
 - Package creation, deterministic writing and any writer limits.
 - Signature handling of any kind, including `signatures.xml` (rule A7).
   `signatures.xml` is an ordinary entry to the inventory and nothing else.
@@ -60,9 +64,12 @@ Both crates set `publish = false`. The workspace uses edition 2024 and
 targets Rust 1.88 or newer.
 
 `openkrx-core` holds all format semantics and performs no I/O. Its only
-dependencies are `serde`, `miniz_oxide` and `quick-xml`; it deliberately does
-not use a general-purpose ZIP crate, because the strictness rules below are
-exactly the decisions such a crate would make differently. `openkrx-cli` owns
+dependencies are `serde`, `miniz_oxide`, `quick-xml` and
+`unicode-normalization` (MIT OR Apache-2.0), the last of which supplies the
+NFC normalisation the extraction planner compares destination paths with. It
+deliberately does not use a general-purpose ZIP crate, because the
+strictness rules below are exactly the decisions such a crate would make
+differently. `openkrx-cli` owns
 argument handling and presentation and carries no package semantics.
 
 `openkrx-core` has one feature, `synthetic-writer`, which is off by default
@@ -89,7 +96,12 @@ as a failure rather than as a success.
 | `src/archive/local.rs` | Checks each local file header, and each data descriptor, against its authoritative central-directory record. |
 | `src/archive/inflate.rs` | Bounded stored/deflate decoding with streaming limit enforcement and CRC-32 checking (corruption, not authenticity). |
 | `src/archive/names.rs` | Entry-name safety classes and collision rules, applied to raw bytes before any encoding decision. |
+| `src/archive/kind.rs` | `EntryKind` and the host-system mapping from `version made by` and `external file attributes` onto regular file, directory, symlink, special file or unknown. |
 | `src/archive/raw.rs` | Checked little-endian reads over the borrowed image; every read reports truncation at a named structure. |
+| `src/extract/mod.rs` | `plan()`, the extraction-planning entry point: `ExtractLimits`, `ExtractionPlan` and `PlanItem`, and the per-entry walk that produces them. |
+| `src/extract/error.rs` | `PlanError` and its four category enums, each mapping to a stable dotted code; `Display` prints code, entry index and numbers only. |
+| `src/extract/paths.rs` | Destination path components and the shapes that must never become one, checked against the union of the three target platforms' rules. |
+| `src/extract/collisions.rs` | NFC and case-folded path collisions, file-versus-directory conflicts, and the deduplicated implicit parent directories. |
 | `src/metadata/mod.rs` | `parse()`, the metadata entry point, and the module's public re-exports. |
 | `src/metadata/error.rs` | `MetadataError` and its three category enums; `Display` prints the code and limit numbers only, never document content. |
 | `src/metadata/limits.rs` | `MetadataLimits`, the XML ceilings, with `DEFAULT`. |
@@ -257,6 +269,28 @@ larger than that ceiling. The grammar `KER_META_V0_9` describes needs six
 levels of nesting and a few dozen elements, so the defaults are far above a
 real document and far below what a general-purpose XML reader would accept.
 
+### Extraction planning limits
+
+`ExtractLimits::DEFAULT` carries these values. They bound the *output* an
+extraction would produce and are independent of `Limits`, which bounds
+reading the archive: a caller may accept an archive it will not extract.
+
+| Limit | Default | Enforced against |
+| --- | --- | --- |
+| `max_files` | 256 | files the plan would create; directory markers do not count |
+| `max_total_bytes` | 128 MiB | decoded bytes of all planned files, summed with checked arithmetic |
+| `max_path_bytes` | 1024 | each destination path in UTF-8 bytes, separators included |
+| `max_component_bytes` | 255 | each path component in UTF-8 bytes |
+| `max_depth` | 16 | components in one destination path |
+
+`max_files` and `max_total_bytes` match the archive-side `max_entries` and
+`max_total_decoded_bytes`, because a plan can never describe more files, or
+more bytes, than an accepted inventory holds; they are stated separately so a
+caller can extract under a tighter bound than it reads under.
+`max_component_bytes` is the smallest component length the common
+filesystems agree on, and `max_path_bytes` and `max_depth` are sized far
+above the layout rules A4, A5 and A10 imply.
+
 ## Structural check inventory
 
 `openkrx_core::profile::check` runs these eleven checks, in this order —
@@ -315,6 +349,113 @@ conformance while [profile.md](profile.md#unresolved-essential-rules) lists
 unresolved essential rules, and a package that is internally consistent may
 still be refused by a real service (M15). There is deliberately no `valid`,
 `conforming` or `is_krx` field in the API.
+
+## Extraction planning
+
+`openkrx_core::extract::plan` turns an `ArchiveInventory` into an
+`ExtractionPlan`: the list of files an extraction would create, decided
+before anything is created. It is a pure function of the inventory and the
+limits — no filesystem, clock, process or network access, allocation
+proportional to the entry count, and the same plan for the same inventory
+every time.
+
+The split is deliberate. Every rule
+[SECURITY.md](../SECURITY.md#required-threat-model-for-package-support)
+requires of extraction that does **not** need a filesystem is decided here,
+where it can be tested exhaustively without touching a disk. What is left for
+the follow-up command ticket is the filesystem half alone: joining a plan
+onto a caller-selected destination, no-clobber creation, the interrupted-write
+commit and cleanup policy, streaming each entry's bytes through
+`ArchiveInventory::entry_bytes`, and the `extract` command and its exit
+statuses. Until that lands, `capabilities().operations` names the three
+reader commands and nothing else, and no `extract.*` code is reachable from
+the command line.
+
+A plan carries no `PathBuf`, no absolute path and no platform separator. A
+`PlanItem` holds the entry index, the destination path as a `Vec<String>` of
+components, the declared size and the decoded size; the plan holds the items
+in central-directory order, the total decoded bytes, the deduplicated implicit
+parent directories in sorted order, and the limits it was produced under. What
+a path is, and where it is rooted, stays the caller's decision.
+
+**A planning failure rejects the whole plan.** Nothing is skipped, renamed or
+partially planned: a caller handed a quietly reduced plan would extract a
+package that is not the package it was given. Every code is catalogued in
+[codes.md](codes.md#extraction-planning-codes).
+
+### Entry kinds
+
+A ZIP archive declares what an entry *is* in two central-directory fields the
+inventory now reports: `version made by`, whose high byte names the host
+system, and `external file attributes`, whose meaning depends on that host.
+`ArchiveEntry::kind()` maps them onto `EntryKind`:
+
+| Condition | Kind |
+| --- | --- |
+| The name ends in `/` | `DirectoryMarker`, whatever the attributes say |
+| Host 3 (Unix), `st_mode` in the high 16 attribute bits: `S_IFREG` / `S_IFDIR` / `S_IFLNK` | `RegularFile` / `DirectoryMarker` / `Symlink` |
+| Host 3, any other mode, including a mode of zero | `Special` |
+| Hosts 0, 10, 11, 14 (MS-DOS, NTFS, MVS, VFAT), FAT attribute bit `0x10` | `DirectoryMarker`, else `RegularFile` |
+| Any other host system | `Unknown` |
+
+A `Symlink` and a `Special` entry reject the plan, with
+`extract.unsupported.link` and `extract.unsupported.special_file`: a link is
+never created, and its target text is never written as an ordinary file
+either. A `DirectoryMarker` produces no item. An `Unknown` entry is planned as
+an ordinary file — a name ending in `/` has already been classified as a
+directory, so nothing about the name is being assumed — and a `Special`
+result from a Unix entry whose mode states no file type is a refusal rather
+than a guess.
+
+### Path rules
+
+The entry name must be valid UTF-8 (`extract.unsupported.non_utf8_name`);
+rule A21 leaves the intended encoding unresolved, so no code page is guessed.
+The name is split on `/`, the only separator rule A8 permits, and each
+component is checked against the union of the three target platforms' rules,
+not the rules of the platform the planner happens to run on. A component may
+not be empty, `.` or `..`, may not hold a NUL, another C0 control or a C1
+control character, may not end with `.` or a space, may not be a Windows
+reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+`LPT1`–`LPT9`, with or without an extension, compared ASCII
+case-insensitively), and may not hold `:`. Each violation has its own
+`extract.unsafe_path.*` code, and the diagnostic carries the entry index
+only, never the component.
+
+Several of those classes — `..`, a C0 control, an absolute first component —
+are already impossible in an accepted inventory, because `archive::names`
+refuses such a name outright. They are checked again because the planner's
+output must be safe on its own terms rather than because an earlier layer is
+assumed to have run.
+
+### Collision policy
+
+Two outputs that a filesystem could not keep apart are **refused, never
+resolved**, as
+[SECURITY.md](../SECURITY.md#required-threat-model-for-package-support)
+requires. Renaming one would hand the caller a file whose name is not the
+name the package declares; skipping one would report success over a partial
+result.
+
+- Two destination paths equal after NFC normalisation and case folding are
+  `extract.ambiguous.collision`. That is what a normalising or
+  case-insensitive filesystem — APFS, NTFS, a case-insensitive ext4
+  directory — would see. Case folding uses `char::to_lowercase`, the Unicode
+  *simple* lowercase mapping, which approximates full case folding; the
+  residual risk is recorded in
+  [SECURITY.md](../SECURITY.md#threat-model-mapping-extraction-planning-layer).
+  A byte-identical or plainly case-folded duplicate never reaches the
+  planner: the inventory already refuses it as
+  `archive.ambiguous.duplicate_name` or `.case_folded_duplicate_name`.
+  Normalising to NFC first is what closes the remaining gap.
+- A path that is a directory prefix of another output is
+  `extract.ambiguous.file_directory_conflict`: `a` and `a/b` cannot both
+  exist. The reported entry is the later of the two.
+
+Directories in a plan are implicit: they are the parents of planned files,
+deduplicated and sorted component-wise so a parent precedes its children. An
+empty directory is deliberately **not** materialised, so a directory marker
+with nothing beneath it produces nothing at all.
 
 ## Command contract and JSON envelope
 

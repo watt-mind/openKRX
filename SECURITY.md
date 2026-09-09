@@ -61,8 +61,10 @@ package operations in the capabilities response.
 Each required archive check above, the stable error-code prefix it produces,
 and the test that holds it. Test names are in `crates/openkrx-core/tests/`.
 Limits appear in [architecture.md](docs/architecture.md#archive-inventory-limits).
-Extraction, output and writer rows do not exist yet; those checks are
-unimplemented, not passing.
+The extraction rows are in
+[their own table below](#threat-model-mapping-extraction-planning-layer) and
+are planning only; filesystem output and the writer rows do not exist yet,
+and those checks are unimplemented, not passing.
 
 | Required check | Error code prefix | Test |
 | --- | --- | --- |
@@ -111,6 +113,64 @@ Neither layer is fuzzed yet. The exhaustive truncation sweeps and the
 single-byte mutation sweeps are the compensating checks until a fuzz target
 lands; an `xml_metadata` target belongs in that work alongside the archive
 one.
+
+## Threat-model mapping: extraction planning layer
+
+`openkrx_core::extract::plan` decides what an extraction would create. It is
+a pure function of the archive inventory: it opens nothing, writes nothing
+and consults no filesystem. **Every row here is planning only; filesystem
+output is pending.** A row states that an unsafe extraction is refused before
+it could start, never that a safe extraction was performed, and no command
+reaches this layer yet — `capabilities().operations` still names the three
+reader commands only.
+
+Test names are in `crates/openkrx-core/tests/`, except the two component
+classes an accepted inventory can no longer carry, whose tests are the
+`#[cfg(test)]` module in `crates/openkrx-core/src/extract/paths.rs`. Limits
+appear in
+[architecture.md](docs/architecture.md#extraction-planning-limits) and the
+rules in
+[architecture.md](docs/architecture.md#extraction-planning).
+
+| Required check | Status | Error code prefix | Test |
+| --- | --- | --- | --- |
+| No traversal or absolute destination: every component is validated, and `..`, `.`, an empty component and a control character are refused | Planning only; filesystem output pending | `extract.unsafe_path.parent_component`, `.current_component`, `.empty_component`, `.control_character` | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_unsafe_component_class_is_refused`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
+| No platform-ambiguous destination: a trailing dot or space, a Windows reserved device name, and a colon are refused whatever the host platform | Planning only; filesystem output pending | `extract.unsafe_path.trailing_dot`, `.trailing_space`, `.reserved_device_name`, `.colon` | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| No symlink or reparse-point escape: a link entry rejects the plan and is never created, nor written as its target text | Planning only; filesystem output pending | `extract.unsupported.link` | `a_symlink_entry_rejects_the_whole_plan`, `entry_kinds_are_read_from_the_central_directory_fields` |
+| No special files: a device node, socket, FIFO or a Unix mode stating no file type rejects the plan | Planning only; filesystem output pending | `extract.unsupported.special_file` | `a_special_file_entry_rejects_the_whole_plan` |
+| No implicit character-set guessing for a destination name | Planning only; filesystem output pending | `extract.unsupported.non_utf8_name` | `a_name_that_is_not_utf8_is_refused_rather_than_decoded` |
+| Specified Unicode and case collisions, refused rather than resolved | Planning only; filesystem output pending | `extract.ambiguous.collision`, `.file_directory_conflict` | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision`, `a_file_that_is_also_a_directory_prefix_is_refused`, `a_shared_file_name_in_different_directories_is_not_a_collision` |
+| Documented output limits — file count, total bytes, path, component and depth — with checked arithmetic | Planning only; filesystem output pending | `extract.over_limit.files`, `.total_bytes`, `.path_bytes`, `.component_bytes`, `.depth` | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary`, `the_path_length_limit_holds_at_its_boundary`, `the_component_length_limit_holds_at_its_boundary`, `the_depth_limit_holds_at_its_boundary` |
+| A failure prevents the operation reporting success: a rejection rejects the whole plan, never a reduced one | Planning only; filesystem output pending | every `extract.*` code | every rejection test above; each asserts that no plan was produced |
+| No panic on any input | Planning only; filesystem output pending | any code; never a panic | `planning_every_fixture_inventory_never_panics`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
+| Diagnostics free of personal content and private paths | Planning only; filesystem output pending | every code; `Display` prints code, entry index and limit numbers only | `error_display_carries_codes_and_numbers_but_no_entry_name` |
+| Confinement to a caller-selected destination, no-clobber creation, commit and cleanup after an interrupted write | **Not implemented** | — | — |
+
+### Residual risks of this layer
+
+- **Case folding is the simple mapping.** Collision detection normalises to
+  NFC and lower-cases with `char::to_lowercase`, the Unicode *simple*
+  lowercase mapping, not full case folding. The two agree for the Latin,
+  Greek and Cyrillic text these names can realistically hold, but a pair
+  that only full case folding equates — a Cherokee or Deseret pair, or a
+  final sigma against its non-final form in an unusual position — would pass
+  planning and could still collide on a case-insensitive filesystem. A
+  no-clobber creation rule in the filesystem half is the compensating
+  control, and it is not implemented yet.
+- **Normalisation form is a choice, not a fact.** A filesystem that stores
+  NFD (older APFS behaviour) or normalises on lookup may equate paths this
+  layer keeps apart in the other direction. The plan is refused where a
+  collision is visible under NFC; nothing here can predict every
+  filesystem's own folding.
+- **A Unix mode of zero is treated as a special file.** Some writers set a
+  Unix host system without a meaningful `st_mode`. Such an archive is
+  refused rather than extracted on an assumption. If a real producer is ever
+  observed doing this, it is a documented decision to revisit with evidence,
+  not a bug to fix by guessing.
+- **Planning proves nothing about writing.** A produced plan says a
+  destination is describable, not that it can be created: permissions, an
+  existing file, a case-insensitive filesystem and a concurrent writer are
+  all invisible to a pure function. The filesystem ticket owns them.
 
 ## Threat-model mapping: command-line input layer
 

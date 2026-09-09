@@ -34,6 +34,37 @@ and such a change is recorded here explicitly.
   blocks. [docs/references.md](docs/references.md) records each source's
   retrieval status and copyright terms; no schema, sample or document text
   is committed, because none of the sources grants redistribution.
+- **Protected extraction planning, without any filesystem (KRX-05, planning
+  half).** `openkrx_core::extract::plan` turns an archive inventory into an
+  `ExtractionPlan`: the files an extraction would create, decided before
+  anything is created. It is a pure function of the inventory — no
+  filesystem, clock, process or network access, allocation proportional to
+  the entry count, and the same plan for the same inventory every time. A
+  plan holds no `PathBuf`, no absolute path and no platform separator; each
+  item carries the entry index, the destination path as components, the
+  declared size and the decoded size, beside the total bytes and the
+  deduplicated implicit parent directories. Five documented limits —
+  `max_files` 256, `max_total_bytes` 128 MiB, `max_path_bytes` 1024,
+  `max_component_bytes` 255 and `max_depth` 16 — bound the output.
+  `ArchiveEntry` now reports the central directory's `version made by` and
+  `external file attributes`, and derives `EntryKind` from them, which is
+  how a symbolic link, a device node and a directory are recognised: a link
+  or a special file rejects the plan rather than being written, and a
+  directory marker produces no item, so an empty directory is never
+  materialised. Destination components are validated against the union of
+  the three target platforms' rules, and two outputs a filesystem could not
+  keep apart — equal after NFC normalisation and case folding, or one a
+  directory prefix of the other — are refused, never renamed or skipped, as
+  is any failure: a rejection rejects the whole plan. Eighteen new
+  `extract.*` codes are catalogued in
+  [docs/codes.md](docs/codes.md#extraction-planning-codes), the rules in
+  [docs/architecture.md](docs/architecture.md#extraction-planning), and the
+  threat-model rows, marked planning only with filesystem output pending,
+  in [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer).
+  Nothing writes and no command reaches the planner:
+  `capabilities().operations` still names the three reader commands only.
+  `unicode-normalization` (MIT OR Apache-2.0) is a new dependency of the
+  core crate, for NFC alone.
 - **A bounded, profile-agnostic archive inventory (KRX-02).**
   `openkrx_core::archive::inventory` reads a caller-supplied ZIP byte slice
   and reports what the archive contains. It performs no filesystem, clock,

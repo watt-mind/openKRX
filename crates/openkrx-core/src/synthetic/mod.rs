@@ -102,6 +102,11 @@ pub struct Entry {
     pub trailer: Vec<u8>,
     /// Local-header offset override written into the central directory.
     pub local_offset: Option<u32>,
+    /// `version made by` written into the central-directory record; its high
+    /// byte is the host system that decides how `external_attributes` reads.
+    pub version_made_by: u16,
+    /// `external file attributes` written into the central-directory record.
+    pub external_attributes: u32,
 }
 
 impl Entry {
@@ -133,6 +138,8 @@ impl Entry {
             central_signature: None,
             trailer: Vec::new(),
             local_offset: None,
+            version_made_by: 20,
+            external_attributes: 0,
         }
     }
 
@@ -143,6 +150,33 @@ impl Entry {
         entry.data = compress_to_vec(data, 6);
         entry.method = DEFLATE;
         entry
+    }
+
+    /// Declare the entry with a Unix host system and `mode` as its `st_mode`.
+    ///
+    /// This is how an archive states that an entry is a symbolic link, a
+    /// device node or a directory, so it is how a test builds one.
+    #[must_use]
+    pub const fn with_unix_mode(mut self, mode: u32) -> Self {
+        self.version_made_by = (3 << 8) | 20;
+        self.external_attributes = mode << 16;
+        self
+    }
+
+    /// Declare the entry with an MS-DOS host system and `attributes` as its
+    /// FAT attribute bits, of which bit 4 (`0x10`) marks a directory.
+    #[must_use]
+    pub const fn with_dos_attributes(mut self, attributes: u32) -> Self {
+        self.version_made_by = 20;
+        self.external_attributes = attributes;
+        self
+    }
+
+    /// Declare the entry with a host system this reader does not map.
+    #[must_use]
+    pub const fn with_host_system(mut self, host: u16) -> Self {
+        self.version_made_by = (host << 8) | 20;
+        self
     }
 
     /// Attach a data descriptor that repeats the entry's own values.
@@ -196,7 +230,7 @@ impl Entry {
     fn central_record(&self, offset: u32) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&self.central_signature.unwrap_or(CENTRAL_SIGNATURE));
-        out.extend_from_slice(&20_u16.to_le_bytes());
+        out.extend_from_slice(&self.version_made_by.to_le_bytes());
         out.extend_from_slice(&20_u16.to_le_bytes());
         out.extend_from_slice(&self.flags.to_le_bytes());
         out.extend_from_slice(&self.central_method.unwrap_or(self.method).to_le_bytes());
@@ -216,7 +250,7 @@ impl Entry {
         out.extend_from_slice(&len16(&self.central_comment).to_le_bytes());
         out.extend_from_slice(&self.disk_start.to_le_bytes());
         out.extend_from_slice(&0_u16.to_le_bytes());
-        out.extend_from_slice(&0_u32.to_le_bytes());
+        out.extend_from_slice(&self.external_attributes.to_le_bytes());
         out.extend_from_slice(&self.local_offset.unwrap_or(offset).to_le_bytes());
         out.extend_from_slice(&self.name);
         out.extend_from_slice(&self.central_extra);
