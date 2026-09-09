@@ -9,13 +9,31 @@ coverage, and security scanning. The initial workspace line-coverage floor
 is 90%. Crates are unpublished and tests use the committed lockfile.
 
 Current tests cover the capability model and executable contract, including
-JSON shape, help/version, and argument rejection. They provide no evidence
-about archive or XML safety because those operations do not exist yet.
+JSON shape, help/version, and argument rejection, plus the bounded archive
+inventory. They provide no evidence about XML safety, extraction, or profile
+conformance, because those operations do not exist yet.
+
+## Implemented test layers
+
+The archive inventory is covered by `crates/openkrx-core/tests/`:
+`archive_inventory.rs` for accepted archives and reported observations,
+`archive_rejects_structure.rs` for contradictory records, ambiguity, coverage
+gaps, truncation and corrupt streams, and `archive_rejects_input.rs` for limit
+boundaries, unsafe names, collisions and unsupported features. Every archive
+is generated programmatically by the test-only writer in `tests/support/`,
+which deliberately permits contradictory headers; no binary fixture is
+committed. Each test asserts a stable error code, so one rejection category
+cannot silently become another, and
+[SECURITY.md](../SECURITY.md#threat-model-mapping-archive-layer) maps every
+required check to its code prefix and test.
+
+Two sweeps stand in for the fuzz target that does not exist yet: every prefix
+of every representative archive must be rejected without panicking, and every
+single-byte mutation of a valid archive must return without panicking.
 
 ## Required future test layers
 
-- Core unit tests: bounded ZIP inventory, actual decoded byte accounting,
-  malformed XML, profile rules, ambiguity, and checked arithmetic.
+- Core unit tests: malformed XML, profile rules, and metadata ambiguity.
 - CLI integration tests: exact JSON/exit-status contracts, terminal-safe
   human output, sensitive-data-free diagnostics, and bounded stdin/files.
 - Filesystem tests: traversal, Unicode/case collisions, existing targets,

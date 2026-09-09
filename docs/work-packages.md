@@ -28,6 +28,16 @@ packages below, not as open design choices.
 
 ## KRX-02: Bounded archive inventory
 
+Status: implemented. `openkrx_core::archive::inventory` reads a bounded,
+profile-agnostic inventory from a caller-supplied byte slice. Concrete limits,
+supported methods and peak-memory behavior are published in
+[architecture.md](architecture.md#safety-and-determinism); the threat-model
+mapping is in [SECURITY.md](../SECURITY.md#threat-model-mapping-archive-layer).
+A fuzz target is still outstanding and tracked separately; the truncation and
+mutation sweeps in [testing.md](testing.md#implemented-test-layers) stand in
+for it. No CLI command exposes the inventory, so `capabilities().operations`
+remains empty.
+
 Dependencies: KRX-01's archive-level rules. Owner: core reader contributor;
 `crates/openkrx-core/` archive/limits/errors modules and synthetic tests.
 
@@ -38,7 +48,8 @@ filesystem writes or attachment decoding. Document memory behavior.
 
 Verification: limit boundaries, hostile header/stream disagreements,
 duplicate and overlapping entries, compression bombs, and malformed archive
-regressions; add a fuzz target and update the threat-model mapping.
+regressions; update the threat-model mapping. A fuzz target and its CI lane
+remain outstanding.
 
 Must treat as unknown: directory nesting and the location of the `mimetype`
 entry, that entry's compression method and byte-exactness, entry-name
