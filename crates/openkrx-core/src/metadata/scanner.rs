@@ -12,7 +12,11 @@
 //!   external-entity attack must produce first;
 //! - a processing instruction other than the XML declaration is refused;
 //! - depth, element count, per-element attribute count and total character
-//!   data are counted while streaming, against produced values only.
+//!   data are counted while streaming, against produced values only. Element
+//!   text, CDATA and attribute values are all measured raw before they are
+//!   materialised, so the copy taken from one event never exceeds
+//!   `max_text_bytes`; a general entity reference resolves to at most one
+//!   character, so it needs no such probe.
 //!
 //! quick-xml resolves no external identifier and opens no stream of its own,
 //! and this crate performs no filesystem, clock, process or network access, so
@@ -148,8 +152,14 @@ impl<'a> Scanner<'a> {
                 self.depth = self.depth.saturating_sub(1);
                 Ok(Some(Node::Close))
             }
-            Event::Text(text) => self.text(&text.xml10_content()),
-            Event::CData(data) => self.text(&data.xml10_content()),
+            Event::Text(text) => {
+                self.reserve_text(text.len() as u64)?;
+                self.text(&text.xml10_content())
+            }
+            Event::CData(data) => {
+                self.reserve_text(data.len() as u64)?;
+                self.text(&data.xml10_content())
+            }
             Event::GeneralRef(reference) => {
                 let resolved_text = resolve_reference(&reference)?;
                 self.text(&resolved_text)
@@ -201,15 +211,18 @@ impl<'a> Scanner<'a> {
     /// Count attributes and reject malformed or over-limit attribute lists.
     ///
     /// Every value is unescaped here rather than lazily, so an entity hidden in
-    /// an attribute cannot slip past the entity rule above.
-    fn check_attributes(&self, start: &BytesStart<'_>) -> Result<(), MetadataError> {
+    /// an attribute cannot slip past the entity rule above. The value's raw
+    /// length is reserved before it is normalised, and its normalised length is
+    /// charged afterwards, so attribute text is bounded exactly as element
+    /// text is; the list is counted first, so the count limit is reported
+    /// ahead of the text limit when an element crosses both.
+    fn check_attributes(&mut self, start: &BytesStart<'_>) -> Result<(), MetadataError> {
+        // The whole list is counted before any of its text is charged, so an
+        // element carrying too many attributes reports the count rather than
+        // the text bound it may cross on the way there.
         let mut count = 0_u32;
         for attribute in start.attributes().with_checks(true) {
-            let attribute: Attribute<'_> =
-                attribute.map_err(|_| MetadataError::malformed(XmlMalformedKind::Attribute))?;
-            attribute
-                .normalized_value(XmlVersion::Implicit1_0)
-                .map_err(|_| MetadataError::malformed(XmlMalformedKind::Entity))?;
+            attribute.map_err(|_| MetadataError::malformed(XmlMalformedKind::Attribute))?;
             count = count.saturating_add(1);
             if count > self.limits.max_attributes_per_element {
                 return Err(MetadataError::over_limit(
@@ -218,6 +231,37 @@ impl<'a> Scanner<'a> {
                     u64::from(count),
                 ));
             }
+        }
+        for attribute in start.attributes().with_checks(true) {
+            let attribute: Attribute<'_> =
+                attribute.map_err(|_| MetadataError::malformed(XmlMalformedKind::Attribute))?;
+            self.reserve_text(attribute.value.len() as u64)?;
+            let value = attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|_| MetadataError::malformed(XmlMalformedKind::Entity))?;
+            self.charge_text(value.len() as u64)?;
+        }
+        Ok(())
+    }
+
+    /// Refuse an event whose raw bytes cannot fit the remaining headroom.
+    ///
+    /// This runs before an event is unescaped or copied, so the copy
+    /// materialised from one event is bounded by `max_text_bytes`. The raw
+    /// event itself is already in the reader's buffer by then and stays
+    /// bounded by `max_document_bytes`. Unescaping and end-of-line
+    /// normalisation never grow a value, so a raw length within the headroom
+    /// guarantees the materialised one is too; the converse does not hold, and
+    /// an event whose raw form exceeds the headroom is refused even when its
+    /// materialised form would have fitted.
+    fn reserve_text(&self, raw_bytes: u64) -> Result<(), MetadataError> {
+        let projected = self.text_bytes.saturating_add(raw_bytes);
+        if projected > self.limits.max_text_bytes {
+            return Err(MetadataError::over_limit(
+                XmlLimitKind::TextBytes,
+                self.limits.max_text_bytes,
+                projected,
+            ));
         }
         Ok(())
     }

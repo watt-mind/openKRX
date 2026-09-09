@@ -122,10 +122,22 @@ pub(crate) fn marker(inventory: &ArchiveInventory<'_>) -> Result<Marker, crate::
     }
 }
 
-/// The first entry whose last path segment is exactly `mimetype`.
+/// The entry A2 describes, or the first one merely shaped like it.
+///
+/// A first entry named exactly `mimetype` is what A2 states, so it is chosen
+/// even when some other entry's last path segment is also `mimetype`: without
+/// this, a `KRX/OCD/mimetype` listed ahead of the real marker would be the only
+/// entry ever inspected. Everything else falls back to the first entry whose
+/// last path segment matches, which A19 leaves open and `marker` reports as an
+/// observation rather than a finding.
 fn find_marker<'a, 'b>(inventory: &'b ArchiveInventory<'a>) -> Option<(u32, &'b ArchiveEntry<'a>)> {
-    inventory
-        .entries()
+    let entries = inventory.entries();
+    if let Some(first) = entries.first()
+        && first.name_bytes() == MARKER_NAME
+    {
+        return Some((0, first));
+    }
+    entries
         .iter()
         .enumerate()
         .find(|(_, entry)| last_segment(entry.name_bytes()) == MARKER_NAME)

@@ -13,6 +13,13 @@ use crate::metadata::{ConsignmentKind, Metadata, SourceSystem};
 ///
 /// The enum is `#[non_exhaustive]`: a rule leaving the unresolved list removes
 /// nothing from the API, but a newly discovered ambiguity may add a variant.
+///
+/// Not every variant is reachable from a report. `A20`, `A21`, `A22` and `M15`
+/// are reserved identifiers for rules no check asserts at all — the report
+/// deliberately says nothing about them rather than guessing — so that
+/// `docs/conformance.md` can address every unresolved rule by the same name a
+/// caller can match on. They are kept for that reason and are never
+/// constructed by [`crate::profile::check`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum RuleId {
@@ -183,6 +190,10 @@ pub enum ReferenceResolution {
 }
 
 /// One declared attachment and what the archive actually holds for it.
+///
+/// Declared paths, file names and sizes are package content. The `Debug`
+/// representation prints them verbatim and must never be logged, persisted or
+/// sent through telemetry.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct AttachmentResolution {
@@ -204,6 +215,9 @@ pub struct AttachmentResolution {
 }
 
 /// What the archive was observed to contain, beyond the check outcomes.
+///
+/// Every field is package content. The `Debug` representation prints it
+/// verbatim and must never be logged, persisted or sent through telemetry.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct Observations {
@@ -224,6 +238,12 @@ pub struct Observations {
 }
 
 /// The result of [`crate::profile::check`].
+///
+/// The report carries the observations, the attachment resolutions and the
+/// parsed document, all of which are package content. The `Debug`
+/// representation prints that content verbatim and must never be logged,
+/// persisted or sent through telemetry; the check outcomes and their stable
+/// codes are the part that is safe to report.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct StructureReport {

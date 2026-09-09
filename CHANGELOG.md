@@ -201,3 +201,21 @@ and such a change is recorded here explicitly.
   an image with no usable end record is reported as
   `archive.malformed.eocd_missing`, as before. `Structure` is
   `#[non_exhaustive]`, so no consumer match was exhaustive over it.
+
+### Fixed
+
+- **Metadata and profile precision.** A repeated `MELLEKLETEK` under one
+  `EXPEDIALAS` is now refused as `metadata.malformed.duplicate_element`, like
+  every sibling field, instead of being merged into the first list and
+  surfacing later as a count mismatch. A first archive entry named exactly
+  `mimetype` is the entry the marker check inspects, even when another entry's
+  last path segment is also `mimetype`; a marker only under a directory prefix
+  stays an unresolved A19 observation. `max_text_bytes` now covers attribute
+  values as well as element text, and each event's raw length is checked
+  against the remaining headroom before the event is unescaped, so the copy
+  materialised from one event never exceeds that bound; the raw event stays in
+  the reader's buffer, bounded by `max_document_bytes`. `Metadata`, `StructureReport`,
+  `Observations` and `AttachmentResolution` document that their `Debug`
+  representation carries package content and must not be logged, and
+  `RuleId::A20`, `A21`, `A22` and `M15` are documented as reserved identifiers
+  for rules no check asserts.
