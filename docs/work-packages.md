@@ -97,6 +97,20 @@ verdict may be emitted while any of them stands.
 
 ## KRX-04: Reader CLI and stable output
 
+Status: implemented. `openkrx inspect`, `openkrx list` and
+`openkrx validate-structure` each take one file or `-`, read at most
+`Limits::DEFAULT.max_archive_bytes + 1` bytes, and render
+`openkrx_core::archive::inventory` and `openkrx_core::profile::check` without
+adding any package semantics. The command contract, the data shapes and the
+eight exit statuses are published in
+[architecture.md](architecture.md#command-contract-and-json-envelope) and
+[Exit statuses](architecture.md#exit-statuses); the two `input.*` codes are in
+[codes.md](codes.md). `capabilities().operations` now names exactly those
+three commands and the stage is `reader`. `validate-structure` renders every
+check as its own outcome and never collapses one into a verdict: `consistent`
+means only that nothing failed and nothing was left undecided. No limit
+override, no extraction and no write of any kind exists.
+
 Dependencies: KRX-02 and KRX-03, both implemented; the CLI renders
 `openkrx_core::archive::inventory` and `openkrx_core::profile::check` and adds
 no package semantics of its own. Owner: CLI contributor;
@@ -116,7 +130,11 @@ diagnostics. Exercise Linux, macOS, and Windows CI.
 
 ## KRX-05: Protected extraction
 
-Dependencies: KRX-02 and KRX-04. Owner: extraction contributor; core planning
+Dependencies: KRX-02 and KRX-04, both implemented. `extract` joins the
+existing command surface: it reuses the bounded input reader, the one-object
+JSON envelope, the exit-status categories and the content-free diagnostic
+rule of KRX-04, and adds the filesystem statuses and codes that writing
+needs. Owner: extraction contributor; core planning
 and CLI filesystem output modules, extraction tests, security documentation.
 
 Acceptance: `extract` plans before writes, preserves payload bytes, enforces

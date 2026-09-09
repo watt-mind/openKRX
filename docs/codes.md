@@ -11,12 +11,21 @@ enum is `#[non_exhaustive]`; a consumer matches on the code string and must
 treat an unknown code as a failure rather than as a success.
 
 `scripts/check-codes.py` keeps this catalogue honest. It extracts every
-`"archive.…"` and `"metadata.…"` string literal from `crates/*/src/**` and
-fails when a code exists in the sources but not here, or here but not in the
-sources. It runs as part of `bash scripts/check.sh`.
+`"archive.…"`, `"input.…"` and `"metadata.…"` string literal from
+`crates/*/src/**` and fails when a code exists in the sources but not here,
+or here but not in the sources. It runs as part of `bash scripts/check.sh`.
 
-Test names below are functions in `crates/openkrx-core/tests/`. Where a code
+Test names below are functions in `crates/openkrx-core/tests/`, except in the
+input section, whose tests are in `crates/openkrx-cli/tests/`. Where a code
 has several asserting tests, the most specific one is named.
+
+Each code also classifies to one exit status, listed in
+[architecture.md](architecture.md#exit-statuses): `input.*` to 5,
+`*.truncated.*`, `*.malformed.*`, `*.ambiguous.*`, `archive.unsafe_name.*` and
+`archive.no_such_entry` to 6, `*.unsupported.*` to 7, and `*.over_limit.*` to
+8 — except `input.over_limit.archive_bytes`, which is an input problem because
+nothing was parsed at all. A structural-check code is never an exit status of
+its own: `validate-structure` reports 3 when any check failed.
 
 ## Reading a diagnostic
 
@@ -34,6 +43,21 @@ The **fields** column names the numeric data the error variant carries.
 `observed` the value that reached it, and `value` an offending numeric such
 as a compression-method identifier. Where a field is optional, it is present
 only when the failure is scoped to a single entry.
+
+## Input codes
+
+`openkrx-cli`, defined in `crates/openkrx-cli/src/input.rs` and
+`crates/openkrx-cli/src/exit.rs`. These are the only codes the command-line
+crate defines: the core crate performs no I/O, so reading the one input a
+reader command takes is the only failure it can produce on its own. Neither
+code carries a path, and neither says which of the possible I/O failures
+occurred, because that distinction is not part of the contract and can leak
+the shape of a filesystem.
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `input.unreadable` | The named file, or standard input, could not be opened or read: it does not exist, it is a directory, it is not permitted, or the read failed part-way. | — | `an_unreadable_input_is_status_five` |
+| `input.over_limit.archive_bytes` | The input reached the input cap, one byte past `Limits::DEFAULT.max_archive_bytes`, and was refused before any parsing began. `limit` is the archive ceiling and `observed` the cap, because reading stops there and the real length is never learned. | `limit`, `observed` | `an_input_past_the_cap_is_refused_before_parsing` |
 
 ## Archive codes
 

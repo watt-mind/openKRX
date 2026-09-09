@@ -28,11 +28,10 @@ rules that no primary source settles, so that claim is not available.
 
 ## Not yet implemented
 
-The library layers below are reachable from Rust only. No command exposes
-them, and `capabilities().operations` is therefore empty.
+The three library layers are reachable from the command line: `inspect`,
+`list` and `validate-structure` render them, and `capabilities().operations`
+names exactly those three. Everything below is still absent.
 
-- Every reader command: `inspect`, `list` and `validate-structure`. Their
-  contracts are specified in [work-packages.md](work-packages.md), not here.
 - Extraction of any kind. Nothing writes to a filesystem, so no no-clobber
   rule, path sanitisation policy, symlink defence or cleanup policy exists
   yet; those are requirements in [SECURITY.md](../SECURITY.md), not
@@ -66,6 +65,13 @@ not use a general-purpose ZIP crate, because the strictness rules below are
 exactly the decisions such a crate would make differently. `openkrx-cli` owns
 argument handling and presentation and carries no package semantics.
 
+`openkrx-core` has one feature, `synthetic-writer`, which is off by default
+and compiles the test-only synthetic writers in `src/synthetic/`. It exists so
+that the command-line crate's subprocess tests can build the same archives the
+core tests build, without a duplicate writer and without a committed binary
+fixture. Both crates enable it as a development dependency only; `cargo build`
+and `cargo build --release` never compile it into a binary.
+
 The error, check-outcome and rule-identifier enums are `#[non_exhaustive]`.
 A consumer matches on the stable dotted code, and must treat an unknown code
 as a failure rather than as a success.
@@ -95,12 +101,22 @@ as a failure rather than as a success.
 | `src/profile/locate.rs` | Finds the metadata candidate and the format marker by shape, reporting the observed prefix and casing as facts. |
 | `src/profile/references.rs` | Resolves `ELHELYEZKEDES` joined to `FAJL_NEV` against real entry names, byte-exactly or as a prefix variant. |
 | `src/profile/report.rs` | `CheckId`, `CheckOutcome`, `RuleId`, `StructureReport`, `StructureSummary` and the observation and attachment-resolution types. |
+| `src/synthetic/mod.rs` | Test-only synthetic ZIP writer, behind the non-default `synthetic-writer` feature; it can emit contradictory headers on purpose so hostile archives are built exactly. No released binary contains it. |
+| `src/synthetic/meta.rs` | Test-only synthetic metadata documents and KRX-shaped archives, built from values authored for this repository. |
 
 ### Module map: `openkrx-cli`
 
 | File | Responsibility |
 | --- | --- |
-| `src/main.rs` | The whole executable: the `clap` parser, the `capabilities` subcommand, the human line pair, and the one-object JSON response. |
+| `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the two core entry points, and hands the result to a renderer. |
+| `src/input.rs` | The only I/O in openKRX: opening a file exactly as named, or reading standard input as binary, bounded by the input cap. |
+| `src/exit.rs` | `Category`, the eight exit statuses, and the single classifier from a stable dotted code to one of them. |
+| `src/commands/mod.rs` | The shared check, outcome and name views every command's report is built from. |
+| `src/commands/inspect.rs` | The `inspect` report: observations, the declared document, and every check. |
+| `src/commands/list.rs` | The `list` report: one row per archive entry, in central-directory order. |
+| `src/commands/validate.rs` | The `validate-structure` report: the summary word, the checks, and the undecided rules. |
+| `src/render/json.rs` | The one-object JSON envelope, in both its successful and its failed shape. |
+| `src/render/human.rs` | Terminal-safe text: control, invisible and undecodable bytes are escaped and a long name is cut. |
 
 ## Format scope
 
@@ -302,12 +318,52 @@ still be refused by a real service (M15). There is deliberately no `valid`,
 
 ## Command contract and JSON envelope
 
-`openkrx --help`, `openkrx --version` and `openkrx capabilities [--json]`
-are the entire supported CLI surface. Help and version use the argument
-parser's normal output. No other command exists, and none of the three
-library layers is reachable from the command line.
+The supported surface is `openkrx --help`, `openkrx --version`,
+`openkrx capabilities [--json]`, and the three reader commands:
 
-In JSON mode, `capabilities` writes exactly one JSON object on stdout:
+```text
+openkrx inspect            <FILE|-> [--json]
+openkrx list               <FILE|-> [--json]
+openkrx validate-structure <FILE|-> [--json]
+```
+
+Each reader command takes exactly one input: a path, opened exactly as
+written with no normalisation, globbing or extension inference on any
+platform, or `-` for standard input, read as binary on every platform. There
+are no limit-override flags, no colour or TTY detection, no configuration
+file and no shell completions; the same arguments produce the same bytes on
+every supported system.
+
+**Bounded input.** At most `Limits::DEFAULT.max_archive_bytes + 1` bytes are
+ever buffered. An input that reaches that cap is refused with
+`input.over_limit.archive_bytes` before any parsing begins, so naming a very
+large file cannot be turned into memory pressure. The core crate performs no
+I/O: the executable reads the bytes and calls `archive::inventory`, then
+`profile::check`.
+
+**One object, one stream.** In JSON mode stdout carries exactly one JSON
+object and nothing else, and stderr is empty on success. In human mode stdout
+carries the report and stderr carries at most one diagnostic line. `inspect`
+and `list` exit 0 whenever they produce their report; only
+`validate-structure` encodes the structural reading in its status.
+
+**Privacy.** A diagnostic — on stderr, and the `error` object — carries a
+stable code, its category, an entry index and numbers. It never carries the
+input path, an entry name or a metadata value. Declared metadata values are
+printed by `inspect` only, on stdout, because that is what it was asked for.
+Nothing is logged, cached or written anywhere.
+
+**Terminal safety.** Human mode escapes C0 and C1 controls, `DEL`, the
+byte-order mark and the invisible and bidirectional formatting characters as
+`\u{..}`, and a byte belonging to no valid UTF-8 sequence as `\x{..}`; rule
+A21 leaves entry-name encoding unresolved, so no encoding is guessed. A name
+longer than 200 characters is cut and the number of characters dropped is
+stated as `…[+N]`. JSON output is never truncated: a consumer needs the whole
+name, and a name that is not valid UTF-8 is reported as `name_hex` rather
+than as an invented string. Output is bounded without a further rule, because
+the inventory refuses more than 256 entries and a name longer than 255 bytes.
+
+### The successful envelope
 
 ```json
 {
@@ -316,23 +372,161 @@ In JSON mode, `capabilities` writes exactly one JSON object on stdout:
   "command": "capabilities",
   "data": {
     "project": "openKRX",
-    "stage": "scaffold",
-    "operations": []
+    "stage": "reader",
+    "operations": ["inspect", "list", "validate-structure"]
   },
   "verified": false
 }
 ```
 
-Without `--json` the same command prints two human lines: the project name
-and stage, then a sentence stating that no document operation is implemented
-and nothing is verified. Diagnostics belong on stderr; stdout carries the
-response and nothing else.
+Without `--json`, `capabilities` prints the project and stage, the operation
+list, and the boundary sentence. `operations` lists implemented package
+operations. `verified: false` expresses the cryptographic boundary and is
+never `true` in this design, in any response.
 
-`operations` lists implemented package operations, and empty means none. An
-archive inventory, a metadata parse and a structural report are library
-capabilities, not package operations, so the list stays empty until a
-command ships. `verified: false` expresses the cryptographic boundary and is
-never `true` in this design.
+### The failed envelope
+
+Every failure exits with the status its category names, in both modes. In
+JSON mode the single object on stdout is:
+
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "command": "list",
+  "error": {
+    "code": "archive.over_limit.entries",
+    "category": "limit",
+    "limit": 256,
+    "observed": 300
+  },
+  "verified": false
+}
+```
+
+`entry_index`, `limit` and `observed` are present only when the failure
+carries them. Both modes also write one short line on stderr:
+`openkrx: <code>`, followed by the same numbers.
+
+### `list`
+
+`entries[]`, in central-directory order, which is stable across runs and
+platforms. `name` is present when the name bytes are valid UTF-8 and
+`name_hex` only when they are not; `name_utf8_flag` reports general-purpose
+bit 11 independently of whether the bytes decode. `declared_size` is what the
+central directory says and `decoded_size` is what the decoder produced; they
+are reported side by side and never collapsed into one figure.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "list",
+  "data": {
+    "entries": [
+      {
+        "index": 0,
+        "name": "mimetype",
+        "name_utf8_flag": false,
+        "method": "stored",
+        "compressed_size": 19,
+        "declared_size": 19,
+        "decoded_size": 19,
+        "crc32": "10b6eee7"
+      }
+    ]
+  },
+  "verified": false
+}
+```
+
+### `inspect`
+
+`observations` are archive-shaped facts, `metadata` is the declared document
+when one was located and parsed and `null` otherwise, and `checks[]` is the
+full inventory in `CheckId::ORDER`. Nothing is interpreted: `created_at`
+keeps its lexical form because the crate has no clock, and
+`declared_size_text` is authoritative because rule M13 leaves the unit and
+rounding of `MERET` open. `declared_size_value` is present only when `MERET`
+reads as a finite number.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "inspect",
+  "data": {
+    "observations": {
+      "entry_count": 3,
+      "root_prefix": "KRX/OCD/",
+      "metadata_entry_name": "KRX/OCD/Metalayer/KULDEMENY_META.xml",
+      "metadata_entry_index": 1,
+      "marker": {"outcome": "pass"}
+    },
+    "metadata": {
+      "version": "v0.9",
+      "source_system": "KER",
+      "consignment_type": "KULDEMENY",
+      "consignment_id": "SYN-0001",
+      "created_at": "2026-01-02T03:04:05.000+01:00",
+      "test": false,
+      "test_present": true,
+      "declared_attachment_count": 1,
+      "attachments": [
+        {
+          "number": 1,
+          "declared_path": "KRX/OCD/Payload/ID-1/synthetic.pdf",
+          "resolution": "resolved",
+          "entry_index": 2,
+          "declared_size_text": "12.5",
+          "declared_size_value": 12.5,
+          "observed_size": 19
+        }
+      ]
+    },
+    "checks": [
+      {"check": "metadata_location", "outcome": "pass"},
+      {"check": "declared_size", "outcome": "unresolved", "rule": "M13"}
+    ]
+  },
+  "verified": false
+}
+```
+
+`reference_id`, `barcode` and `error_code` appear only when the document
+declares them, and `root_prefix_hex` and `metadata_entry_name_hex` only when
+those names are not valid UTF-8. A check carries `code` only when it failed
+and `rule` only when it is undecided; the four outcomes are `pass`, `fail`,
+`unresolved` and `not_applicable`, and they stay distinct in every rendering.
+
+### `validate-structure`
+
+`summary` is `consistent`, `inconsistent` or `unresolved` — the summary of
+[the check inventory](#structural-check-inventory), and **not** a conformance
+verdict. `unresolved_rules[]` names each undecided rule once, in the order
+the checks first cite it.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "validate-structure",
+  "data": {
+    "summary": "unresolved",
+    "checks": [
+      {"check": "metadata_location", "outcome": "pass"},
+      {"check": "attachment_references", "outcome": "fail",
+       "code": "metadata.reference.missing_entry"},
+      {"check": "declared_size", "outcome": "unresolved", "rule": "M13"}
+    ],
+    "unresolved_rules": ["M13"]
+  },
+  "verified": false
+}
+```
+
+There is deliberately no field named `valid`, `conforming` or `is_krx` in any
+response, and no command prints such a word as a claim.
 
 **The `schema_version` compatibility rule.** `schema_version` is `1`. A
 consumer must ignore object fields it does not recognise, because adding a
@@ -342,33 +536,54 @@ and requires an explicit decision to raise `schema_version` in the same
 change that makes it. A consumer that reads an unknown `schema_version`
 must stop rather than guess.
 
-Reader commands are specified, not implemented. Their contracts — bounded
-input, the one-object rule, stable error codes, exit-status categories and
-the requirement that `validate-structure` render the check inventory
-outcome by outcome rather than collapse it into a verdict — are in
-[work-packages.md](work-packages.md), package KRX-04. Until such a command
-ships, this section describes the complete CLI.
-
 ## Exit statuses
 
-Only two statuses exist today, because only one command exists.
+Eight categories, exhaustive and stable; a consumer may branch on the number.
+`crates/openkrx-cli/src/exit.rs` holds the only mapping, and one unit test per
+category holds each row.
 
-| Status | Meaning |
-| --- | --- |
-| 0 | The command succeeded. Today this means capability reporting completed. |
-| 2 | The arguments were rejected: an unknown or missing subcommand, or an invalid flag. This is the argument parser's status. |
+| Status | Category | Meaning |
+| --- | --- | --- |
+| 0 | `success` | The command produced its report. For `validate-structure`, the summary is `consistent`. |
+| 2 | `usage` | The arguments were rejected: an unknown or missing command, a missing file argument, or an invalid flag. |
+| 3 | `structure_inconsistent` | `validate-structure` only: at least one check failed. |
+| 4 | `structure_unresolved` | `validate-structure` only: no check failed, and at least one rule could not be decided. |
+| 5 | `input` | The input could not be opened or read, or it reached the input cap. |
+| 6 | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. |
+| 7 | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, a multi-disk archive, another compression method, or an XML feature the parser refuses. |
+| 8 | `limit` | A documented parsing limit was exceeded. |
 
-There is no exit status for a format error, an over-limit input or an I/O
-failure, because no command can encounter one. A reader command must define
-its own status categories before it ships, and adding one is a contract
-change that belongs in the changelog.
+`inspect` and `list` never exit 3 or 4: a failing or undecided check is part
+of their report, not their status. A structural failure is therefore visible
+in three ways that never disagree — the check's outcome, the summary word,
+and the exit status.
+
+A code classifies to exactly one category, by its head and its category
+segment: `input.*` to 5; `*.over_limit.*` to 8, except
+`input.over_limit.archive_bytes`, which is an input problem because nothing
+was parsed at all; `*.unsupported.*` to 7; and `*.truncated.*`,
+`*.malformed.*`, `*.ambiguous.*`, `archive.unsafe_name.*` and
+`archive.no_such_entry` to 6. The remaining `metadata.*` codes are
+structural-check failures, which reach a status only through
+`validate-structure`'s summary, as 3.
+
+The core error enums are `#[non_exhaustive]`, so no downstream `match` on
+their variants can be exhaustive and a new code cannot be made to fail
+compilation in the command-line crate. Classification therefore keys on the
+code's own category segment, which is part of the published contract, and a
+segment this build does not know classifies to nothing. A test reads every
+code out of [codes.md](codes.md) — the catalogue `scripts/check-codes.py`
+forces to stay complete — and fails when one of them does not classify, so an
+added code cannot reach a release unclassified.
 
 ## Stable codes
 
-Every failure this crate produces carries a stable dotted code. The archive
+Every failure openKRX produces carries a stable dotted code. The archive
 layer produces `archive.*`, the metadata layer and the profile layer both
-produce `metadata.*`, and the two `metadata.*` sets are disjoint, so a
-consumer can bucket every diagnostic by its dotted code alone.
+produce `metadata.*`, and the two `metadata.*` sets are disjoint. The
+command-line crate adds `input.*` for the one thing the core crate cannot
+fail at, because it performs no I/O: reading the input. A consumer can
+bucket every diagnostic by its dotted code alone.
 
 The complete catalogue — every code, its category, its meaning, the numeric
 fields its error carries, and the test that asserts it — is

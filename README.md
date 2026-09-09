@@ -4,10 +4,10 @@ An open-source Rust library and command-line tool for Hungarian KRX
 document packages: the ZIP-based container used in Hungarian
 administrative correspondence.
 
-**No package operation is implemented.** The executable reports its
-capabilities and nothing else. It does not read, list, inspect, validate,
-extract or create a KRX file, and there are no releases or published Cargo
-packages. What exists today is a library, described below.
+**It reads; it does not write.** `openkrx inspect`, `openkrx list` and
+`openkrx validate-structure` read a package locally and report what is in it.
+Nothing is extracted, nothing is created, nothing is uploaded and nothing is
+verified. There are no releases or published Cargo packages yet.
 
 ## Who it is for
 
@@ -31,13 +31,13 @@ what it observed and reports an undecidable rule as undecided. See
 | Bounded ZIP archive inventory (`openkrx_core::archive::inventory`) | Implemented, library only |
 | Bounded metadata parsing (`openkrx_core::metadata::parse`) | Implemented, library only |
 | Structural check inventory (`openkrx_core::profile::check`) | Implemented, library only |
-| Reader commands: `inspect`, `list`, `validate-structure` | Not implemented |
+| Reader commands: `inspect`, `list`, `validate-structure` | Implemented |
 | `extract`, `create` | Not implemented |
 | Signature handling of any kind | Not implemented, and not planned |
 
-The three implemented layers are reachable from Rust only. No command
-exposes them, which is why the capability response lists no operations.
-The implementation sequence is in the [roadmap](docs/roadmap.md).
+The three reader commands render the three library layers and add no rule of
+their own. The implementation sequence is in the
+[roadmap](docs/roadmap.md).
 
 ## What exists today
 
@@ -66,19 +66,45 @@ entry name, document text or attribute value.
 **Structural checking is not signature verification and not delivery
 evidence.** openKRX performs no cryptography. Attachments, including `.es3`
 dossiers, are opaque bytes: they are never opened, signed, or submitted
-anywhere.
+anywhere. `validate-structure` reporting `consistent` means only that no
+check failed and none was left undecided.
 
 ## Quick start
 
 Requires Rust 1.88 or newer. From a checkout:
 
 ```sh
-cargo run -p openkrx-cli -- --help
-cargo run -p openkrx-cli -- --version
-cargo run -p openkrx-cli -- capabilities --json
+cargo build --release -p openkrx-cli
+target/release/openkrx list               package.krx
+target/release/openkrx inspect            package.krx
+target/release/openkrx validate-structure package.krx
 ```
 
-The capabilities response is one JSON object, shown formatted here:
+Each command takes one file, or `-` to read standard input, and each accepts
+`--json`. `list` prints what the archive holds:
+
+```text
+index  method   compressed    declared     decoded  crc32     name
+    0  stored           19          19          19  10b6eee7  mimetype
+    1  deflate         449        1003        1003  067b8732  KRX/OCD/Metalayer/KULDEMENY_META.xml
+    2  stored           19          19          19  4b26d730  KRX/OCD/Payload/ID-1/synthetic.pdf
+```
+
+`inspect` adds what the package declares about itself and how every
+structural check came out. `validate-structure` prints the checks alone and
+puts the reading in its exit status: `0` when nothing failed and nothing was
+left open, `3` when a check failed, `4` when a rule could not be decided.
+The full table is in
+[the architecture reference](docs/architecture.md#exit-statuses).
+
+```text
+Structural summary: unresolved
+0 of 11 checks failed and 1 could not be decided. This is not a statement
+that the package is a valid or conforming KRX file.
+```
+
+`--json` writes exactly one object on stdout and leaves stderr empty on
+success:
 
 ```json
 {
@@ -87,17 +113,17 @@ The capabilities response is one JSON object, shown formatted here:
   "command": "capabilities",
   "data": {
     "project": "openKRX",
-    "stage": "scaffold",
-    "operations": []
+    "stage": "reader",
+    "operations": ["inspect", "list", "validate-structure"]
   },
   "verified": false
 }
 ```
 
-An empty `operations` list means no package operation is implemented. A
-library layer is not a package operation, so the list stays empty until a
-command ships. `verified: false` states the cryptographic boundary and is
-never `true`.
+`verified: false` states the cryptographic boundary and is never `true`.
+Every response and every diagnostic carries a stable code; a diagnostic
+carries the code, an entry index and numbers, and never the input path, an
+entry name or a metadata value.
 
 ## Documentation
 

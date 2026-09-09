@@ -7,11 +7,12 @@
 //! structural checks over the two. None performs filesystem, clock, process or
 //! network access, and none resolves anything external.
 //!
-//! No extraction, writing or CLI command exists, so [`capabilities`] still
-//! reports no operations. Nothing here asserts that an archive is a KRX
-//! package: `docs/profile.md` lists essential rules as unresolved, and each of
-//! them maps to a distinct [`profile::CheckOutcome::Unresolved`] outcome rather
-//! than to a pass or a failure.
+//! The three reader commands `inspect`, `list` and `validate-structure` expose
+//! these layers, and [`capabilities`] names them. No extraction and no writing
+//! exists. Nothing here asserts that an archive is a KRX package:
+//! `docs/profile.md` lists essential rules as unresolved, and each of them maps
+//! to a distinct [`profile::CheckOutcome::Unresolved`] outcome rather than to a
+//! pass or a failure.
 
 #![warn(missing_docs)]
 
@@ -22,6 +23,8 @@ mod error;
 mod limits;
 pub mod metadata;
 pub mod profile;
+#[cfg(feature = "synthetic-writer")]
+pub mod synthetic;
 
 pub use error::{
     AmbiguityKind, ArchiveError, LimitKind, MalformedKind, Structure, UnsafeNameKind,
@@ -44,13 +47,13 @@ pub struct Capabilities {
 
 /// Return the current implementation status without I/O or side effects.
 ///
-/// The operation list stays empty while no command exposes a package
-/// operation: a library check is not a package operation, and a structural
-/// report is not a conformance verdict.
+/// The list names the package operations a command actually performs. Reading
+/// is implemented; extraction and creation are not, and a structural report is
+/// not a conformance verdict whichever command produced it.
 pub const fn capabilities() -> Capabilities {
     Capabilities {
         project: "openKRX",
-        stage: "scaffold",
-        operations: &[],
+        stage: "reader",
+        operations: &["inspect", "list", "validate-structure"],
     }
 }

@@ -9,11 +9,15 @@ rules for fixtures and for any private corpus.
 
 Almost every test is an integration test, because the contract worth testing
 is the public one: a byte slice goes in, a typed value or a stable code comes
-out. The exceptions are the doctests in the public API documentation and one
-`#[cfg(test)]` module in `crates/openkrx-core/src/archive/inflate.rs`, which
-pins the CRC-32 implementation against its published check value, the empty
-input, and chunk ordering — an internal helper with no public surface to
-exercise it through.
+out. The exceptions are the doctests in the public API documentation and two
+`#[cfg(test)]` modules. The one in
+`crates/openkrx-core/src/archive/inflate.rs` pins the CRC-32 implementation
+against its published check value, the empty input, and chunk ordering — an
+internal helper with no public surface to exercise it through. The one in
+`crates/openkrx-cli/src/exit.rs` holds one test per exit-status category and
+reads every code out of `docs/codes.md` to assert that each classifies: a
+subprocess can reach only the codes an archive can be built to produce, and
+the contract covers every code the crates define.
 
 | File | Covers |
 | --- | --- |
@@ -24,8 +28,12 @@ exercise it through.
 | `crates/openkrx-core/tests/metadata_rejects.rs` | Every refused XML feature (DTD, undeclared entity, forbidden character reference, stray processing instruction, non-UTF-8 declaration and non-UTF-8 bytes, unbound prefix, repeated attribute), every grammar violation (wrong root, wrong namespace, missing, repeated and misordered elements, unexpected child, enumeration, integer and boolean values), and every metadata limit at its boundary. Holds its own truncation and mutation sweeps, and the content-free `Display` assertion. |
 | `crates/openkrx-core/tests/profile_structure.rs` | The check inventory over synthetic KRX-shaped archives: the canonical layout, all three observed root prefixes, both metadata file-name spellings, a lower-case `Metalayer`, missing and ambiguous metadata, a missing, misplaced, mismatched and prefixed marker, a deflated marker producing no finding, missing, prefix-variant and duplicate references, a shared file name in different payload directories, count agreement and its absence, an omitted schema-required element, a document that does not parse, caller-tightened limits, and that every check is reported exactly once in the documented order. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
-| `crates/openkrx-core/tests/support/` | Test-only synthetic writers, not tests. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. |
-| `crates/openkrx-cli/tests/contract.rs` | The executable contract by subprocess: the JSON envelope's exact shape, that the human output promises no processing, that help and version are available, and that a missing or unimplemented command is rejected. |
+| `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
+| `crates/openkrx-cli/tests/contract.rs` | The executable's argument surface by subprocess: the capability envelope's exact shape and its operation list, that the human output states the boundary rather than a verdict, that help names every command and the exit statuses, and that six kinds of argument error each exit 2. |
+| `crates/openkrx-cli/tests/reader.rs` | Each reader command on a package that can be read, in both modes: the consistent package, the entry listing and its stable ordering, the declared document beside the observed archive, every check rendered as its own outcome, the two other layouts leaving A19 undecided, `-` on all three commands producing the same report as a file, a name that is not UTF-8 reported as bytes, an invisible character escaped, a long name cut with its remainder counted, and that a successful run writes nothing on stderr. |
+| `crates/openkrx-cli/tests/failures.rs` | Every exit-status category end to end: a failing check (3) for `validate-structure` only, malformed and truncated images (6), a ZIP64 extra field (7), an over-limit entry count with its numbers (8), a missing file, a directory and both an over-cap file and an over-cap standard input (5), one stderr line in human mode, and exactly one object on stdout in JSON mode even when the run failed. |
+| `crates/openkrx-cli/tests/privacy.rs` | The content-free-diagnostic rule, by canary: a canary path segment, a canary entry name and a canary metadata value are searched for on stderr in every case and on stdout in every failing case, and a declared value is shown to reach stdout for `inspect` alone. |
+| `crates/openkrx-cli/tests/support/mod.rs` | Subprocess helpers and the synthetic packages the command tests read, not tests: a scratch directory that removes itself, a standard-input runner, and one builder per package shape. |
 
 Each rejection test asserts a **stable code**, not merely that an error
 occurred, so one rejection category cannot silently become another.
@@ -33,6 +41,13 @@ occurred, so one rejection category cannot silently become another.
 required threat-model check to its code prefix and test, and
 [conformance.md](conformance.md) maps each profile rule to the test that
 holds it.
+
+The command-line tests run the built executable as a subprocess, so they
+exercise the real argument parsing, the real streams and the real exit
+status rather than an internal function standing in for them. They avoid
+platform-specific assumptions — no shell, no Unix path shape, no text-mode
+standard input — because CI runs the same tests on Linux, macOS and Windows,
+which is the only check on the platform-specific parts of input handling.
 
 What the suite does **not** provide evidence about: extraction, which does
 not exist; conformance, which cannot be claimed while
