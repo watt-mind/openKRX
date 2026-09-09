@@ -12,7 +12,9 @@ Before the first release:
 3. Pass required CI on the release commit, including dependency/security
    review and the minimum supported Rust version.
 4. Review public fixtures and dependency licences, privacy boundaries,
-   documentation, changelog, and vulnerability reporting.
+   documentation, and vulnerability reporting. Move the `[Unreleased]`
+   entries of [CHANGELOG.md](../CHANGELOG.md) under the new version
+   heading; the changelog is the release notes.
 5. Design a separate release change covering versioning, signed/provenance
    artifacts where supported, checksums, package contents, and smoke tests.
 6. Merge a reviewed `develop` to `master` release PR before tagging through

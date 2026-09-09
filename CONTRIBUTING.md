@@ -15,8 +15,12 @@ per task. Use Conventional Commits, for example:
 
 A PR describes the concrete behavior change, links its public issue when
 one exists, lists validation and remaining limitations, and updates relevant
-documentation. Never expose internal tracker information or local maintainer
-paths. Record unrelated follow-ups separately rather than expanding scope.
+documentation. Every behaviour-changing PR adds an entry under
+`[Unreleased]` in [CHANGELOG.md](CHANGELOG.md), and updates the documents
+the [maintenance map](docs/index.md#maintenance-map) lists for that kind of
+change, in the same PR. Never expose internal tracker information or local
+maintainer paths. Record unrelated follow-ups separately rather than
+expanding scope.
 
 ## Local checks
 
