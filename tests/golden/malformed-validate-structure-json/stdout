@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"command":"validate-structure","error":{"code":"archive.malformed.eocd_missing","category":"package"},"verified":false}

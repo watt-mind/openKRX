@@ -1,0 +1,1 @@
+openkrx: archive.over_limit.entries (limit 256, observed 300) — the package is larger or more complex than a documented limit allows; the limits are not configurable from the command line (exit 8)

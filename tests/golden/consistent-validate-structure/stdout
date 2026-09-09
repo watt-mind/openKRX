@@ -1,0 +1,18 @@
+Structural summary: unresolved
+0 of 11 checks failed and 1 could not be decided. This is not a statement that the package is a valid or conforming KRX file.
+
+Structural checks
+  metadata_location           pass
+  metadata_file_name          pass
+  root_prefix                 pass
+  marker_entry                pass
+  metadata_parse              pass
+  schema_optional_fields      pass
+  handling_instructions_form  pass
+  attachment_references       pass
+  attachment_count            pass
+  attachment_uniqueness       pass
+  declared_size               undecided (rule M13)
+
+Undecided rules: M13 — no primary source settles them, so no conformance claim is available. See docs/profile.md.
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

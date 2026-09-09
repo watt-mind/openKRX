@@ -38,6 +38,8 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/profile_structure.rs` | The check inventory over synthetic KRX-shaped archives: the canonical layout, all three observed root prefixes, both metadata file-name spellings, a lower-case `Metalayer`, missing and ambiguous metadata, a missing, misplaced, mismatched and prefixed marker, a deflated marker producing no finding, missing, prefix-variant and duplicate references, a shared file name in different payload directories, count agreement and its absence, an omitted schema-required element, a document that does not parse, caller-tightened limits, and that every check is reported exactly once in the documented order. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
+| `crates/openkrx-core/examples/golden_fixtures.rs` | The generator behind the five committed packages under `tests/fixtures/golden/`, not a test: a canonical two-attachment package, the same package without the `KRX/OCD/` prefix, one declaring an attachment the archive does not hold, a truncated image and an over-limit one. Deterministic by construction; see [the golden output contract](#golden-output-contract). |
+| `tests/golden/` | The byte-exact output contract: one directory per command run, holding its `cmd`, its exact `stdout` and `stderr` and its exit status, compared by `scripts/golden.py`. |
 | `crates/openkrx-cli/tests/contract.rs` | The executable's argument surface by subprocess: the capability envelope's exact shape and its operation list, that the human output states the boundary rather than a verdict, that help names every command and the exit statuses, and that six kinds of argument error each exit 2. |
 | `crates/openkrx-cli/tests/reader.rs` | Each reader command on a package that can be read, in both modes: the consistent package, the entry listing and its stable ordering, the declared document beside the observed archive, every check rendered as its own outcome, the two other layouts leaving A19 undecided, `-` on all three commands producing the same report as a file, a name that is not UTF-8 reported as bytes, an invisible character escaped, a long name cut with its remainder counted, and that a successful run writes nothing on stderr. |
 | `crates/openkrx-cli/tests/extract.rs` | `extract`, the one command that writes, by subprocess against a destination each test owns and then reads back: a successful extraction with byte-identical payloads and nothing else created, the JSON report and its item order, a target file that already exists, a destination that is missing, a file, or a symbolic link, a marker left by an interrupted run, an entry named like that marker refused under the no-clobber code, a non-empty destination whose contents survive, a planner refusal keeping its own category and naming no path, a malformed and an unreadable package never reaching the destination, the usage errors, and — behind `cfg(unix)` — an ancestor symlink inside the destination, a pre-existing symlink at the leaf, and an injected write failure proving the cleanup pass removes exactly this run's files and leaves everything else. |
@@ -154,6 +156,56 @@ a new head documented in the catalogue alone is not extracted and reaches
 `cargo test -p openkrx-cli` fails, so a head can never be added in one place
 only.
 
+## Golden output contract
+
+The Rust tests assert the facts each command reports. They do not pin the
+**bytes**, so a renamed JSON field, a reordered key, a reworded human line or
+a changed exit status passes every test that does not happen to name it. The
+golden contract closes that gap: `tests/golden/<case>/` holds one command's
+exact `stdout`, exact `stderr` and `status`, and `scripts/golden.py` compares
+them byte for byte.
+
+What it pins, in 36 cases: `capabilities` in both modes; `inspect`, `list`
+and `validate-structure` in both modes over all five committed fixtures —
+which between them cover a consistent package, an undecided rule (A19), a
+failed check, a malformed image and an exceeded limit, so exit statuses 0, 3,
+4, 6 and 8 all appear; and `extract` in both modes into a fresh directory,
+plus a second run into the same directory, which is refused under the
+no-clobber rule with status 9.
+
+A case directory holds `cmd`, one line of arguments, and optionally `setup`,
+one line run first whose output is discarded — that is how the no-clobber
+case gets a destination that is already populated. Two placeholders are
+substituted: `{fixture}` becomes the repository-relative
+`tests/fixtures/golden`, and `{outdir}` becomes an empty directory the case
+owns. **Nothing is normalised.** The JSON envelope is serialised from Rust
+structs in declaration order, so its key order is fixed; both renderers are
+pure functions of the package; and `extract` reports destination-relative
+paths and never the destination itself. The only absolute path any case is
+given is its `{outdir}`, and the runner *fails* when that name appears on
+either stream rather than masking it, because an output that carried it would
+be a privacy bug in the executable, not a gap in the script.
+
+Run it locally against a release build:
+
+```sh
+cargo build --release --locked -p openkrx-cli
+python3 scripts/golden.py check --bin target/release/openkrx
+python3 scripts/golden.py verify-fixtures
+```
+
+It is deliberately **not** part of `bash scripts/check.sh`, which must stay
+fast and needs no release binary. CI runs it in the `Golden output contract`
+job, which is a required check.
+
+`scripts/golden.py update --bin <path>` rewrites the goldens. A changed
+golden is a change to the contract every consumer parses, so it is reviewed
+as one: the pull request body must say which command's output changed and
+why, and a removed, renamed or redefined envelope field also raises
+`schema_version` and is recorded in [CHANGELOG.md](../CHANGELOG.md). Running
+`update` to make a red build green, without that justification, is the one
+thing this gate exists to prevent.
+
 ## Sweeps
 
 Two exhaustive sweeps sit under the [fuzz targets](#fuzzing) and cover what a
@@ -187,17 +239,35 @@ targets](#fuzzing) are for.
 
 ## Fixture policy
 
-No binary fixture is committed, and the policy is stated in
-[tests/fixtures/README.md](../tests/fixtures/README.md).
+The policy is stated in
+[tests/fixtures/README.md](../tests/fixtures/README.md), which is also the
+inventory of the only committed packages.
 
-Every archive and every document a test reads is generated at run time by
-`crates/openkrx-core/tests/support/`, an independent original written for
+Every archive and every document a *Rust* test reads is generated at run time
+by `crates/openkrx-core/tests/support/`, an independent original written for
 this repository that can emit contradictory headers on purpose. Generating
 beats committing: the property under test is visible in the test that builds
 the input, and no opaque binary has to be trusted or re-derived.
 
-A binary fixture may be added only if a property genuinely cannot be
-generated. It must then be recorded in the fixture inventory with its
+The five packages under `tests/fixtures/golden/` are the documented
+exception, and they are generated too — just ahead of time. The golden
+contract compares process output byte for byte, so the input has to be the
+same bytes on every machine and in every run, which a builder called from
+inside a test cannot guarantee across a refactor of that builder.
+`crates/openkrx-core/examples/golden_fixtures.rs` writes them from the same
+synthetic writer, from fixed values with no clock and no randomness:
+
+```sh
+cargo run -p openkrx-core --features synthetic-writer \
+    --example golden_fixtures -- tests/fixtures/golden
+```
+
+Re-running it must rewrite byte-identical files, and
+`python3 scripts/golden.py verify-fixtures` asserts that in CI, so a
+hand-edited package cannot quietly become the contract.
+
+Any further binary fixture may be added only if a property genuinely cannot
+be generated. It must then be recorded in the fixture inventory with its
 provenance, the property under test and the expected result, and it must be
 an independently authored synthetic original — never a real submission, and
 never a redacted or modified derivative of one. Third-party example packages

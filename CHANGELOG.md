@@ -190,6 +190,21 @@ and such a change is recorded here explicitly.
   corpus is committed, `fuzz/regressions/<target>/` is reserved for minimised
   fuzzer-generated artifacts, and the truncation and single-byte mutation
   sweeps remain the exhaustive compensating control.
+- **A golden output contract.** `tests/golden/` pins the exact `stdout`,
+  `stderr` and exit status of 36 command runs: `capabilities` in both modes,
+  `inspect`, `list` and `validate-structure` in both modes over five
+  fixtures, and `extract` into a fresh directory and into one it refuses
+  under the no-clobber rule — exit statuses 0, 3, 4, 6, 8 and 9 between them.
+  `scripts/golden.py check|update` compares and rewrites them byte for byte,
+  with no normalisation: the JSON envelope's key order is fixed by its Rust
+  structs, and a case fails rather than masks if any output ever carries the
+  destination it was given. The five deterministic packages under
+  `tests/fixtures/golden/` are the first committed fixtures; they are written
+  by `crates/openkrx-core/examples/golden_fixtures.rs` from the same
+  synthetic writer, recorded in `tests/fixtures/README.md`, and
+  `scripts/golden.py verify-fixtures` holds them byte-identical to their
+  generator. The `Golden output contract` CI job runs both against a release
+  build; `scripts/check.sh` is unchanged, so local runs stay fast.
 
 ### Changed
 

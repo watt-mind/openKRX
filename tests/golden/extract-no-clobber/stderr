@@ -1,0 +1,2 @@
+openkrx: output.exists at entry 0 — a file this package would create is already in the destination; nothing is ever overwritten, so extract into an empty directory, or move the existing file out of the way first (exit 9)
+openkrx: nothing had been written, so the destination is as it was found

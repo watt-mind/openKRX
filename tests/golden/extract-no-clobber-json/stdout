@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"command":"extract","error":{"code":"output.exists","category":"output","entry_index":0},"cleanup":{"removed":0,"left_in_place":0},"verified":false}
