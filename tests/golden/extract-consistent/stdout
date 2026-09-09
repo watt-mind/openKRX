@@ -1,0 +1,9 @@
+entry         bytes  path
+    0            19  mimetype
+    1          1281  KRX/OCD/Metalayer/KULDEMENY_META.xml
+    2            19  KRX/OCD/Payload/ID-1/synthetic-a.pdf
+    3            19  KRX/OCD/Payload/ID-2/synthetic-b.pdf
+
+4 files written, 6 directories created, 1338 bytes.
+Nothing was overwritten: every file was created new, and nothing already in the destination was changed or removed. Paths are relative to the destination.
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

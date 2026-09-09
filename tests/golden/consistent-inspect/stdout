@@ -1,0 +1,37 @@
+Package observations
+  entries               4
+  root prefix           KRX/OCD/
+  metadata entry        KRX/OCD/Metalayer/KULDEMENY_META.xml (entry 1)
+  format marker         pass
+
+Declared metadata, as the package writes it; nothing is verified
+  KRX version           v0.9
+  source system         KER
+  consignment type      KULDEMENY
+  consignment id        SYN-0001
+  created at            2026-01-02T03:04:05.000+01:00
+  test flag             false
+  attachments declared  2
+
+  attachment 1          KRX/OCD/Payload/ID-1/synthetic-a.pdf
+    declared size       12.5 (unit unresolved, rule M13)
+    resolves to         entry 2, 19 bytes decoded
+
+  attachment 2          KRX/OCD/Payload/ID-2/synthetic-b.pdf
+    declared size       12.5 (unit unresolved, rule M13)
+    resolves to         entry 3, 19 bytes decoded
+
+Structural checks
+  metadata_location           pass
+  metadata_file_name          pass
+  root_prefix                 pass
+  marker_entry                pass
+  metadata_parse              pass
+  schema_optional_fields      pass
+  handling_instructions_form  pass
+  attachment_references       pass
+  attachment_count            pass
+  attachment_uniqueness       pass
+  declared_size               undecided (rule M13)
+
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

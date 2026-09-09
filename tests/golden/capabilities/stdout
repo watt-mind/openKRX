@@ -1,0 +1,3 @@
+openKRX: reader
+Operations: inspect, list, validate-structure, extract
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

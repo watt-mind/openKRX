@@ -1,0 +1,1 @@
+validate-structure {fixture}/missing-attachment.krx --json

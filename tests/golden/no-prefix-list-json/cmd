@@ -1,0 +1,1 @@
+list {fixture}/no-prefix.krx --json

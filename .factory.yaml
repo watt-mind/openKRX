@@ -20,7 +20,8 @@
       "Test (windows-latest)",
       "Minimum supported Rust (1.88)",
       "Dependencies",
-      "Coverage"
+      "Coverage",
+      "Golden output contract"
     ]
   }
 }

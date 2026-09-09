@@ -1,0 +1,1 @@
+extract {fixture}/consistent.krx --into {outdir} --json

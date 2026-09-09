@@ -1,0 +1,8 @@
+index  method   compressed    declared     decoded  crc32     name
+    0  stored           19          19          19  10b6eee7  mimetype
+    1  deflate         474        1281        1281  ff6891dc  KRX/OCD/Metalayer/KULDEMENY_META.xml
+    2  stored           19          19          19  4b26d730  KRX/OCD/Payload/ID-1/synthetic-a.pdf
+    3  stored           19          19          19  3c21e7a6  KRX/OCD/Payload/ID-2/synthetic-b.pdf
+
+4 entries.
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

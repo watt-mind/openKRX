@@ -16,6 +16,13 @@ workspace = true
 # and by the command-line crate's subprocess tests. Never enabled by a binary.
 synthetic-writer = []
 
+# The generator behind the committed golden fixtures. It is an example rather
+# than a test because it writes files a human then commits, and it needs the
+# same test-only writer, so it is built only with that feature enabled.
+[[example]]
+name = "golden_fixtures"
+required-features = ["synthetic-writer"]
+
 [dependencies]
 miniz_oxide.workspace = true
 quick-xml.workspace = true
