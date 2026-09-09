@@ -7,7 +7,10 @@ a private corpus is ever used.
 Nothing here relaxes the rule stated in
 [architecture.md](architecture.md#boundaries): until the code for a milestone
 exists, no openKRX output may claim or imply that an archive is a conforming
-package, and no output may claim anything cryptographic at all.
+package, and no output may claim anything cryptographic at all. The rules
+themselves are in [profile.md](profile.md), the open ones in
+[Unresolved essential rules](profile.md#unresolved-essential-rules), and
+what the code asserts from them in [conformance.md](conformance.md).
 
 ## Not yet implemented
 
@@ -46,7 +49,7 @@ criteria and verification.
 | [KRX-01: establish the first profile](work-packages.md#krx-01-establish-the-first-profile) | **Done** | [profile.md](profile.md): rules A1 to A22 and M1 to M15 with section-level citations, an evidence class per rule, the unresolved list, and recorded redistribution terms. |
 | [KRX-02: bounded archive inventory](work-packages.md#krx-02-bounded-archive-inventory) | **Done** | `openkrx_core::archive::inventory`: a bounded, profile-agnostic ZIP reader with published limits, exact byte coverage, ambiguity refusal and 43 stable codes. No CLI exposure. |
 | [KRX-03: metadata and structural validation](work-packages.md#krx-03-metadata-and-structural-validation) | **Done** | `openkrx_core::metadata::parse` and `openkrx_core::profile::check`: bounded `KER_META_V0_9`-shaped parsing and the eleven-check structural inventory, with each unresolved rule reported as `Unresolved(rule)`. No verdict, no CLI exposure. |
-| [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | **Done** | `inspect`, `list` and `validate-structure` over the existing layers, with bounded input, eight stable exit statuses, a one-object JSON contract and content-free diagnostics. The first milestone that makes any of this usable without writing Rust. |
+| [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | **Done** | `inspect`, `list` and `validate-structure` over the existing layers, with bounded input, eight stable exit statuses, a one-object JSON contract and content-free diagnostics. The first milestone that makes any of this usable without writing Rust; its output stays within [profile.md](profile.md) and reports observations, never a conformance verdict. |
 | [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | Planned | `extract`, planned before any write, with the full filesystem threat model held by tests on every supported OS. |
 | [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | Planned, and blocked on evidence | `create`. Cannot be built while the container layout is unresolved: see [Known gaps](conformance.md#known-gaps). |
 | [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |

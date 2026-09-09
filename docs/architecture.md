@@ -135,10 +135,11 @@ as a failure rather than as a success.
 KRX, as this project uses the word, means the ZIP-based document container
 described by the primary sources registered in
 [references.md](references.md) and reduced to numbered rules in
-[profile.md](profile.md). It is the Hungarian realisation of the SPOCS OCD
-container: a marker entry naming the format, a `Metalayer` directory holding
-one descriptive metadata document, and payload subdirectories holding one
-opaque attachment each.
+[profile.md](profile.md), whose rule-to-check map is
+[conformance.md](conformance.md). It is the Hungarian realisation of the
+SPOCS OCD container: a marker entry naming the format, a `Metalayer`
+directory holding one descriptive metadata document, and payload
+subdirectories holding one opaque attachment each.
 
 Three scopes exist in the code, and they are deliberately separate.
 
@@ -473,7 +474,9 @@ written with no normalisation, globbing or extension inference on any
 platform, or `-` for standard input, read as binary on every platform. There
 are no limit-override flags, no colour or TTY detection, no configuration
 file and no shell completions; the same arguments produce the same bytes on
-every supported system.
+every supported system. This is a reader, not a conformance checker: what
+its output may state follows the rules in [profile.md](profile.md) and the
+rule-to-check map in [conformance.md](conformance.md).
 
 **Bounded input.** At most `Limits::DEFAULT.max_archive_bytes + 1` bytes are
 ever buffered. An input that reaches that cap is refused with
