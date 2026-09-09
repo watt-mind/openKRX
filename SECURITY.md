@@ -4,12 +4,14 @@
 
 The CLI supports only help, version, and capability reporting. The core
 library additionally implements a bounded ZIP inventory
-(`openkrx_core::archive::inventory`) over a caller-supplied byte slice; no
-command exposes it. Nothing extracts files, parses XML, uses keys, or accesses
-government services. The requirements below remain implementation gates for
-package support, not claims that a complete secure KRX parser exists. A
-successful inventory is an observation, never a conformance or authenticity
-statement.
+(`openkrx_core::archive::inventory`), bounded metadata parsing
+(`openkrx_core::metadata::parse`) and a structural check inventory
+(`openkrx_core::profile::check`) over caller-supplied byte slices; no command
+exposes them. Nothing extracts files, uses keys, or accesses government
+services. The requirements below remain implementation gates for package
+support, not claims that a complete secure KRX parser exists. A successful
+inventory, parse or structural report is an observation, never a conformance
+or authenticity statement.
 
 Only the current `develop` branch receives fixes during scaffolding. There
 are no released versions to support yet.
@@ -57,7 +59,7 @@ package operations in the capabilities response.
 Each required archive check above, the stable error-code prefix it produces,
 and the test that holds it. Test names are in `crates/openkrx-core/tests/`.
 Limits appear in [architecture.md](docs/architecture.md#archive-inventory-limits).
-XML, extraction, output and writer rows do not exist yet; those checks are
+Extraction, output and writer rows do not exist yet; those checks are
 unimplemented, not passing.
 
 | Required check | Error code prefix | Test |
@@ -76,9 +78,37 @@ unimplemented, not passing.
 | Diagnostics free of personal content and private paths | every code; `Display` prints code, entry index and limit numbers only | `error_display_carries_codes_and_numbers_but_no_entry_name` |
 | No implicit execution, nested extraction, or remote access | not applicable: the core crate has no filesystem, clock, process or network access | reviewed by construction; the crate's only dependencies are `serde` and `miniz_oxide` |
 
-The archive layer is not fuzzed yet. The exhaustive truncation sweep and the
-single-byte mutation sweep are the compensating checks until a fuzz target
-lands.
+## Threat-model mapping: metadata layer
+
+Each required XML check above, the stable error-code prefix it produces, and
+the test that holds it. Test names are in `crates/openkrx-core/tests/`. Limits
+appear in [architecture.md](docs/architecture.md#metadata-limits); the check
+inventory appears in
+[architecture.md](docs/architecture.md#structural-check-inventory).
+
+| Required check | Error code prefix | Test |
+| --- | --- | --- |
+| No XML DTDs or entity declarations | `metadata.unsupported.dtd` | `a_doctype_declaration_is_refused_before_anything_is_declared`, `an_external_entity_shaped_doctype_is_refused_as_a_doctype` |
+| No entity or external resolution; only the five XML predefines and numeric character references | `metadata.malformed.entity` | `an_undeclared_entity_reference_is_refused_in_text`, `an_undeclared_entity_reference_is_refused_in_an_attribute_value`, `a_character_reference_to_a_forbidden_code_point_is_refused`, `predefined_entities_and_character_references_are_resolved_in_text` |
+| No processing instructions other than the XML declaration | `metadata.unsupported.processing_instruction` | `a_processing_instruction_other_than_the_declaration_is_refused` |
+| No implicit character-set guessing | `metadata.unsupported.encoding`, `metadata.malformed.encoding` | `a_non_utf8_encoding_declaration_is_refused_rather_than_guessed`, `bytes_that_are_not_utf8_are_refused_as_an_encoding_problem` |
+| Documented document-size, XML-depth, node-count, attribute-count and text limits, enforced while streaming | `metadata.over_limit.document_bytes`, `.depth`, `.elements`, `.attributes_per_element`, `.text_bytes` | `the_document_size_limit_holds_at_its_boundary`, `the_depth_limit_holds_at_its_boundary`, `the_element_count_limit_holds_at_its_boundary`, `the_attribute_count_limit_holds_at_its_boundary`, `the_text_limit_holds_at_its_boundary`, `a_deeply_nested_unknown_subtree_still_meets_the_depth_limit` |
+| Checked arithmetic, no panic on any input | any code; never a panic | `no_truncation_of_a_valid_document_is_ever_accepted_or_panics`, `single_byte_mutations_never_panic`, `a_truncated_prefix_of_every_refused_document_also_never_panics`, `no_truncation_of_a_krx_shaped_archive_ever_panics` |
+| Reject ambiguity rather than selecting a convenient duplicate | `metadata.ambiguous.multiple_candidates`, `metadata.malformed.duplicate_element`, `metadata.malformed.unbound_prefix`, `metadata.reference.duplicate` | `two_metadata_candidates_are_an_ambiguity_not_a_choice`, `a_repeated_header_element_is_refused`, `a_repeated_sibling_block_is_refused`, `an_unbound_namespace_prefix_is_refused`, `two_references_sharing_an_attachment_number_fail`, `two_references_sharing_a_joined_path_fail` |
+| Exact namespace and grammar rules, with unknown, malformed and unsupported cases distinguishable | `metadata.unsupported.namespace`, `metadata.malformed.root_element`, `.missing_element`, `.element_order`, `.enumeration`, `.integer`, `.boolean`, `.unexpected_child`, `.attribute`, `.syntax` | `a_root_in_another_namespace_is_unsupported_not_malformed`, `an_unqualified_root_is_unsupported_because_the_schema_is_qualified`, `a_wrong_root_element_in_the_right_namespace_is_malformed`, `a_missing_required_header_element_is_reported_with_its_field`, `sibling_blocks_out_of_the_documented_order_are_refused`, `a_value_outside_its_enumeration_is_refused`, `a_non_integer_attachment_number_is_refused`, `a_non_boolean_teszt_is_refused`, `a_child_element_inside_a_leaf_field_is_refused`, `a_repeated_attribute_is_refused`, `an_unclosed_element_is_refused_as_a_syntax_problem` |
+| Declared attachments exist, and their references do not collide | `metadata.reference.missing_entry`, `metadata.count_mismatch` | `a_reference_to_a_missing_entry_fails`, `a_declared_count_disagreeing_with_the_list_fails`, `a_shared_file_name_in_different_payload_directories_is_accepted` |
+| Unresolved rules stay distinguishable from failures | no code; `Unresolved(rule)` | `a_shorter_root_prefix_is_unresolved_rather_than_wrong`, `a_lower_case_metadata_file_name_is_unresolved_rather_than_wrong`, `a_marker_under_a_directory_prefix_is_unresolved_rather_than_wrong`, `a_reference_that_only_resolves_after_a_prefix_swap_is_unresolved`, `an_omitted_schema_required_element_is_unresolved_rather_than_wrong` |
+| Diagnostics free of personal content and private paths | every code; `Display` prints code and limit numbers only | `error_display_carries_codes_and_numbers_but_no_document_content` |
+| No implicit execution, nested extraction, or remote access | not applicable: the core crate has no filesystem, clock, process or network access | reviewed by construction; the crate's only dependencies are `serde`, `miniz_oxide` and `quick-xml` |
+
+Attachment bytes are never decoded by this layer. Only the marker entry and
+the metadata document are read back through `ArchiveInventory::entry_bytes`;
+attachments stay opaque and are checked by name alone.
+
+Neither layer is fuzzed yet. The exhaustive truncation sweeps and the
+single-byte mutation sweeps are the compensating checks until a fuzz target
+lands; an `xml_metadata` target belongs in that work alongside the archive
+one.
 
 ## Data and key policy
 

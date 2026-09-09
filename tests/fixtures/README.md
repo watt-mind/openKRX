@@ -23,3 +23,19 @@ Do not copy third-party example packages or schemas into this directory
 without separately documented redistribution permission. Never include
 personal metadata, real certificate identities, secrets, private keys, or a
 complete PEM private-key armour line. Generate keys at runtime if required.
+
+The metadata and profile tests follow the same rule. Every XML document and
+every KRX-shaped archive they read is generated at run time by the `meta`
+module of `crates/openkrx-core/tests/support/`, from values written from
+scratch for this repository.
+
+`crates/openkrx-core/tests/metadata_evidence.rs` deserves explicit note. It
+reproduces the *structure* that `docs/profile.md` rules M9 and M10 describe for
+the two official `KULDEMENY_META.xml` samples — an XML declaration, the target
+namespace bound to an `ns2` prefix, and an attachment reference split across
+`ELHELYEZKEDES` and `FAJL_NEV`. It is a **synthetic re-expression of that
+structure, not the official sample**: no identifier, description, timestamp,
+barcode, note or other text is copied from any primary source, and none may be
+added. `docs/profile.md` records that the posta.hu material carries no
+redistribution licence. The test is evidence of schema shape only; agreement
+with a real service remains unverified.

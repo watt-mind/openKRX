@@ -10,8 +10,10 @@ is 90%. Crates are unpublished and tests use the committed lockfile.
 
 Current tests cover the capability model and executable contract, including
 JSON shape, help/version, and argument rejection, plus the bounded archive
-inventory. They provide no evidence about XML safety, extraction, or profile
-conformance, because those operations do not exist yet.
+inventory, bounded metadata parsing, and the structural check inventory. They
+provide no evidence about extraction or profile conformance: extraction does
+not exist, and conformance cannot be claimed while
+[profile.md](profile.md#unresolved-essential-rules) lists unresolved rules.
 
 ## Implemented test layers
 
@@ -31,17 +33,41 @@ Two sweeps stand in for the fuzz target that does not exist yet: every prefix
 of every representative archive must be rejected without panicking, and every
 single-byte mutation of a valid archive must return without panicking.
 
+The metadata and profile layers are covered by three more files.
+`metadata_parse.rs` holds accepted documents and the facts the parser reports,
+including the values `profile.md` leaves open — an absent `TESZT`, an absent
+`MELLEKLET_LEIRASA`, a non-numeric `MERET` — which are recorded rather than
+rejected. `metadata_rejects.rs` holds every prohibited XML feature, every
+grammar violation and every limit boundary, each asserting a stable code, plus
+its own truncation and single-byte-mutation sweeps. `profile_structure.rs`
+holds the check inventory over synthetic KRX-shaped archives: all three
+observed layouts, both metadata file-name spellings, a marker mismatch, a
+prefixed marker, missing and ambiguous metadata, missing references, duplicate
+references and counts. Every archive and every document is generated at run
+time by `tests/support/`, whose `meta` module builds documents from freshly
+authored values.
+[SECURITY.md](../SECURITY.md#threat-model-mapping-metadata-layer) maps every
+required XML check to its code prefix and test.
+
+`metadata_evidence.rs` is the independent-evidence layer. It re-expresses the
+*structure* of the two official sample documents `profile.md` M9 and M10
+describe — an XML declaration, the `ns2` prefix binding, and a reference split
+across `ELHELYEZKEDES` and `FAJL_NEV` — using values written from scratch for
+this repository. It is evidence of schema shape only: no public sample archive
+and no independent conformance corpus exist
+([profile.md](profile.md#conformance-evidence)), so agreement with a real
+service stays unverified.
+
 ## Required future test layers
 
-- Core unit tests: malformed XML, profile rules, and metadata ambiguity.
 - CLI integration tests: exact JSON/exit-status contracts, terminal-safe
   human output, sensitive-data-free diagnostics, and bounded stdin/files.
 - Filesystem tests: traversal, Unicode/case collisions, existing targets,
   symlinks/reparse points, interrupted writes, and cleanup ownership.
 - Writer tests: deterministic bytes for fixed inputs, opaque payload
   preservation, reader compatibility, and independent conformance evidence.
-- Fuzz targets: bounded archive inventory and XML parsing as soon as these
-  attack surfaces exist; retain minimised synthetic regressions.
+- Fuzz targets: bounded archive inventory and metadata XML parsing; both
+  attack surfaces now exist. Retain minimised synthetic regressions.
 
 Use boundary values immediately below, at, and above each limit. Include
 contradictory ZIP size declarations, duplicate entries, overlapping records,

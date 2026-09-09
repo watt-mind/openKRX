@@ -13,4 +13,5 @@ workspace = true
 
 [dependencies]
 miniz_oxide.workspace = true
+quick-xml.workspace = true
 serde.workspace = true

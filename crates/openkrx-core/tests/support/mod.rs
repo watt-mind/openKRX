@@ -7,6 +7,8 @@
 
 #![allow(dead_code)]
 
+pub mod meta;
+
 use miniz_oxide::deflate::compress_to_vec;
 
 /// Local file-header signature.

@@ -139,6 +139,10 @@ parsing of `KER_META_V0_9`* and must treat M11–M15 as unknown: mismatched
 unexpected `ELHELYEZKEDES` prefix must map to a distinct "unsupported or
 unknown" outcome rather than to "invalid".
 
+The checks implemented on that basis, and the rule each unresolved outcome
+cites, are listed in
+[architecture.md](architecture.md#structural-check-inventory).
+
 ## Conformance evidence
 
 Publicly available and independently usable:

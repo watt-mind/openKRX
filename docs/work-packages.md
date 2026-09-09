@@ -59,6 +59,21 @@ an archive a conforming KRX package.
 
 ## KRX-03: Metadata and structural validation
 
+Status: implemented. `openkrx_core::metadata::parse` reads a bounded
+`KER_META_V0_9`-shaped document from a caller-supplied byte slice, and
+`openkrx_core::profile::check` runs a fixed inventory of eleven structural
+checks over an archive inventory and that document. The check inventory,
+its stable codes and the metadata limits are published in
+[architecture.md](architecture.md#structural-check-inventory); the threat-model
+mapping is in
+[SECURITY.md](../SECURITY.md#threat-model-mapping-metadata-layer). Each
+unresolved rule maps to a distinct `Unresolved(rule)` outcome, so no
+conformance verdict exists and the reported summary `Consistent` is explicitly
+not one. An XML fuzz target is still outstanding and tracked with the archive
+one; the truncation and mutation sweeps in
+[testing.md](testing.md#implemented-test-layers) stand in for it. No CLI
+command exposes the checks, so `capabilities().operations` remains empty.
+
 Dependencies: KRX-01 and KRX-02. Owner: profile contributor; core metadata
 and validation modules, profile fixtures, and specification updates.
 
@@ -80,13 +95,18 @@ verdict may be emitted while any of them stands.
 
 ## KRX-04: Reader CLI and stable output
 
-Dependencies: KRX-02 and KRX-03. Owner: CLI contributor;
+Dependencies: KRX-02 and KRX-03, both implemented; the CLI renders
+`openkrx_core::archive::inventory` and `openkrx_core::profile::check` and adds
+no package semantics of its own. Owner: CLI contributor;
 `crates/openkrx-cli/` input/commands/rendering and CLI integration tests.
 
 Acceptance: `inspect`, `list`, and `validate-structure` with bounded input,
 one-object JSON, stable errors/exit statuses, explicit profile/check scope,
-and terminal-safe output. Capability reporting lists only enabled commands.
-Update architecture and README examples. Never report crypto validity.
+and terminal-safe output. `validate-structure` renders the check inventory
+outcome by outcome and must not collapse it into a `valid` verdict: an
+unresolved rule stays visibly distinct from a pass and from a failure.
+Capability reporting lists only enabled commands. Update architecture and
+README examples. Never report crypto validity.
 
 Verification: subprocess tests for success, malformed/unsupported input,
 limits, stdout/stderr separation, stable ordering, and sensitive-data-free
