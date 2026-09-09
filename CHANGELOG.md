@@ -174,6 +174,25 @@ and such a change is recorded here explicitly.
   its decoded budget is per call, capped at `max_entry_decoded_bytes` each
   time and never charged against `max_total_decoded_bytes`. No limit value,
   public signature or accepted archive changes.
+- **The extraction planner refuses two shapes it previously planned.** A
+  symbolic link declared by an entry whose host system is 19 (OS X) is now
+  refused as `extract.unsupported.link`, like one from host 3: both are the
+  host systems APPNOTE records as storing `st_mode` in the high external
+  attribute bits, so reading only host 3 left a link written on macOS
+  classified as `Unknown` and planned as an ordinary file holding its target
+  text. No other host is assumed to carry a mode. A destination component
+  holding one of `*`, `?`, `<`, `>`, `|` or `"`, none of which a Windows
+  filesystem accepts in a name, is now refused as
+  `extract.unsafe_path.reserved_character`, and one starting with a space —
+  which Windows Explorer strips, as it does a trailing one — as
+  `extract.unsafe_path.leading_space`. Those are the only two new codes; no
+  existing code was renamed or removed. The entry-kind table and path rules
+  in [docs/architecture.md](docs/architecture.md#extraction-planning), the
+  catalogue in [docs/codes.md](docs/codes.md#extraction-planning-codes) and
+  the extraction rows and residual risks in
+  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer)
+  record all three decisions. Nothing writes: the planner is still a pure
+  function no command reaches.
 
 ### Removed
 

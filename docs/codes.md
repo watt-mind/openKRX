@@ -258,9 +258,10 @@ function of the inventory and touches no filesystem. The filesystem half of
 KRX-05 — a destination, no-clobber creation, cleanup after an interrupted
 write — is a later ticket and will add codes of its own.
 
-Tests are in `crates/openkrx-core/tests/extract_rejects.rs`, except the two
-classes an accepted inventory can no longer carry, whose tests are the
-`#[cfg(test)]` module in `crates/openkrx-core/src/extract/paths.rs`.
+Tests are in `crates/openkrx-core/tests/extract_rejects.rs`, except the class
+an accepted inventory can no longer carry — a `..` component, which
+`archive::names` refuses first — whose tests are the `#[cfg(test)]` module in
+`crates/openkrx-core/src/extract/paths.rs`.
 
 ### `extract.unsupported.*`
 
@@ -282,12 +283,14 @@ below, so a component violating two of them always reports the first.
 | --- | --- | --- |
 | `extract.unsafe_path.empty_component` | A component is empty, as in `a//b`. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
 | `extract.unsafe_path.current_component` | A component is `.`. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
-| `extract.unsafe_path.parent_component` | A component is `..`. The archive layer already refuses such a name as `archive.unsafe_name.parent_component`, so this is defence in depth over the planner's own output. | `every_unsafe_component_class_is_refused` |
+| `extract.unsafe_path.parent_component` | A component is `..`. The archive layer already refuses such a name as `archive.unsafe_name.parent_component`, so this is defence in depth over the planner's own output. | `every_unsafe_component_class_is_refused`, `the_class_no_archive_can_carry_reports_its_stable_code` |
 | `extract.unsafe_path.control_character` | A component holds a NUL, another C0 control, or a C1 control character. The C0 half is already refused by the archive layer; the C1 half is not, because those bytes are valid UTF-8 name bytes. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
 | `extract.unsafe_path.trailing_dot` | A component ends with `.`, which Windows silently strips, so two entries could become one file. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
 | `extract.unsafe_path.trailing_space` | A component ends with a space, stripped the same way. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.leading_space` | A component starts with a space, which Windows Explorer and several tools strip the same way. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
 | `extract.unsafe_path.reserved_device_name` | A component is a Windows reserved device name — `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` — with or without an extension, compared ASCII case-insensitively. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
 | `extract.unsafe_path.colon` | A component holds `:`, which names an alternate data stream on NTFS. | `every_unsafe_component_class_reachable_from_an_archive_is_refused` |
+| `extract.unsafe_path.reserved_character` | A component holds one of the six characters no Windows filesystem accepts in a name: `*`, `?`, `<`, `>`, `\|` or `"`. One code covers all six. A backslash is not among them: `archive.unsafe_name.backslash` refuses such a name before a plan is attempted. | `every_unsafe_component_class_reachable_from_an_archive_is_refused`, `every_character_windows_refuses_outright_is_one_reserved_character_class` |
 
 ### `extract.ambiguous.*`
 
@@ -297,7 +300,7 @@ renaming or skipping. The reported `entry` is the later of the two.
 | Code | Meaning | Asserted by |
 | --- | --- | --- |
 | `extract.ambiguous.collision` | Two destination paths are equal after NFC normalisation and simple case folding, so a normalising or case-insensitive filesystem would see one path written twice. | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision` |
-| `extract.ambiguous.file_directory_conflict` | One entry's destination path is a directory prefix of another's, so one name would have to be a file and a directory at once. | `a_file_that_is_also_a_directory_prefix_is_refused` |
+| `extract.ambiguous.file_directory_conflict` | One entry's destination path is a directory prefix of another's, so one name would have to be a file and a directory at once. The reported entry is the later of the two in either arrival order. | `a_file_that_is_also_a_directory_prefix_is_refused`, `a_directory_prefix_that_arrives_before_its_file_is_refused_the_same_way` |
 
 ### `extract.over_limit.*`
 
