@@ -64,7 +64,7 @@ specification, 2017-01-16), `HK-2019` (Hivatali kapu technical guide,
 | A19 | Directory nesting and the location of `mimetype` | **Unresolved** | Three primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
 | A20 | Compression method, extra fields, and byte-exactness required for the `mimetype` entry | **Unresolved** | No source states them |
 | A21 | ZIP entry name character encoding (UTF-8 general-purpose flag versus CP437) and case sensitivity | **Unresolved** | No source states them |
-| A22 | Payload subdirectory naming: `ID-<n>`, `ID<n>` and `ID_<n>` all appear, as does the numbering base and whether the names must be contiguous | **Unresolved** | Primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
+| A22 | Payload subdirectory naming: `ID-<n>`, `ID<n>` and `ID_<n>` all appear; the numbering base and whether the names must be contiguous are also unstated | **Unresolved** | Primary sources disagree; see [Unresolved rules](#unresolved-essential-rules) |
 
 ## Metadata rules
 
@@ -115,11 +115,11 @@ A22, payload subdirectory naming, is similarly unsettled: `ID-1`, `ID-2` in
 `BKSZ-2.1` §3.8.2 (p. 26) adds a maximum of 10 as a service rule (A10), so
 even the permitted range is only known for one service.
 
-Because A19, A20, A21, A22, M11, M12, M13 and M14 are open, openKRX cannot
-claim structural conformance (KRX-03) or produce a package that can be
-asserted to conform (KRX-06). A reader may report what it observed; it may
-not report that an archive is a valid KRX package, and a writer must not be
-built until the layout is settled by a citable source or by an
+Because A19, A20, A21, A22, M11, M12, M13, M14 and M15 are open, openKRX
+cannot claim structural conformance (KRX-03) or produce a package that can
+be asserted to conform (KRX-06). A reader may report what it observed; it
+may not report that an archive is a valid KRX package, and a writer must not
+be built until the layout is settled by a citable source or by an
 authoritative statement obtained from the format owner.
 
 ## What is nevertheless usable now
@@ -127,7 +127,7 @@ authoritative statement obtained from the format owner.
 KRX-02 needs only archive-level facts that no source contradicts: the
 container is a ZIP archive (A1), entry names use `/` separators (A8), a
 marker entry names the format (A2), and real packages carry a small number
-of entries (A5, A10). Whether entry names carry a `KRX/` root prefix is
+of entries (A10). Whether entry names carry a `KRX/` root prefix is
 unresolved (A19), so the inventory must not assume either shape. Those
 facts support a bounded, profile-agnostic inventory with concrete limits,
 provided the inventory reports observations only and never labels an
