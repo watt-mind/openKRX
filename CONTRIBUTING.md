@@ -1,10 +1,12 @@
 # Contributing
 
-openKRX is a scaffold for a local KRX library and CLI. Start with the
-[work packages](docs/work-packages.md); format research precedes parser
-conformance and package creation. Discuss scope through a public issue
-before a substantial change. Report vulnerabilities through
-[SECURITY.md](SECURITY.md).
+openKRX is a local library and command-line tool that reads Hungarian KRX
+packages — `inspect`, `list`, `validate-structure` — and extracts one into a
+directory the caller names. Start with the
+[work packages](docs/work-packages.md), which are dependency-ordered: the
+package writer stays blocked until the format evidence settles the container
+layout. Discuss scope through a public issue before a substantial change.
+Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 ## Branches and commits
 
@@ -34,10 +36,12 @@ cargo build --release --locked
 
 Install hooks with `lefthook install` if Lefthook is available. Hooks support
 the workflow; CI remains authoritative. CI runs formatting, Clippy,
-documentation checks, tests on Linux/macOS/Windows, MSRV checks, dependency
-policy and unused-dependency checks, coverage, and security scanning. The
-bootstrap workspace line-coverage floor is 90%; parser and filesystem work
-must add meaningful boundary coverage, not only raise that aggregate.
+documentation checks, tests on Linux/macOS/Windows, a minimum-supported-Rust
+job pinned to 1.88, dependency policy and unused-dependency checks, coverage,
+a bounded fuzz lane that builds both targets on nightly and runs each for 30
+seconds, and security scanning. The workspace line-coverage floor is 90%;
+parser and filesystem work must add meaningful boundary coverage, not only
+raise that aggregate.
 
 Keep dependencies minimal, justified, and compatible with the MSRV and MIT
 project licence. Actions must be pinned to immutable commits. Changes to
@@ -61,4 +65,5 @@ alone is not permission. See [references](docs/references.md).
 Acceptance criteria pass; affected documentation is current; local checks
 and required CI are green; privacy and security boundaries hold. A package
 round-trip alone is insufficient evidence of external interoperability.
-There is no package publishing or release automation in this foundation.
+No package publishing or release automation exists yet; the gates that come
+before a first release are in [docs/releasing.md](docs/releasing.md).

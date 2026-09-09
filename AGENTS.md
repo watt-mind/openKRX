@@ -14,9 +14,10 @@ planned operations as implemented.
 
 ## Scope and ownership
 
-- `crates/openkrx-core/`: library contract, then bounded ZIP/XML processing,
-  profile rules, and deterministic writing. No implicit filesystem, network,
-  process, or clock access; inject I/O where needed.
+- `crates/openkrx-core/`: bounded ZIP and XML processing, the profile rules,
+  extraction planning, and the deterministic writing that KRX-06 will add. No
+  implicit filesystem, network, process, or clock access; inject I/O where
+  needed.
 - `crates/openkrx-cli/`: arguments, human/JSON output, bounded input and safe
   output handling. Keep package semantics in the core crate.
 - `docs/`: architecture, evidence, work package specifications, and roadmap.
@@ -67,8 +68,9 @@ cargo test --workspace --locked
 cargo build --release --locked
 ```
 
-CI also covers documentation, three operating systems, MSRV, dependencies,
-coverage, and security. Read workflow files for the exact current gates.
+CI also covers documentation, three operating systems, a minimum-supported-Rust
+job pinned to 1.88, dependencies, coverage, a bounded fuzz lane, and security.
+Read workflow files for the exact current gates.
 Keep Rust files under the repository's enforced size limit; split by
 responsibility. Use Conventional Commits. Update the CLI contract, security
 model, evidence map, and roadmap when behavior changes. Do not add tests
@@ -94,7 +96,8 @@ afterwards. The full table is the maintenance map in
 | The release process | `docs/releasing.md`, `CHANGELOG.md` |
 
 `scripts/check-codes.py` enforces the code row automatically: it extracts
-every `archive.*`, `metadata.*` and `input.*` literal from `crates/*/src/**`
+every `archive.*`, `extract.*`, `input.*`, `metadata.*` and `output.*`
+literal from `crates/*/src/**`
 and fails when one is missing from `docs/codes.md`, or when that document
 lists a code no source defines. It runs inside `bash scripts/check.sh`. The
 other rows are a review obligation, and a missing update is an incomplete

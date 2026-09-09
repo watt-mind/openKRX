@@ -21,9 +21,8 @@ and such a change is recorded here explicitly.
   executable offers `--help`, `--version` and `capabilities [--json]`; the
   JSON response is one object carrying `schema_version`, `ok`, `command`,
   `data` and `verified: false`, and its `operations` list is empty because
-  no package operation exists. Development checks, CI, and the
-  contribution, security and fixture policies were established alongside
-  it.
+  no package operation exists. It carries the development checks, the CI
+  workflow, and the contribution, security and fixture policies.
 - **The first supported KRX profile, as evidence (KRX-01).**
   [docs/profile.md](docs/profile.md) records twenty-two archive rules and
   fifteen metadata rules extracted from four primary Magyar Posta documents
@@ -34,64 +33,6 @@ and such a change is recorded here explicitly.
   blocks. [docs/references.md](docs/references.md) records each source's
   retrieval status and copyright terms; no schema, sample or document text
   is committed, because none of the sources grants redistribution.
-- **Protected extraction planning, without any filesystem (KRX-05, planning
-  half).** `openkrx_core::extract::plan` turns an archive inventory into an
-  `ExtractionPlan`: the files an extraction would create, decided before
-  anything is created. It is a pure function of the inventory — no
-  filesystem, clock, process or network access, allocation proportional to
-  the entry count, and the same plan for the same inventory every time. A
-  plan holds no `PathBuf`, no absolute path and no platform separator; each
-  item carries the entry index, the destination path as components, the
-  declared size and the decoded size, beside the total bytes and the
-  deduplicated implicit parent directories. Five documented limits —
-  `max_files` 256, `max_total_bytes` 128 MiB, `max_path_bytes` 1024,
-  `max_component_bytes` 255 and `max_depth` 16 — bound the output.
-  `ArchiveEntry` now reports the central directory's `version made by` and
-  `external file attributes`, and derives `EntryKind` from them, which is
-  how a symbolic link, a device node and a directory are recognised: a link
-  or a special file rejects the plan rather than being written, and a
-  directory marker produces no item, so an empty directory is never
-  materialised. Destination components are validated against the union of
-  the three target platforms' rules, and two outputs a filesystem could not
-  keep apart — equal after NFC normalisation and case folding, or one a
-  directory prefix of the other — are refused, never renamed or skipped, as
-  is any failure: a rejection rejects the whole plan. Eighteen new
-  `extract.*` codes are catalogued in
-  [docs/codes.md](docs/codes.md#extraction-planning-codes), the rules in
-  [docs/architecture.md](docs/architecture.md#extraction-planning), and the
-  threat-model rows in
-  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer).
-  `unicode-normalization` (MIT OR Apache-2.0) is a new dependency of the
-  core crate, for NFC alone.
-- **Protected filesystem output and the `extract` command (KRX-05, output
-  half).** `openkrx extract <FILE|-> --into <DIR> [--json]` writes what the
-  planner decided into a directory the caller names, and is the only code in
-  openKRX that writes anywhere. The destination must already exist, must be
-  a directory, and must not be a symbolic link or a Windows reparse point —
-  `extract` never creates it — and it need not be empty. **Nothing is ever
-  overwritten:** a planned path that exists in any form, or an existing
-  ancestor inside the destination that is a link rather than a real
-  directory, refuses the whole extraction before a byte is written. Files are
-  created with `create_new` and directories one level at a time with
-  `create_dir`, each re-checked after creation; no permission bit and no
-  timestamp is copied from the package. A `.openkrx-extract.partial` marker
-  exists for the length of a run, so an interrupted one is detectable and the
-  next run into that destination is refused rather than mixed into it. Any
-  failure after the first write removes every file, directory and marker
-  **this run created**, newest first, and never anything that was already
-  there; the report carries `removed` and `left_in_place` counts. A new exit
-  status, `9` (`output`), and eight `output.*` codes are catalogued in
-  [docs/codes.md](docs/codes.md#output-codes), the policy and the race
-  assumptions in
-  [docs/architecture.md](docs/architecture.md#extraction-output), and the
-  threat-model rows and residual risks in
-  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-output-layer).
-  `capabilities().operations` gains `"extract"`. The successful JSON `data`
-  is `{files_written, directories_created, bytes_written, items[],
-  marker_removed}`, and a failed `extract` response gains a `cleanup` object;
-  both are additive, so `schema_version` stays `1`. No runtime dependency was
-  added. Extracting a file is not a statement that it is authentic or safe to
-  open, and a crash still leaves partial output behind the marker.
 - **A bounded, profile-agnostic archive inventory (KRX-02).**
   `openkrx_core::archive::inventory` reads a caller-supplied ZIP byte slice
   and reports what the archive contains. It performs no filesystem, clock,
@@ -164,6 +105,64 @@ and such a change is recorded here explicitly.
   `input.unreadable` and `input.over_limit.archive_bytes`, were added, and
   `scripts/check-codes.py` now catalogues the `input.*` prefix as well.
   Nothing is extracted, created, cached, logged or written anywhere.
+- **Protected extraction planning, without any filesystem (KRX-05, planning
+  half).** `openkrx_core::extract::plan` turns an archive inventory into an
+  `ExtractionPlan`: the files an extraction would create, decided before
+  anything is created. It is a pure function of the inventory — no
+  filesystem, clock, process or network access, allocation proportional to
+  the entry count, and the same plan for the same inventory every time. A
+  plan holds no `PathBuf`, no absolute path and no platform separator; each
+  item carries the entry index, the destination path as components, the
+  declared size and the decoded size, beside the total bytes and the
+  deduplicated implicit parent directories. Five documented limits —
+  `max_files` 256, `max_total_bytes` 128 MiB, `max_path_bytes` 1024,
+  `max_component_bytes` 255 and `max_depth` 16 — bound the output.
+  `ArchiveEntry` now reports the central directory's `version made by` and
+  `external file attributes`, and derives `EntryKind` from them, which is
+  how a symbolic link, a device node and a directory are recognised: a link
+  or a special file rejects the plan rather than being written, and a
+  directory marker produces no item, so an empty directory is never
+  materialised. Destination components are validated against the union of
+  the three target platforms' rules, and two outputs a filesystem could not
+  keep apart — equal after NFC normalisation and case folding, or one a
+  directory prefix of the other — are refused, never renamed or skipped, as
+  is any failure: a rejection rejects the whole plan. Eighteen new
+  `extract.*` codes are catalogued in
+  [docs/codes.md](docs/codes.md#extraction-planning-codes), the rules in
+  [docs/architecture.md](docs/architecture.md#extraction-planning), and the
+  threat-model rows in
+  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer).
+  `unicode-normalization` (MIT OR Apache-2.0) is a new dependency of the
+  core crate, for NFC alone.
+- **Protected filesystem output and the `extract` command (KRX-05, output
+  half).** `openkrx extract <FILE|-> --into <DIR> [--json]` writes what the
+  planner decided into a directory the caller names, and is the only code in
+  openKRX that writes anywhere. The destination must already exist, must be
+  a directory, and must not be a symbolic link or a Windows reparse point —
+  `extract` never creates it — and it need not be empty. **Nothing is ever
+  overwritten:** a planned path that exists in any form, or an existing
+  ancestor inside the destination that is a link rather than a real
+  directory, refuses the whole extraction before a byte is written. Files are
+  created with `create_new` and directories one level at a time with
+  `create_dir`, each re-checked after creation; no permission bit and no
+  timestamp is copied from the package. A `.openkrx-extract.partial` marker
+  exists for the length of a run, so an interrupted one is detectable and the
+  next run into that destination is refused rather than mixed into it. Any
+  failure after the first write removes every file, directory and marker
+  **this run created**, newest first, and never anything that was already
+  there; the report carries `removed` and `left_in_place` counts. A new exit
+  status, `9` (`output`), and eight `output.*` codes are catalogued in
+  [docs/codes.md](docs/codes.md#output-codes), the policy and the race
+  assumptions in
+  [docs/architecture.md](docs/architecture.md#extraction-output), and the
+  threat-model rows and residual risks in
+  [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-output-layer).
+  `capabilities().operations` gains `"extract"`. The successful JSON `data`
+  is `{files_written, directories_created, bytes_written, items[],
+  marker_removed}`, and a failed `extract` response gains a `cleanup` object;
+  both are additive, so `schema_version` stays `1`. No runtime dependency was
+  added. Extracting a file is not a statement that it is authentic or safe to
+  open, and a crash still leaves partial output behind the marker.
 - **The documentation set and its maintenance gate.**
   [docs/index.md](docs/index.md) describes every document and carries a
   maintenance map saying which documents each kind of change must update in
@@ -220,6 +219,22 @@ and such a change is recorded here explicitly.
   [SECURITY.md](SECURITY.md#threat-model-mapping-extraction-planning-layer)
   record all three decisions. Nothing writes: the planner is still a pure
   function no command reaches.
+- **Both crate descriptions, and the documents that still described the
+  repository as a scaffold.** `openkrx-core` is described as bounded KRX
+  package reading, structural checks and extraction planning, and
+  `openkrx-cli` as `inspect`, `list`, `validate-structure` and `extract`;
+  both keep `publish = false`. [CONTRIBUTING.md](CONTRIBUTING.md),
+  [SECURITY.md](SECURITY.md) and
+  [docs/releasing.md](docs/releasing.md) state the implemented surface and
+  its boundaries instead, and [README.md](README.md),
+  [AGENTS.md](AGENTS.md), [docs/index.md](docs/index.md),
+  [docs/roadmap.md](docs/roadmap.md),
+  [docs/work-packages.md](docs/work-packages.md) and
+  [docs/research.md](docs/research.md) were read against the code and each
+  other: the stale claims that nothing is extracted, that
+  `capabilities().operations` is empty, that `scripts/check-codes.py` covers
+  three code prefixes, and that no filesystem code exists are gone. No
+  behaviour, dependency or lockfile entry changes.
 - `miniz_oxide` moved from 0.8.9 to 0.9.1, with the root `Cargo.lock` and
   `fuzz/Cargo.lock` refreshed together so both resolve the same version;
   the inflate API in use, the licence and the MSRV are unchanged.

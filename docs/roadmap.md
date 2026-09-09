@@ -40,8 +40,9 @@ The authoritative, code-level version of this list is
 - A fuzzing campaign. Both parsers have a `cargo-fuzz` target and a
   30-second-per-target smoke lane in CI; a seed corpus, a scheduled long run
   and coverage measurement do not exist.
-- A CLI agent skill. Now that a reader command ships there is a workflow to
-  describe, and it is a separate change rather than part of KRX-04.
+- A CLI agent skill (`openkrx skill`). Now that the reader and extraction
+  commands ship there is a workflow to describe; a separate change is in
+  progress and nothing in the executable exposes a skill yet.
 - Configurable limits from the command line. `Limits` and `MetadataLimits`
   are library values a Rust caller can tighten; nothing on the command line
   reaches them.
@@ -68,7 +69,12 @@ KRX-05 was the first milestone that writes to a filesystem, so the whole
 extraction threat model is now live; its residual risks are recorded in
 [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer). KRX-06 is
 the one that cannot start, whatever the engineering appetite, until a citable
-source or an authoritative statement settles the layout.
+source or an authoritative statement settles the layout: nine of the
+thirty-seven profile rules are unresolved, and a writer would have to invent
+an answer to A19 to A22 to emit a single archive. The two requests that would
+settle them — one to the format owner, one for the SPOCS OCD deliverable —
+are written out in [profile.md](profile.md#what-the-2026-09-09-search-added),
+and both are for a person to make.
 
 ## Engineering items
 
@@ -82,7 +88,12 @@ Unordered, and independent of the milestone sequence.
   mutation sweeps stay the compensating control until then; see
   [testing.md](testing.md#fuzzing).
 - **Mutation testing** of the check inventory, to find checks that pass for
-  the wrong reason. Meaningful only once the inventory stops growing.
+  the wrong reason. A first gate is in progress; until it lands and is
+  recorded in [testing.md](testing.md), nothing measures whether a check
+  passes for the right reason.
+- **A golden output contract** pinning the human and JSON renderings of each
+  command, so an accidental change to what a reader sees fails a test rather
+  than a review. In progress, and not a gate yet.
 - **Property tests** for the ZIP reader's coverage arithmetic, generating
   structurally valid archives and asserting that exactly the declared bytes
   are claimed.
@@ -112,8 +123,9 @@ Stated plainly, because the tests that would remove them do not exist yet.
   renders `Unresolved` as a pass, or that treats
   `StructureSummary::Consistent` as acceptance, would be making a claim
   openKRX explicitly does not make.
-- **Both parsers are fuzzed only as a smoke test.** Each target runs for 30
-  seconds per push from an empty corpus, which is enough to prove the harness
+- **Both parsers are fuzzed only as a smoke test.** The `Fuzz (build only)`
+  job runs each target for 30 seconds from an empty corpus, which is enough
+  to prove the harness
   executes and to catch a shallow regression, and no more; it is not a
   campaign and the lane passing is not evidence that a reader is fuzz-clean.
   Beyond that the sweeps cover truncations and one-byte mutations of valid
@@ -131,11 +143,16 @@ Stated plainly, because the tests that would remove them do not exist yet.
   format description implies, not from a corpus. A real package larger than
   a ceiling would be refused as over-limit, correctly by the contract and
   unhelpfully in practice, until the ceiling is revisited with evidence.
-- **No filesystem code exists beyond reading one input, so none of the
-  extraction risks are mitigated — they are absent.** The reader opens the
-  path it was given and writes nothing anywhere. The moment KRX-05 starts,
-  the whole extraction threat model in [SECURITY.md](../SECURITY.md) becomes
-  live at once.
+- **The extraction threat model is live, and one part of it is not
+  defended.** `extract` writes into a directory the caller names, so every
+  row of the output threat model in [SECURITY.md](../SECURITY.md) now
+  applies to real files. Confinement rests on `symlink_metadata` and
+  exclusive creation, which lose to a writer who can replace a path
+  component between the check and the creation; that race is stated, not
+  tested, in
+  [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer). A crash
+  still leaves partial output behind the `.openkrx-extract.partial` marker,
+  because the undo pass runs on a returned error and not on a signal.
 - **The exit-status classifier keys on a code's category segment.** The core
   error enums are `#[non_exhaustive]`, so a new code cannot be made to fail
   compilation in the command-line crate. A test over

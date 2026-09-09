@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
-description = "openKRX command-line interface (development scaffold)"
+description = "openkrx: inspect, list, validate-structure and extract Hungarian KRX packages"
 
 [lints]
 workspace = true

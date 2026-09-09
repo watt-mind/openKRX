@@ -7,22 +7,24 @@ commands `inspect`, `list` and `validate-structure`, and `extract`. The
 reader commands render the core library's bounded ZIP inventory
 (`openkrx_core::archive::inventory`), bounded metadata parsing
 (`openkrx_core::metadata::parse`) and structural check inventory
-(`openkrx_core::profile::check`), which still operate on caller-supplied byte
-slices only. `extract` writes: it joins `openkrx_core::extract::plan` onto a
-directory the caller names, under the no-clobber, no-link, undo-on-failure
-policy mapped [below](#threat-model-mapping-extraction-output-layer). The
-core crate itself still performs no I/O of any kind.
+(`openkrx_core::profile::check`), all of which operate on caller-supplied
+byte slices only. `extract` writes: it joins `openkrx_core::extract::plan`
+onto a directory the caller names, under the no-clobber, no-link,
+undo-on-failure policy mapped
+[below](#threat-model-mapping-extraction-output-layer). The core crate itself
+performs no I/O of any kind.
 
 Reading the one input a command takes is bounded before parsing begins, and
 writing happens only where `extract` was explicitly pointed. Nothing creates
 a package, uses keys, or accesses government services. The requirements below
-remain implementation gates for package support, not claims that a complete
-secure KRX parser exists. A successful inventory, parse, structural report or
-extraction is an observation, never a conformance or authenticity
-statement.
+remain implementation gates for the package operations that do not exist
+yet, not claims that a complete secure KRX parser exists. A successful
+inventory, parse, structural report or extraction is an observation, never a
+conformance or authenticity statement.
 
-Only the current `develop` branch receives fixes during scaffolding. There
-are no released versions to support yet.
+Only the current `develop` branch receives fixes. There are no released
+versions, and no tags, to support yet; when releases begin, this section
+will name the supported versions.
 
 ## Reporting
 

@@ -70,7 +70,7 @@ differently. Adopting one would have meant fighting its permissiveness at
 every call site, and inheriting a dependency tree for a container format
 whose entire supported surface is stored and deflate.
 
-The reader is about 1 300 lines across seven modules, forbids `unsafe`,
+The reader is about 1 600 lines across eight modules, forbids `unsafe`,
 performs no I/O, and its rules are stated as tests. That is a size worth
 owning. The trade is real and is written down here: openKRX will refuse
 archives that a permissive reader opens, and a compatibility report against
@@ -120,6 +120,18 @@ encoding other than UTF-8 is refused rather than guessed at. Putting all
 four in one place means the argument that no external resolution can happen
 is a short one that a reviewer can check in a single file.
 
+### `unicode-normalization`, for NFC and nothing else
+
+The extraction planner has to decide whether two entry names would become the
+same file. Two names that differ only in normalisation form — a precomposed
+character against its decomposed sequence — are one file on macOS and two on
+Linux, so the planner compares destination components after NFC and case
+folding and refuses the package when two of them collide, rather than
+renaming or skipping one. That comparison needs a normaliser, and writing one
+means shipping the Unicode tables. `unicode-normalization` is
+MIT OR Apache-2.0, has no transitive dependency of consequence, and is used
+for NFC alone; nothing else in openKRX normalises anything.
+
 ### No vendored XSD
 
 `KER_META_V0_9.xsd` is embedded in a posta.hu document that states only
@@ -166,8 +178,9 @@ across the workspace.
 The requirements that decided it: memory safety while parsing hostile input
 without a garbage collector or a runtime; one static binary per platform for
 a tool intended to run locally on a person's machine; a dependency set small
-enough to audit (`serde`, `miniz_oxide` and `quick-xml` in the core crate,
-with `clap` and `serde_json` added by the CLI); and enough
+enough to audit (`serde`, `miniz_oxide`, `quick-xml` and
+`unicode-normalization` in the core crate, with `clap` and `serde_json` added
+by the CLI); and enough
 type-system strength to make "an unresolved rule is not a failure" a
 compile-time distinction rather than a convention. The sibling projects
 openSzigno and openPapir are Rust, so a shared consumer contract stays in
