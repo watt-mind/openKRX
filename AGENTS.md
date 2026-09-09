@@ -2,8 +2,10 @@
 
 Read [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 [SECURITY.md](SECURITY.md), and [docs/architecture.md](docs/architecture.md)
-before changing code. The repository is a scaffold: only help, version,
-and capabilities exist. Never describe planned operations as implemented.
+before changing code. The CLI offers only help, version, and capabilities;
+the core crate additionally implements a bounded archive inventory, bounded
+metadata parsing and a structural check inventory, none of which any command
+exposes. Never describe planned operations as implemented.
 
 ## Scope and ownership
 
@@ -67,6 +69,35 @@ responsibility. Use Conventional Commits. Update the CLI contract, security
 model, evidence map, and roadmap when behavior changes. Do not add tests
 that merely repeat trivial implementation details; exercise boundaries and
 observable contracts.
+
+## Documentation maintenance
+
+Documentation is updated in the same PR as the change it describes, not
+afterwards. The full table is the maintenance map in
+[docs/index.md](docs/index.md#maintenance-map); the short form:
+
+| Change | Update |
+| --- | --- |
+| Parsing behaviour | `docs/architecture.md`, `docs/testing.md`, `CHANGELOG.md` |
+| A limit or its default | `docs/architecture.md` limit table, `CHANGELOG.md` |
+| A stable code | `docs/codes.md`, `SECURITY.md` mapping, `CHANGELOG.md` |
+| A profile rule's status | `docs/profile.md`, `docs/conformance.md`, `CHANGELOG.md` |
+| The CLI contract | `docs/architecture.md`, `README.md`, `CHANGELOG.md` |
+| Tests or fixtures | `docs/testing.md`, `tests/fixtures/README.md` |
+| A dependency | `docs/architecture.md`, `docs/research.md`, `CHANGELOG.md` |
+| A security control | `SECURITY.md`, `docs/architecture.md`, `docs/testing.md` |
+| The release process | `docs/releasing.md`, `CHANGELOG.md` |
+
+`scripts/check-codes.py` enforces the code row automatically: it extracts
+every `archive.*` and `metadata.*` literal from `crates/*/src/**` and fails
+when one is missing from `docs/codes.md`, or when that document lists a code
+no source defines. It runs inside `bash scripts/check.sh`. The other rows
+are a review obligation, and a missing update is an incomplete change.
+
+Every behaviour-changing PR adds an entry under `[Unreleased]` in
+`CHANGELOG.md`. Never write "valid KRX", "conforming" or an equivalent as a
+claim; those words appear only in negations and boundary statements, because
+`docs/profile.md` lists unresolved essential rules.
 
 ## Factory orchestration
 

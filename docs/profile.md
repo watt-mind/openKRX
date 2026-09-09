@@ -141,7 +141,9 @@ unknown" outcome rather than to "invalid".
 
 The checks implemented on that basis, and the rule each unresolved outcome
 cites, are listed in
-[architecture.md](architecture.md#structural-check-inventory).
+[architecture.md](architecture.md#structural-check-inventory). Every rule
+above, mapped to the module or check that implements it, the outcome it can
+produce and the test that holds it, is in [conformance.md](conformance.md).
 
 ## Conformance evidence
 

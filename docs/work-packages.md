@@ -23,18 +23,19 @@ source; documentation checks pass. Unresolved essential rules block the
 associated conformance/writer work, not generic bounded ZIP research.
 
 Output: [profile.md](profile.md) holds the evidence table and the list of
-unresolved rules. Treat its unresolved rows as binding constraints on the
-packages below, not as open design choices.
+unresolved rules, and [conformance.md](conformance.md) maps each rule to
+what the code does about it. Treat the unresolved rows as binding
+constraints on the packages below, not as open design choices.
 
 ## KRX-02: Bounded archive inventory
 
 Status: implemented. `openkrx_core::archive::inventory` reads a bounded,
 profile-agnostic inventory from a caller-supplied byte slice. Concrete limits,
 supported methods and peak-memory behavior are published in
-[architecture.md](architecture.md#safety-and-determinism); the threat-model
+[architecture.md](architecture.md#limits); the threat-model
 mapping is in [SECURITY.md](../SECURITY.md#threat-model-mapping-archive-layer).
 A fuzz target is still outstanding and tracked separately; the truncation and
-mutation sweeps in [testing.md](testing.md#implemented-test-layers) stand in
+mutation sweeps in [testing.md](testing.md#sweeps) stand in
 for it. No CLI command exposes the inventory, so `capabilities().operations`
 remains empty.
 
@@ -62,16 +63,17 @@ an archive a conforming KRX package.
 Status: implemented. `openkrx_core::metadata::parse` reads a bounded
 `KER_META_V0_9`-shaped document from a caller-supplied byte slice, and
 `openkrx_core::profile::check` runs a fixed inventory of eleven structural
-checks over an archive inventory and that document. The check inventory,
-its stable codes and the metadata limits are published in
-[architecture.md](architecture.md#structural-check-inventory); the threat-model
+checks over an archive inventory and that document. The check inventory
+and the metadata limits are published in
+[architecture.md](architecture.md#structural-check-inventory), the stable
+codes in [codes.md](codes.md); the threat-model
 mapping is in
 [SECURITY.md](../SECURITY.md#threat-model-mapping-metadata-layer). Each
 unresolved rule maps to a distinct `Unresolved(rule)` outcome, so no
 conformance verdict exists and the reported summary `Consistent` is explicitly
 not one. An XML fuzz target is still outstanding and tracked with the archive
 one; the truncation and mutation sweeps in
-[testing.md](testing.md#implemented-test-layers) stand in for it. No CLI
+[testing.md](testing.md#sweeps) stand in for it. No CLI
 command exposes the checks, so `capabilities().operations` remains empty.
 
 Dependencies: KRX-01 and KRX-02. Owner: profile contributor; core metadata

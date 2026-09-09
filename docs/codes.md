@@ -1,0 +1,227 @@
+# Stable code catalogue
+
+Every failure openKRX produces carries a stable dotted code. This document
+lists all of them: the category the code belongs to, what it means, the
+numeric fields the error carries alongside it, and the test that asserts it.
+
+The codes are part of the public contract. Renaming one, or changing which
+condition produces it, is a breaking change and belongs in
+[CHANGELOG.md](../CHANGELOG.md). Adding one is not, which is why every error
+enum is `#[non_exhaustive]`; a consumer matches on the code string and must
+treat an unknown code as a failure rather than as a success.
+
+`scripts/check-codes.py` keeps this catalogue honest. It extracts every
+`"archive.…"` and `"metadata.…"` string literal from `crates/*/src/**` and
+fails when a code exists in the sources but not here, or here but not in the
+sources. It runs as part of `bash scripts/check.sh`.
+
+Test names below are functions in `crates/openkrx-core/tests/`. Where a code
+has several asserting tests, the most specific one is named.
+
+## Reading a diagnostic
+
+No diagnostic ever carries content. `Display` for `ArchiveError` prints the
+code, the numeric limit values where the error is a limit, the offending
+numeric value where the error is an unsupported feature, and the
+central-directory index of the entry. `Display` for `MetadataError` prints
+the code and its numeric limit values only; the schema-fixed element an
+error concerns is available as a typed `MetadataError::field`, never
+printed, and document text, attribute values and entity names are never
+exposed at all.
+
+The **fields** column names the numeric data the error variant carries.
+`entry` is a central-directory index, `limit_value` the configured ceiling,
+`observed` the value that reached it, and `value` an offending numeric such
+as a compression-method identifier. Where a field is optional, it is present
+only when the failure is scoped to a single entry.
+
+## Archive codes
+
+`ArchiveError`, defined in `crates/openkrx-core/src/error.rs`. Six
+categories keep truncation, self-contradiction, ambiguity, unsupported
+features, resource exhaustion and unsafe names distinguishable from one
+another, plus one lookup code.
+
+### `archive.truncated.*`
+
+The image ended inside a structure. Fields: `entry`, when entry-scoped.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `archive.truncated.eocd` | The end-of-central-directory record, or its comment, runs past the end of the image. | `no_truncation_of_a_valid_archive_is_ever_accepted` (the truncation sweep; no test pins this code specifically) |
+| `archive.truncated.central_directory` | A central-directory record header, or one of its variable-length fields, is cut short. | `a_central_record_cut_short_is_reported_as_truncation` |
+| `archive.truncated.local_header` | A local file header, or one of its variable-length fields, is cut short. | `a_record_pointing_past_the_image_is_reported_as_truncation` |
+| `archive.truncated.entry_data` | An entry declares more compressed data than the image holds. | `an_entry_declaring_more_data_than_the_image_holds_is_truncated` |
+| `archive.truncated.data_descriptor` | A data descriptor runs into the end of the image. | `a_descriptor_running_into_the_end_of_the_image_is_truncated` |
+
+### `archive.malformed.*`
+
+A complete image that contradicts itself. Fields: `entry`, when
+entry-scoped.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `archive.malformed.eocd_missing` | No end-of-central-directory record ends the image, so it is not a ZIP archive at all. | `missing_end_record_is_reported_as_missing` |
+| `archive.malformed.record_signature` | A record did not carry the signature its position requires. | `a_record_without_its_signature_is_rejected` |
+| `archive.malformed.central_directory_count` | The central directory holds a different record count than the end record declares. | `a_declared_record_count_above_the_real_one_is_rejected` |
+| `archive.malformed.central_directory_size` | The central directory does not occupy exactly the declared byte range. | `a_declared_record_count_below_the_real_one_is_rejected` |
+| `archive.malformed.central_directory_placement` | The central directory does not end where the end record begins. | `a_displaced_central_directory_is_rejected` |
+| `archive.malformed.local_header_mismatch` | A local header contradicts its authoritative central-directory record on name, flags, method, CRC or a size. | `a_local_header_contradicting_its_record_is_rejected` |
+| `archive.malformed.data_descriptor_mismatch` | A data descriptor contradicts its central-directory record, or appears without general-purpose bit 3. | `a_data_descriptor_contradicting_its_record_is_rejected` |
+| `archive.malformed.overlapping_ranges` | Two claimed byte ranges overlap, so one byte belongs to two structures. | `overlapping_entry_ranges_are_rejected` |
+| `archive.malformed.prefix_bytes` | Bytes precede the first local header. | `bytes_before_the_first_local_header_are_rejected` |
+| `archive.malformed.trailing_bytes` | Bytes follow the end-of-central-directory comment. | `bytes_after_the_end_record_comment_are_rejected` |
+| `archive.malformed.unclaimed_bytes` | Bytes belong to no local header, entry, descriptor, central-directory record or end record. | `bytes_claimed_by_no_structure_are_rejected` |
+| `archive.malformed.crc_mismatch` | Decoded data did not match the declared CRC-32. This detects corruption, never authenticity. | `a_crc_that_does_not_match_the_decoded_bytes_is_rejected` |
+| `archive.malformed.declared_size_mismatch` | The decoded size did not match the declared uncompressed size. | `a_declared_size_below_the_decoded_size_is_rejected` |
+| `archive.malformed.deflate_stream` | The deflate stream is invalid, ends early, or carries bytes after its final block. | `a_corrupt_deflate_stream_is_rejected` |
+
+### `archive.ambiguous.*`
+
+Input that admits more than one reading; refused rather than resolved.
+Fields: `entry`, when entry-scoped.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `archive.ambiguous.eocd` | More than one end-of-central-directory record terminates the image, so two readers could read two archives. | `a_second_end_record_candidate_is_an_ambiguity_not_a_choice` |
+| `archive.ambiguous.duplicate_name` | Two entries carry byte-identical names. | `duplicate_and_case_folded_names_are_ambiguities` |
+| `archive.ambiguous.case_folded_duplicate_name` | Two entry names differ only by case, and rule A21 leaves case rules unresolved, so neither reading can be preferred. | `duplicate_and_case_folded_names_are_ambiguities` |
+
+### `archive.unsupported.*`
+
+A well-formed ZIP feature this reader deliberately does not implement.
+Fields: `value`, when the feature has an identifying number, and `entry`,
+when entry-scoped.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `archive.unsupported.method` | A compression method other than stored (0) or deflate (8). | `unsupported_compression_methods_are_rejected` |
+| `archive.unsupported.zip64` | A ZIP64 record, marker value, locator or extra field. | `zip64_records_and_markers_are_rejected` |
+| `archive.unsupported.encryption` | An encryption or strong-encryption general-purpose flag. | `encryption_and_patched_data_flags_are_rejected` |
+| `archive.unsupported.multi_disk` | A multi-disk or split archive, or a record on another disk. | `a_record_on_another_disk_is_rejected` |
+| `archive.unsupported.patched_data` | Compressed patched data (general-purpose bit 5). | `encryption_and_patched_data_flags_are_rejected` |
+
+### `archive.over_limit.*`
+
+A documented ceiling was reached. Fields: `limit_value`, `observed` where
+meaningful, and `entry` when entry-scoped. The defaults are in
+[architecture.md](architecture.md#archive-inventory-limits).
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `archive.over_limit.archive_bytes` | The input slice is longer than `max_archive_bytes`. | `archive_size_limit_holds_at_its_boundary` |
+| `archive.over_limit.entries` | The end record declares more records than `max_entries`, checked before the directory is walked. | `entry_count_limit_holds_at_its_boundary` |
+| `archive.over_limit.name_bytes` | An entry name is longer than `max_name_bytes`. | `name_length_limit_holds_at_its_boundary` |
+| `archive.over_limit.entry_decoded_bytes` | One entry decoded more bytes than `max_entry_decoded_bytes`, counted while decoding. | `per_entry_decoded_size_limit_holds_at_its_boundary` |
+| `archive.over_limit.total_decoded_bytes` | All entries together decoded more than `max_total_decoded_bytes`. | `total_decoded_size_limit_holds_at_its_boundary` |
+| `archive.over_limit.compression_ratio` | An entry past the 64 KiB grace window exceeded `max_compression_ratio` decoded-to-compressed. | `a_deflate_bomb_is_stopped_by_the_ratio_limit` |
+| `archive.over_limit.extra_field_bytes` | A local or central extra-field block is larger than `max_extra_field_bytes`. | `extra_field_limit_holds_at_its_boundary_in_both_headers` |
+| `archive.over_limit.comment_bytes` | The archive comment or an entry comment is larger than `max_comment_bytes`. | `comment_limit_holds_at_its_boundary_for_archive_and_entry` |
+
+### `archive.unsafe_name.*`
+
+A name shape that must never reach a filesystem layer. Names are checked as
+raw bytes, before any encoding decision, and the name itself is never
+reported. Fields: `entry`, always present.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `archive.unsafe_name.empty` | The name is empty. | `every_unsafe_name_class_is_rejected` |
+| `archive.unsafe_name.control_byte` | The name holds a NUL or another C0 control byte. | `every_unsafe_name_class_is_rejected` |
+| `archive.unsafe_name.backslash` | The name holds a backslash, which rule A8 does not permit as a separator. | `every_unsafe_name_class_is_rejected` |
+| `archive.unsafe_name.absolute_path` | The name starts with `/`. | `every_unsafe_name_class_is_rejected` |
+| `archive.unsafe_name.parent_component` | The name holds a `..` path component. | `every_unsafe_name_class_is_rejected` |
+| `archive.unsafe_name.drive_prefix` | The name starts with a Windows drive prefix such as `c:`. | `every_unsafe_name_class_is_rejected` |
+| `archive.unsafe_name.directory_with_data` | The name ends with a separator but the entry declares content. | `every_unsafe_name_class_is_rejected` |
+
+### Lookup
+
+| Code | Category | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- | --- |
+| `archive.no_such_entry` | Lookup | `ArchiveInventory::entry_bytes` was asked for an index the inventory does not hold. | `entry` | `entry_bytes_redecodes_only_the_requested_entry` |
+
+## Metadata codes
+
+`MetadataError`, defined in `crates/openkrx-core/src/metadata/error.rs`.
+Three categories keep refused XML features, grammar violations and resource
+exhaustion distinguishable. No variant carries an entry index, because the
+parser reads one document and never sees the archive.
+
+### `metadata.unsupported.*`
+
+An XML feature or a namespace this reader deliberately refuses to process.
+Fields: none.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `metadata.unsupported.dtd` | A `<!DOCTYPE ...>` declaration. Refused before anything can be declared, so no entity is ever declared and no external identifier is ever seen. | `a_doctype_declaration_is_refused_before_anything_is_declared` |
+| `metadata.unsupported.processing_instruction` | A processing instruction other than the XML declaration. | `a_processing_instruction_other_than_the_declaration_is_refused` |
+| `metadata.unsupported.encoding` | A declared character encoding other than UTF-8, refused rather than guessed at. | `a_non_utf8_encoding_declaration_is_refused_rather_than_guessed` |
+| `metadata.unsupported.namespace` | The root element is bound to a namespace the profile does not define, or is unqualified while the schema is qualified (M1). | `a_root_in_another_namespace_is_unsupported_not_malformed` |
+
+### `metadata.malformed.*` (parser)
+
+A document that is not well-formed, or does not match the M1 to M8 grammar.
+Fields: none numeric; a typed `MetadataError::field` names the schema-fixed
+element where one applies, and is never printed.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `metadata.malformed.syntax` | The byte stream is not well-formed XML. | `an_unclosed_element_is_refused_as_a_syntax_problem` |
+| `metadata.malformed.encoding` | The byte stream is not valid UTF-8. | `bytes_that_are_not_utf8_are_refused_as_an_encoding_problem` |
+| `metadata.malformed.entity` | A general entity reference other than the five XML predefines, or a character reference to a forbidden code point. | `an_undeclared_entity_reference_is_refused_in_text` |
+| `metadata.malformed.unbound_prefix` | A namespace prefix was used without being bound. | `an_unbound_namespace_prefix_is_refused` |
+| `metadata.malformed.attribute` | An attribute is malformed, or repeated on one element. | `a_repeated_attribute_is_refused` |
+| `metadata.malformed.root_element` | The root element is in the target namespace but is not `KULDEMENY` (M1). | `a_wrong_root_element_in_the_right_namespace_is_malformed` |
+| `metadata.malformed.missing_element` | A required element is absent (M3, M5, M7). | `a_missing_required_header_element_is_reported_with_its_field` |
+| `metadata.malformed.duplicate_element` | An element appears more than once where the grammar allows one. | `a_repeated_header_element_is_refused` |
+| `metadata.malformed.element_order` | The `KULDEMENY` children appear in an order M2 does not allow. | `sibling_blocks_out_of_the_documented_order_are_refused` |
+| `metadata.malformed.unexpected_child` | A leaf element that must carry text carries child elements instead. | `a_child_element_inside_a_leaf_field_is_refused` |
+| `metadata.malformed.enumeration` | A value is outside its schema enumeration (M4). | `a_value_outside_its_enumeration_is_refused` |
+| `metadata.malformed.integer` | A value declared `xs:long` is not an integer (M5, M7). | `a_non_integer_attachment_number_is_refused` |
+| `metadata.malformed.boolean` | A value declared `xs:boolean` is not a boolean (M3). | `a_non_boolean_teszt_is_refused` |
+
+### `metadata.over_limit.*`
+
+A documented metadata ceiling was reached, counted inside the XML event
+loop against values actually produced. Fields: `limit_value` and
+`observed`. The defaults are in
+[architecture.md](architecture.md#metadata-limits).
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `metadata.over_limit.document_bytes` | The document slice is longer than `max_document_bytes`, checked before parsing starts. | `the_document_size_limit_holds_at_its_boundary` |
+| `metadata.over_limit.depth` | Element nesting exceeded `max_depth`, counting the root as depth 1. | `the_depth_limit_holds_at_its_boundary` |
+| `metadata.over_limit.elements` | More element start events than `max_elements` were produced. | `the_element_count_limit_holds_at_its_boundary` |
+| `metadata.over_limit.attributes_per_element` | One element carried more attributes than `max_attributes_per_element`. | `the_attribute_count_limit_holds_at_its_boundary` |
+| `metadata.over_limit.text_bytes` | Character data across the document exceeded `max_text_bytes`. | `the_text_limit_holds_at_its_boundary` |
+
+## Structural check codes
+
+`openkrx_core::profile::codes`, defined in
+`crates/openkrx-core/src/profile/mod.rs`. These are the codes a failing
+structural check reports as `CheckOutcome::Fail(code)`. They share the
+`metadata.` namespace with the parser codes above and never collide with
+one, so a consumer can bucket every diagnostic this crate produces by its
+dotted code alone. A `CheckOutcome` carries the code string only, so none of
+them carries a numeric field. Tests are in `profile_structure.rs`.
+
+| Code | Category | Meaning | Asserted by |
+| --- | --- | --- | --- |
+| `metadata.missing` | Location | No entry has the shape of a metadata document (A4). | `an_archive_without_a_metadata_document_fails_the_location_check` |
+| `metadata.ambiguous.multiple_candidates` | Location | More than one entry does, and nothing settles which one is meant. | `two_metadata_candidates_are_an_ambiguity_not_a_choice` |
+| `metadata.malformed.marker_missing` | Marker | No entry's last path segment is `mimetype` (A2). | `an_archive_without_a_marker_fails_the_marker_check` |
+| `metadata.malformed.marker_not_first` | Marker | A `mimetype` entry exists but is not the archive's first entry (A2). | `a_marker_that_is_not_the_first_entry_fails_the_marker_check` |
+| `metadata.malformed.marker_content` | Marker | The marker entry holds something other than `application/OCD+ZIP` (A2). | `a_marker_holding_something_else_fails_the_marker_check` |
+| `metadata.reference.missing_entry` | Reference | A declared attachment names no entry, with or without a plausible root prefix (M5, M10). | `a_reference_to_a_missing_entry_fails` |
+| `metadata.reference.duplicate` | Reference | Two references share an attachment number, or a joined declared path (A6). | `two_references_sharing_an_attachment_number_fail` |
+| `metadata.count_mismatch` | Count | `MELLEKLETEK_SZAMA` disagrees with the number of listed references (M7). | `a_declared_count_disagreeing_with_the_list_fails` |
+
+## What is deliberately absent
+
+There is no success code, no `valid`, no `conforming` and no `is_krx`. A
+check that cannot be decided reports `CheckOutcome::Unresolved(rule)`
+naming the rule of [profile.md](profile.md) that blocks it, and that outcome
+carries no code at all — it is not a failure and must never be rendered as
+one. The unresolved rules and the checks that cite them are mapped in
+[conformance.md](conformance.md).
