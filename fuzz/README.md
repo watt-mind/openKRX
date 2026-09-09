@@ -25,6 +25,14 @@ ignored by Git. No corpus is committed; see
 [regressions/README.md](regressions/README.md) for what may be.
 
 `fuzz/Cargo.lock` is committed so a fuzz build resolves the same dependency
-tree everywhere. Dependabot watches the root workspace only, so this lockfile
-is refreshed by hand — with `cargo +nightly update --manifest-path fuzz/Cargo.toml`
-— when a target needs it.
+tree everywhere, and CI enforces it: `cargo fuzz` accepts none of cargo's
+manifest flags, so the fuzz job resolves the graph with
+`cargo +nightly metadata --manifest-path fuzz/Cargo.toml --locked` before it
+builds, which fails on an absent or stale lockfile. Dependabot has its own
+`cargo` entry for `/fuzz`; refresh the lockfile by hand with
+
+```sh
+cargo +nightly update --manifest-path fuzz/Cargo.toml
+```
+
+whenever `fuzz/Cargo.toml` changes, and commit the result with it.

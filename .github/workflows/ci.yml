@@ -123,7 +123,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      FUZZ_TARGET: x86_64-unknown-linux-gnu
+      # The Rust target triple the fuzz binaries are built for, not the name of
+      # a fuzz target: those are `inventory` and `xml_metadata`, named below.
+      FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,12 +141,19 @@ jobs:
       # install-action falls back to cargo-binstall for this version, which
       # ships a musl build. AddressSanitizer cannot link against a static
       # libc, so the target is named explicitly rather than inherited.
-      - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET"
+      # `cargo fuzz` accepts none of cargo's manifest flags, so `--locked`
+      # reaches neither `fuzz build` nor `fuzz run` — both reject it outright.
+      # Resolving the same graph with `cargo metadata --locked` first is the
+      # equivalent: it fails when `fuzz/Cargo.lock` is absent or stale, and
+      # the build that follows then reuses that lockfile unchanged.
+      - name: Enforce the fuzz lockfile
+        run: cargo +nightly metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
+      - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE"
       - name: Bounded run of each target
         run: |
-          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET" \
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
             inventory -- -max_total_time=30 -rss_limit_mb=2048
-          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET" \
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
             xml_metadata -- -max_total_time=30 -rss_limit_mb=2048
       - name: Upload crash artifacts
         if: failure()
@@ -153,7 +162,6 @@ jobs:
           name: fuzz-artifacts
           path: fuzz/artifacts/
           if-no-files-found: ignore
-
   hygiene:
     name: Commit hygiene
     if: github.event_name == 'pull_request'
