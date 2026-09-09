@@ -2,7 +2,7 @@
 
 Everything openKRX asserts about a format rule is held by a named test. This
 document says which test file holds what, how to run the suite and the
-coverage gate, what the sweeps guarantee while no fuzz target exists, and the
+coverage gate, what the sweeps and the fuzz targets each guarantee, and the
 rules for fixtures and for any private corpus.
 
 ## Test layout
@@ -118,8 +118,9 @@ many codes are catalogued.
 
 ## Sweeps
 
-Two exhaustive sweeps stand in for the fuzz targets that do not exist yet.
-They are cheap, deterministic, and run in the normal test suite.
+Two exhaustive sweeps sit under the [fuzz targets](#fuzzing) and cover what a
+short bounded fuzzing run cannot: they are exhaustive rather than random,
+cheap, deterministic, and they run in the normal test suite on every platform.
 
 **Truncation.** For each representative input, every prefix — every length
 from zero up to one byte short of the whole — is fed to the parser, and each
@@ -143,7 +144,8 @@ scans for signatures rather than following the declared structure.
 
 What that guarantees: no reachable arithmetic overflow, slice index or
 `unwrap` on any input one byte away from a valid one. It does not guarantee
-anything about inputs two bytes away; that is what a fuzz target is for.
+anything about inputs two bytes away; that is what the [fuzz
+targets](#fuzzing) are for.
 
 ## Fixture policy
 
@@ -170,29 +172,110 @@ an `ns2` prefix, and a reference split across `ELHELYEZKEDES` and
 `FAJL_NEV`. No identifier, description, timestamp, barcode or note is copied
 from any source, and none may be added.
 
-## Fuzzing (planned)
+## Fuzzing
 
-Neither parser is fuzzed yet. The sweeps above are the compensating control,
-and this is recorded as a residual risk in
+Both readers have a `cargo-fuzz` target. The package lives in
+[fuzz/](../fuzz/README.md) and is **not** a member of the root workspace: it
+needs a nightly toolchain and libFuzzer, and keeping it separate means
+`cargo deny`, `cargo llvm-cov --workspace` and the MSRV check never see its
+dependencies. `cargo machete` does scan the directory, and needs no exclusion:
+`libfuzzer-sys` is reached through a normal `use`, so it is seen as used.
+
+| Target | What it calls |
+| --- | --- |
+| `inventory` | `archive::inventory(data, &Limits::DEFAULT)`, then `entry_bytes` for every accepted entry, which is the only path that inflates data |
+| `xml_metadata` | `metadata::parse(data, &MetadataLimits::DEFAULT)` |
+
+Neither asserts anything about the result. The property under test is that the
+call **returns** — accept or refuse — on any byte string, which is the same
+property the sweeps hold one byte at a time.
+
+### Prerequisites
+
+```sh
+rustup toolchain install nightly
+cargo install cargo-fuzz
+```
+
+libFuzzer ships with the nightly toolchain, so nothing else is needed on
+Linux or macOS. There is no Windows lane.
+
+### Running a target
+
+```sh
+cargo +nightly fuzz build --fuzz-dir fuzz
+cargo +nightly fuzz run --fuzz-dir fuzz inventory -- -max_total_time=30
+cargo +nightly fuzz run --fuzz-dir fuzz xml_metadata -- -max_total_time=30
+```
+
+Without `-max_total_time` a run continues until it is interrupted. The corpus
+it accumulates is written to `fuzz/corpus/<target>/` and is ignored by Git;
+delete it to start from nothing. Add `-rss_limit_mb=2048` on a memory-tight
+machine, and run one target at a time.
+
+### Reproducing an artifact
+
+A crash writes its input to `fuzz/artifacts/<target>/`. Replay and minimise it:
+
+```sh
+cargo +nightly fuzz run  --fuzz-dir fuzz inventory fuzz/artifacts/inventory/crash-<id>
+cargo +nightly fuzz tmin --fuzz-dir fuzz inventory fuzz/artifacts/inventory/crash-<id>
+cargo +nightly fuzz fmt  --fuzz-dir fuzz inventory fuzz/artifacts/inventory/crash-<id>
+```
+
+`tmin` shrinks the input while it still reproduces; `fmt` prints it as the
+Rust literal to paste into a test. A crash is then handled by the rule in
+[fuzz/regressions/README.md](../fuzz/regressions/README.md): minimise, express
+it as a named generated construction in the matching `*_rejects_*.rs` file,
+and only then fix the reader. The minimised blob is retained under
+`fuzz/regressions/<target>/` only when it cannot be expressed as a
+construction, and only because it is fuzzer-generated and therefore synthetic.
+
+### Adding a target
+
+Add `fuzz/fuzz_targets/<name>.rs` holding one `fuzz_target!` call and nothing
+else, add the matching `[[bin]]` block to `fuzz/Cargo.toml` with
+`test = false`, `doc = false` and `bench = false`, create
+`fuzz/regressions/<name>/.gitkeep`, extend the table above and add the target
+to the CI lane. Keep the harness body to the single call: a harness that
+asserts a result turns a behaviour change into a fuzzing failure, which is not
+what this lane is for.
+
+### The CI lane
+
+The `Fuzz (build only)` job in `.github/workflows/ci.yml` runs on
+`ubuntu-latest` for every push and pull request. It installs the nightly
+toolchain and a pinned `cargo-fuzz`, builds both targets, then runs each for
+**30 seconds** with `-rss_limit_mb=2048`, a 60-second total fuzzing budget.
+Crash artifacts are uploaded when the job fails. The job names
+`--target x86_64-unknown-linux-gnu` explicitly: cargo-fuzz otherwise defaults
+to the triple of its own binary, and the pre-built one is a musl build, which
+AddressSanitizer cannot link against a static libc.
+
+The budget is deliberate. Thirty seconds per target proves the harness still
+links and executes and catches a shallow regression — the class of bug a
+refactor introduces — without adding minutes to every pull request. It is not
+a campaign, and it finds nothing deep: the job passing is not evidence that a
+reader is fuzz-clean, only that it survived a short bounded run from an empty
+corpus. Deep fuzzing stays a local activity for now.
+
+### Fuzzing (planned)
+
+What the lane does not do yet, and what remains outstanding:
+
+- **No seed corpus.** Each run starts from nothing, so a run rediscovers ZIP
+  and XML structure from scratch. A corpus built at run time by the existing
+  `tests/support/` writers — not committed as binaries — would let a short run
+  start deep instead of shallow.
+- **No scheduled long run.** Only the 30-second per-target lane exists; a
+  weekly campaign with a persisted corpus is the natural next step.
+- **No coverage measurement** of what the targets reach.
+- **Only the two readers are fuzzed.** `profile::check` and `extract::plan`
+  sit on top of them and have no target of their own.
+
+Until those exist, the sweeps above remain the load-bearing compensating
+control, and the residual risk stays recorded in
 [roadmap.md](roadmap.md#residual-risks-in-the-current-state).
-
-Two targets belong in that work, and the attack surfaces for both already
-exist:
-
-- `zip_inventory`: `archive::inventory(data, &Limits::DEFAULT)`, asserting
-  only that the call returns.
-- `xml_metadata`: `metadata::parse(data, &MetadataLimits::DEFAULT)`, the
-  same.
-
-Adding a target means: a `fuzz/` cargo-fuzz workspace excluded from the main
-workspace; one harness file per target whose body is the single call above;
-a seed corpus built by the existing `tests/support/` writers rather than
-committed as binaries; a CI lane that runs each target for a bounded time on
-pull requests and longer on a schedule; and a rule that every crash is
-minimised, converted into a named regression test in the matching
-`*_rejects_*.rs` file, and only then fixed. The minimised input goes into the
-test as a generated construction, not as a committed blob, whenever it can
-be expressed that way.
 
 ## Compatibility testing later
 

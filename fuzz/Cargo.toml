@@ -1,0 +1,33 @@
+[package]
+name = "openkrx-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "cargo-fuzz targets for the openKRX bounded readers"
+
+# Deliberately its own workspace: the root workspace stays on stable, and
+# `cargo deny` and `cargo llvm-cov --workspace` never see the nightly-only
+# fuzzing dependencies.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+openkrx-core = { path = "../crates/openkrx-core" }
+
+[[bin]]
+name = "inventory"
+path = "fuzz_targets/inventory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml_metadata"
+path = "fuzz_targets/xml_metadata.rs"
+test = false
+doc = false
+bench = false

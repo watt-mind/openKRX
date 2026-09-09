@@ -64,7 +64,9 @@ Limits appear in [architecture.md](docs/architecture.md#archive-inventory-limits
 The extraction rows are in
 [their own table below](#threat-model-mapping-extraction-planning-layer) and
 are planning only; filesystem output and the writer rows do not exist yet,
-and those checks are unimplemented, not passing.
+and those checks are unimplemented, not passing. The no-panic row is held by
+the sweeps and, on random input, by the `inventory` fuzz target and its
+bounded CI lane ([testing.md](docs/testing.md#fuzzing)).
 
 | Required check | Error code prefix | Test |
 | --- | --- | --- |
@@ -110,10 +112,12 @@ Attachment bytes are never decoded by this layer. Only the marker entry and
 the metadata document are read back through `ArchiveInventory::entry_bytes`;
 attachments stay opaque and are checked by name alone.
 
-Neither layer is fuzzed yet. The exhaustive truncation sweeps and the
-single-byte mutation sweeps are the compensating checks until a fuzz target
-lands; an `xml_metadata` target belongs in that work alongside the archive
-one.
+Both layers are fuzzed. `inventory` drives `archive::inventory` and
+`entry_bytes`, `xml_metadata` drives `metadata::parse`, and each runs for a
+bounded 30 seconds per pull request; the exhaustive truncation and single-byte
+mutation sweeps remain the load-bearing compensating checks, because a short
+run is not a campaign. Both are described in
+[testing.md](docs/testing.md#fuzzing), with what the lane still does not do.
 
 ## Threat-model mapping: extraction planning layer
 
