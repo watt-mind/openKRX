@@ -1,7 +1,7 @@
 # Release readiness
 
-No releases, published crates, or binary distribution are configured by
-this scaffold. Both workspace crates have `publish = false`.
+No releases, published crates, or binary distribution are configured yet.
+Both workspace crates set `publish = false`, and no tag exists.
 
 Before the first release:
 
