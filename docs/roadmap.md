@@ -37,7 +37,9 @@ The authoritative, code-level version of this list is
 - ZIP64, encryption, multi-disk archives, and compression methods other
   than stored and deflate. These are refused with stable codes, not
   deferred.
-- Fuzz targets for either parser.
+- A fuzzing campaign. Both parsers have a `cargo-fuzz` target and a
+  30-second-per-target smoke lane in CI; a seed corpus, a scheduled long run
+  and coverage measurement do not exist.
 - A CLI agent skill. Now that a reader command ships there is a workflow to
   describe, and it is a separate change rather than part of KRX-04.
 - Configurable limits from the command line. `Limits` and `MetadataLimits`
@@ -72,10 +74,13 @@ source or an authoritative statement settles the layout.
 
 Unordered, and independent of the milestone sequence.
 
-- **Fuzz targets** for the archive and metadata parsers, with a CI lane and
-  a crash-to-regression-test rule. The truncation and mutation sweeps are
-  the compensating control today; see
-  [testing.md](testing.md#fuzzing-planned).
+- **Fuzzing beyond the smoke lane.** The `inventory` and `xml_metadata`
+  targets, the bounded CI lane and the crash-to-regression-test rule all
+  exist; what does not is a seed corpus, a scheduled long run with a
+  persisted corpus, coverage measurement of what the targets reach, and a
+  target for `profile::check` or `extract::plan`. The truncation and
+  mutation sweeps stay the compensating control until then; see
+  [testing.md](testing.md#fuzzing).
 - **Mutation testing** of the check inventory, to find checks that pass for
   the wrong reason. Meaningful only once the inventory stops growing.
 - **Property tests** for the ZIP reader's coverage arithmetic, generating
@@ -107,9 +112,13 @@ Stated plainly, because the tests that would remove them do not exist yet.
   renders `Unresolved` as a pass, or that treats
   `StructureSummary::Consistent` as acceptance, would be making a claim
   openKRX explicitly does not make.
-- **Neither parser is fuzzed.** The sweeps cover truncations and one-byte
-  mutations of valid inputs, which is a narrow neighbourhood. Nothing has
-  explored inputs further away.
+- **Both parsers are fuzzed only as a smoke test.** Each target runs for 30
+  seconds per push from an empty corpus, which is enough to prove the harness
+  executes and to catch a shallow regression, and no more; it is not a
+  campaign and the lane passing is not evidence that a reader is fuzz-clean.
+  Beyond that the sweeps cover truncations and one-byte mutations of valid
+  inputs, a narrow neighbourhood. Nothing has explored inputs further away,
+  and `profile::check` and `extract::plan` have no target at all.
 - **Strictness has never been measured against real archives.** Exact byte
   coverage, ambiguity refusal and the case-folded collision rule will
   refuse archives that a permissive reader opens. Whether real producers

@@ -262,9 +262,22 @@ The `Fuzz (build only)` job in `.github/workflows/ci.yml` runs on
 toolchain and a pinned `cargo-fuzz`, builds both targets, then runs each for
 **30 seconds** with `-rss_limit_mb=2048`, a 60-second total fuzzing budget.
 Crash artifacts are uploaded when the job fails. The job names
-`--target x86_64-unknown-linux-gnu` explicitly: cargo-fuzz otherwise defaults
-to the triple of its own binary, and the pre-built one is a musl build, which
+`--target x86_64-unknown-linux-gnu` explicitly, through the
+`FUZZ_TARGET_TRIPLE` env variable: cargo-fuzz otherwise defaults to the triple
+of its own binary, and the pre-built one is a musl build, which
 AddressSanitizer cannot link against a static libc.
+
+The lane also enforces `fuzz/Cargo.lock`. `cargo fuzz` accepts none of cargo's
+manifest flags — `--locked` reaches neither `fuzz build` nor `fuzz run`, both
+of which reject it as an unexpected argument — so the job resolves the same
+dependency graph first with
+
+```sh
+cargo +nightly metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1
+```
+
+which fails when the lockfile is absent or stale. The build that follows then
+reuses that lockfile unchanged, which is what `--locked` would have bought.
 
 The budget is deliberate. Thirty seconds per target proves the harness still
 links and executes and catches a shallow regression — the class of bug a
@@ -273,9 +286,7 @@ a campaign, and it finds nothing deep: the job passing is not evidence that a
 reader is fuzz-clean, only that it survived a short bounded run from an empty
 corpus. Deep fuzzing stays a local activity for now.
 
-### Fuzzing (planned)
-
-What the lane does not do yet, and what remains outstanding:
+Outstanding, and none of it exists yet:
 
 - **No seed corpus.** Each run starts from nothing, so a run rediscovers ZIP
   and XML structure from scratch. A corpus built at run time by the existing

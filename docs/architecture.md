@@ -53,8 +53,13 @@ still absent.
 - ZIP64, encryption, multi-disk archives and every compression method other
   than stored and deflate. These are refused, not deferred; see
   [Parser safety model](#parser-safety-model).
-- Fuzz targets. Exhaustive truncation and single-byte mutation sweeps stand
-  in for them; see [testing.md](testing.md#fuzzing-planned).
+- Fuzzing beyond a smoke lane. Both readers have a `cargo-fuzz` target,
+  `inventory` and `xml_metadata`, and CI runs each for 30 seconds per push —
+  a smoke budget that proves the harness executes, not a campaign. There is
+  no seed corpus, no scheduled long run, and no target for `profile::check`
+  or `extract::plan`. The exhaustive truncation and single-byte mutation
+  sweeps remain the compensating control; see
+  [testing.md](testing.md#fuzzing).
 
 ## Crate shape
 
