@@ -6,12 +6,8 @@
 //! resolved by "take the last", and a signature whose comment stops short means
 //! the image carries trailing bytes.
 
-use crate::error::{
-    AmbiguityKind, ArchiveError, LimitKind, MalformedKind, Structure, UnsupportedKind,
-};
+use crate::error::{AmbiguityKind, ArchiveError, LimitKind, MalformedKind, UnsupportedKind};
 use crate::limits::Limits;
-
-use super::raw::Cursor;
 
 /// End-of-central-directory record signature.
 pub(crate) const EOCD_SIGNATURE: [u8; 4] = [b'P', b'K', 5, 6];
@@ -40,10 +36,10 @@ pub(crate) fn find(bytes: &[u8], limits: &Limits) -> Result<Eocd, ArchiveError> 
             continue;
         }
         signatures += 1;
-        let Some(comment_field) = bytes.get(start + 20..start + EOCD_FIXED_BYTES) else {
+        let Some(record) = bytes[start..].first_chunk::<EOCD_FIXED_BYTES>() else {
             continue;
         };
-        let comment = usize::from(u16::from_le_bytes([comment_field[0], comment_field[1]]));
+        let comment = usize::from(u16::from_le_bytes([record[20], record[21]]));
         if start + EOCD_FIXED_BYTES + comment != bytes.len() {
             continue;
         }
@@ -53,10 +49,10 @@ pub(crate) fn find(bytes: &[u8], limits: &Limits) -> Result<Eocd, ArchiveError> 
                 entry: None,
             });
         }
-        terminal = Some(start);
+        terminal = Some((start, record));
     }
     match terminal {
-        Some(start) => parse(bytes, start, limits),
+        Some((start, record)) => parse(bytes, start, record, limits),
         None if signatures > 0 => Err(ArchiveError::Malformed {
             kind: MalformedKind::TrailingBytes,
             entry: None,
@@ -68,20 +64,27 @@ pub(crate) fn find(bytes: &[u8], limits: &Limits) -> Result<Eocd, ArchiveError> 
     }
 }
 
-/// Parse and validate the record found at `start`.
-fn parse(bytes: &[u8], start: usize, limits: &Limits) -> Result<Eocd, ArchiveError> {
+/// Parse and validate the record `find` located at `start`.
+///
+/// The record arrives as its 22 fixed bytes, which `find` has already proven
+/// present, so every field is read at a constant offset and no read here can
+/// run off the end of the image.
+fn parse(
+    bytes: &[u8],
+    start: usize,
+    record: &[u8; EOCD_FIXED_BYTES],
+    limits: &Limits,
+) -> Result<Eocd, ArchiveError> {
     if start >= 4 && bytes[start - 4..start] == ZIP64_LOCATOR_SIGNATURE {
         return Err(unsupported(UnsupportedKind::Zip64));
     }
-    let mut cursor = Cursor::new(&bytes[start..], Structure::Eocd, None);
-    cursor.take(4)?;
-    let disk = cursor.u16()?;
-    let directory_disk = cursor.u16()?;
-    let entries_here = cursor.u16()?;
-    let entries_total = cursor.u16()?;
-    let directory_bytes = cursor.u32()?;
-    let directory_offset = cursor.u32()?;
-    let comment = cursor.u16()?;
+    let disk = u16::from_le_bytes([record[4], record[5]]);
+    let directory_disk = u16::from_le_bytes([record[6], record[7]]);
+    let entries_here = u16::from_le_bytes([record[8], record[9]]);
+    let entries_total = u16::from_le_bytes([record[10], record[11]]);
+    let directory_bytes = u32::from_le_bytes([record[12], record[13], record[14], record[15]]);
+    let directory_offset = u32::from_le_bytes([record[16], record[17], record[18], record[19]]);
+    let comment = u16::from_le_bytes([record[20], record[21]]);
     if disk != 0 || directory_disk != 0 || entries_here != entries_total {
         return Err(unsupported(UnsupportedKind::MultiDisk));
     }
