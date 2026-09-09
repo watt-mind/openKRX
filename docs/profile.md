@@ -155,8 +155,9 @@ Three things were found, and none of them is a normative statement:
   party's format-identification signature (`TRID-OCD`), machine-derived
   from six real archives, records the strings `METALAYER`, `MIMETYPE`,
   `PAYLOAD` and `ID-1` together with a local file header at offset zero.
-  Both corroborate the `KRX/OCD/…` shape and the hyphenated `ID-<n>` form
-  against producers other than the hybrid service.
+  The screenshots corroborate the `KRX/OCD/…` shape and the hyphenated
+  `ID-<n>` form from a second producer; the TrID signature corroborates only
+  that entries with those names co-occur, and it records no path.
 - Nothing observed the archive root, so the location of `mimetype` — the
   precise conflict in A19 — is still unobserved as well as unstated.
 
