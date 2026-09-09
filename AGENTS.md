@@ -67,3 +67,13 @@ responsibility. Use Conventional Commits. Update the CLI contract, security
 model, evidence map, and roadmap when behavior changes. Do not add tests
 that merely repeat trivial implementation details; exercise boundaries and
 observable contracts.
+
+## Factory orchestration
+
+For an explicitly requested orchestration run, read
+[the master orchestrator instructions](docs/orchestrator.md) and
+[runner setup](docs/factory.md). Claim and re-read the private ticket before
+editing, use one isolated worktree per ticket, and obtain independent review
+before serial merges to `develop`. Only green post-merge CI permits `Done`.
+The repository privacy rules override generic Factory examples that expose
+private tracker identifiers in public branches, commits or PRs.
