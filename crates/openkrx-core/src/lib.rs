@@ -36,6 +36,7 @@ pub mod extract;
 mod limits;
 pub mod metadata;
 pub mod profile;
+pub mod repack;
 #[cfg(feature = "synthetic-writer")]
 pub mod synthetic;
 
@@ -48,6 +49,7 @@ pub use extract::{ExtractLimits, ExtractionPlan, PlanError, PlanItem};
 pub use limits::Limits;
 pub use metadata::{MetadataError, MetadataLimits};
 pub use profile::{ProfileError, StructureReport, StructureSummary};
+pub use repack::{Edits, RepackError, RepackPlan};
 
 /// Machine-readable implementation status; never a verification verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -75,7 +77,14 @@ pub const fn capabilities() -> Capabilities {
     Capabilities {
         project: "openKRX",
         stage: "reader-writer",
-        operations: &["inspect", "list", "validate-structure", "extract", "create"],
+        operations: &[
+            "inspect",
+            "list",
+            "validate-structure",
+            "extract",
+            "create",
+            "repack",
+        ],
     }
 }
 

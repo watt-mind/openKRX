@@ -279,9 +279,9 @@ fn capabilities_still_lists_only_the_package_operations() {
     // `skill` operates on no package, so it is not a capability: a consumer
     // branching on `operations` must not be told openkrx grew one.
     let text = stdout(&run(&["capabilities", "--json"]));
-    assert!(
-        text.contains(r#""operations":["inspect","list","validate-structure","extract","create"]"#)
-    );
+    assert!(text.contains(
+        r#""operations":["inspect","list","validate-structure","extract","create","repack"]"#
+    ));
     assert!(!text.contains(r#""skill""#));
 }
 

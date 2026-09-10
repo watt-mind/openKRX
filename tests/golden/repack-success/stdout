@@ -1,0 +1,8 @@
+Wrote 1317 bytes in 5 entries.
+In the package that was edited: 2 attachments preserved byte for byte (1, 2), none replaced, none removed.
+In the package that was written: 1 attachment added (3).
+Header fields set: consignment_id, note. No value is repeated here.
+Layout: canonical-documented, which docs/profile.md documents and no real producer has been checked against. Nothing was signed.
+Reading it back left A19, M13 undecided, so validate-structure over this package exits 4. That is the expected outcome for a package openkrx wrote, not a defect in it.
+Nothing was overwritten: the new file was created new, and the package that was edited was not changed or removed.
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

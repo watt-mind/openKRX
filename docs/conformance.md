@@ -137,6 +137,32 @@ The command half adds two rows of its own, and no rule status:
 | A19, M13 read back over what was written | Runs `archive::inventory`, `metadata::parse` and `profile::check` over the bytes it just wrote, before reporting success | `validate-structure` over a created package exits 4 and never 3: nothing fails, `marker_entry` cites A19, and any declared size cites M13. A failing check is a defect in openKRX, reported as `create.internal.self_check_failed`, and the file is removed | `a_created_package_reads_back_as_unresolved_and_never_as_inconsistent` (`crates/openkrx-cli/tests/create.rs`) | Unresolved |
 | M11: elements one official example omits | Passes `MELLEKLET_LEIRASA` through from the manifest, and writes `TESZT` always | An attachment described in the manifest keeps check 6 at `Pass`; omitting `description` reports `Unresolved(M11)`, exactly as for a package read from elsewhere | `a_manifest_with_no_attachment_writes_the_two_fixed_entries` (`crates/openkrx-cli/tests/create.rs`) | Unresolved |
 
+## Repacking
+
+Repacking is implemented in the library and exposed by one command:
+`openkrx_core::repack::{plan, apply}` decides and performs an edit, and
+`openkrx repack <FILE|-> --edits <FILE> --out <FILE>` places the result in a
+file that must not already exist, reading it back through the structural checks
+before reporting success. It resolves no rule and moves no status: it composes
+the three reading layers onto the writer, so every row above applies to what it
+writes exactly as it applies to what `create` writes.
+
+The rows below are what repacking adds. All three are refusals, and that is the
+point: openKRX edits a package it could have written itself, and refuses every
+other one rather than relaying it out under rules nobody has settled.
+
+| Rule | What repacking does | Outcome semantics | Test | Status |
+| --- | --- | --- | --- | --- |
+| A19, A22, M12: the layout and the spellings the sources leave open | Reads the input as the canonical documented layout, byte-exactly, and refuses anything else | `repack.unsupported.root_prefix`, `.metadata_name`, `.marker`, `.extra_entry`. A refused package is not damaged: every reading command still reads it | `a_metadata_document_under_another_root_prefix_is_refused`, `a_metadata_file_name_spelled_differently_is_refused` | Unresolved (unchanged) |
+| A7, A9, A11–A16, M2, M8: content the reader observes but does not retain | Refuses rather than dropping it: a signature document, a service-specific document, an element outside the grammar, or a block whose presence alone was recorded | `repack.unsupported.extra_entry`, `.unknown_elements`, `.opaque_block` | `an_entry_the_documented_layout_does_not_place_is_refused`, `a_document_carrying_elements_outside_the_grammar_is_refused`, `a_block_the_reader_records_only_the_presence_of_is_refused` | Not implemented (unchanged) |
+| M5, M6, M7, M13: the derived references and the count | Re-derives every one of them from the attachments the result carries, and refuses an input whose own references the writer would derive differently | `repack.unsupported.attachment_reference`, `.attachment_entry`; a preserved attachment's bytes are byte-identical in the result | `a_reference_the_writer_would_derive_differently_is_refused`, `every_preserved_attachment_keeps_its_bytes_exactly` | Unresolved (unchanged) |
+
+The command half adds one row, and no rule status:
+
+| Rule | What the command does | Outcome semantics | Test | Status |
+| --- | --- | --- | --- | --- |
+| A19, M13 read back over what was written | Runs the structural checks over the bytes it just wrote, before reporting success | `validate-structure` over a repacked package exits 4 and never 3. A failing check is a defect in openKRX, reported as `repack.internal.self_check_failed`, and the file is removed | `the_report_says_what_changed_and_what_was_preserved` (`crates/openkrx-cli/tests/repack.rs`) | Unresolved |
+
 ## Known gaps
 
 Nine of the thirty-seven rules cannot be decided from the retrieved sources:

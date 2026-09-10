@@ -71,6 +71,8 @@ pub const MANIFEST_TIMESTAMP: &str = "manifest.invalid.timestamp";
 
 /// A package `create` wrote did not read back cleanly. A defect in openKRX.
 pub const CREATE_SELF_CHECK_FAILED: &str = "create.internal.self_check_failed";
+/// A package `repack` wrote did not read back cleanly. A defect in openKRX.
+pub const REPACK_SELF_CHECK_FAILED: &str = "repack.internal.self_check_failed";
 
 /// What kind of outcome a run had, and therefore which status it exits with.
 ///
@@ -203,6 +205,8 @@ have to overwrite, and must be writable"
             }
             ("archive", "unsafe_name" | "no_such_entry") => Self::Package,
             ("create", "invalid" | "unsafe_name" | "internal") => Self::Package,
+            ("repack", "unsupported") => Self::Unsupported,
+            ("repack", "invalid" | "internal") => Self::Package,
             ("manifest", "invalid") => Self::Package,
             ("extract", "unsafe_path") => Self::Package,
             ("metadata", "missing" | "reference" | "count_mismatch") => Self::Inconsistent,
@@ -389,16 +393,27 @@ mod tests {
         for (code, extract, create) in [
             (super::OUTPUT_DESTINATION_MISSING, "--into", "--out"),
             (super::OUTPUT_DESTINATION_NOT_A_DIRECTORY, "--into", "--out"),
-            (super::OUTPUT_DESTINATION_SYMLINK, "extraction", "create"),
+            (super::OUTPUT_DESTINATION_SYMLINK, "extraction", "--out"),
             (super::OUTPUT_EXISTS, "extract into", "--out"),
         ] {
             let extracting = Failure::output(code).line("extract");
             let creating = Failure::output(code).line("create");
+            let repacking = Failure::output(code).line("repack");
             assert!(extracting.contains(extract), "{code}: {extracting}");
             assert!(!extracting.contains("--out"), "{code}: {extracting}");
-            assert!(creating.contains(create), "{code}: {creating}");
-            assert!(!creating.contains("--into"), "{code}: {creating}");
+            for writing in [&creating, &repacking] {
+                assert!(writing.contains(create), "{code}: {writing}");
+                assert!(!writing.contains("--into"), "{code}: {writing}");
+            }
         }
+        // The one sentence the two writing commands do not share: `repack`
+        // must say that the package being edited is not a legal --out, which
+        // is the mistake its own argument shape invites.
+        let repacking = Failure::output(super::OUTPUT_EXISTS).line("repack");
+        assert!(
+            repacking.contains("no package is edited in place"),
+            "{repacking}"
+        );
     }
 
     #[test]
@@ -437,6 +452,97 @@ mod tests {
             "manifest.invalid.type at field /attachments/path (attachment 2)"
         );
         assert_eq!(scoped.entry_index, None, "no archive exists yet");
+    }
+
+    #[test]
+    fn every_repacking_refusal_classifies_and_explains_itself() {
+        // The two categories `repack` adds: a package openkrx cannot re-emit
+        // is an unsupported feature, and an edit naming an attachment the
+        // package does not hold is a package problem.
+        for code in [
+            "repack.unsupported.metadata_missing",
+            "repack.unsupported.root_prefix",
+            "repack.unsupported.metadata_name",
+            "repack.unsupported.marker",
+            "repack.unsupported.extra_entry",
+            "repack.unsupported.unknown_elements",
+            "repack.unsupported.opaque_block",
+            "repack.unsupported.dispatch_count",
+            "repack.unsupported.attachment_reference",
+            "repack.unsupported.attachment_entry",
+        ] {
+            assert_eq!(
+                Category::of_code(code),
+                Some(Category::Unsupported),
+                "{code}"
+            );
+            let line = Failure::new(code).line("repack");
+            assert!(line.ends_with("(exit 7)"), "{line}");
+            // Each one says what would be lost or changed, rather than
+            // sharing the category's "openkrx does not implement it".
+            assert!(
+                !line.contains("another reader may open it"),
+                "{code}: {line}"
+            );
+        }
+        for code in [
+            "repack.invalid.no_such_attachment",
+            "repack.invalid.duplicate_target",
+            "repack.invalid.inventory_mismatch",
+            super::REPACK_SELF_CHECK_FAILED,
+        ] {
+            assert_eq!(Category::of_code(code), Some(Category::Package), "{code}");
+            assert!(
+                Failure::new(code).line("repack").ends_with("(exit 6)"),
+                "{code}"
+            );
+        }
+        let failure = Failure::repack_self_check_failed();
+        assert_eq!(failure.code, "repack.internal.self_check_failed");
+        assert!(failure.line("repack").contains("defect in openkrx"));
+        assert!(
+            !failure.line("repack").contains("manifest"),
+            "repack takes no manifest"
+        );
+    }
+
+    #[test]
+    fn a_repacking_refusal_points_at_the_attachment_number_it_concerns() {
+        use openkrx_core::repack::{InvalidKind, RepackError, UnsupportedKind};
+
+        let invalid = Failure::from(RepackError::Invalid {
+            kind: InvalidKind::NoSuchAttachment,
+            number: Some(9),
+        });
+        assert_eq!(invalid.code, "repack.invalid.no_such_attachment");
+        assert_eq!(invalid.attachment_number, Some(9));
+        assert_eq!(invalid.entry_index, None);
+        assert_eq!(
+            invalid.message(),
+            "repack.invalid.no_such_attachment at attachment number 9"
+        );
+
+        let unsupported = Failure::from(RepackError::Unsupported {
+            kind: UnsupportedKind::ExtraEntry,
+            entry: Some(4),
+            number: None,
+        });
+        assert_eq!(unsupported.category, Category::Unsupported);
+        assert_eq!(unsupported.entry_index, Some(4));
+
+        // The three layers repacking composes keep their own codes, numbers
+        // and categories rather than being folded into a repack.* one.
+        let read = Failure::from(RepackError::Read(ArchiveError::OverLimit {
+            limit: LimitKind::Entries,
+            limit_value: 256,
+            observed: Some(300),
+            entry: None,
+        }));
+        assert_eq!(read.category, Category::Limit);
+        assert_eq!(
+            read.message(),
+            "archive.over_limit.entries (limit 256, observed 300)"
+        );
     }
 
     #[test]

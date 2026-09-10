@@ -1,0 +1,2 @@
+openkrx: output.exists — something is already at the path --out names. Nothing is ever overwritten and no package is edited in place, so --out must name a file that does not exist yet — the package being repacked is not it; the edited package is written beside it, and the original is left as it was (exit 9)
+openkrx: nothing had been written, so the destination is as it was found

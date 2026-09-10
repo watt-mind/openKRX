@@ -31,7 +31,15 @@
 //! `verified` is `false` in every response and a successful run is not
 //! authentication, not proof of delivery and not a legal determination.
 //!
-//! A sixth command reports on no package at all: [`skill`] writes the agent
+//! A sixth command reads a package and writes one: [`repack`] applies a
+//! strictly validated list of edits to an existing package and writes the
+//! result to a file that must not already exist. Every attachment no edit
+//! names is carried through byte for byte, and a package carrying anything the
+//! writer cannot re-emit — another root prefix, a signature file, an element
+//! outside the schema — is refused rather than repacked into one that quietly
+//! lost it.
+//!
+//! A seventh command reports on no package at all: [`skill`] writes the agent
 //! skill document this binary carries to stdout, so an agent holding nothing
 //! but the executable can read the contract it is about to rely on. It is the
 //! one command outside the JSON envelope.
@@ -39,6 +47,7 @@
 //! [`inspect`]: crate::commands::inspect
 //! [`extract`]: mod@crate::extract
 //! [`create`]: mod@crate::create
+//! [`repack`]: mod@crate::repack
 //! [`skill`]: mod@crate::skill
 
 use clap::{Parser, Subcommand};
@@ -47,11 +56,15 @@ use serde::Serialize;
 
 mod commands;
 mod create;
+mod edits;
 mod exit;
 mod extract;
 mod input;
+mod json;
 mod manifest;
+mod output;
 mod render;
+mod repack;
 mod skill;
 
 use exit::{Category, Failure};
@@ -63,8 +76,9 @@ use std::path::PathBuf;
     name = "openkrx",
     version,
     about = "Read a Hungarian KRX document package locally, extract one into a \
-directory you name, and create one from a manifest file. Nothing is uploaded \
-and nothing is verified. `skill` writes the agent skill this binary carries.",
+directory you name, create one from a manifest file, and edit an existing one \
+into a new file. Nothing is uploaded and nothing is verified. `skill` writes \
+the agent skill this binary carries.",
     after_help = EXIT_STATUS_HELP
 )]
 struct Args {
@@ -86,12 +100,14 @@ Exit statuses:
   3  validate-structure only: a structural check failed
   4  validate-structure only: nothing failed, but a rule could not be decided
   5  the input could not be read, or is larger than the 64 MiB input cap
-  6  the package is malformed, truncated or ambiguous; for create, the
-     manifest does not describe a package that can be written
-  7  the package uses a feature this reader does not implement
+  6  the package is malformed, truncated or ambiguous; for create and
+     repack, the manifest or the edits do not describe a package that can be
+     written
+  7  the package uses a feature this reader does not implement; for repack,
+     it carries something the writer cannot re-emit
   8  a documented parsing or writing limit was exceeded
-  9  extract and create only: the destination could not be used, or a write
-     failed
+  9  extract, create and repack only: the destination could not be used, or a
+     write failed
 
 inspect and list exit 0 whenever they produce their report: read the check
 outcomes in the report, or use validate-structure, to act on a failing check.
@@ -148,6 +164,41 @@ unverified against every real producer. openkrx reads its own output back
 before reporting success: validate-structure over it exits 4, citing A19 and,
 whenever it carries an attachment, M13. That is the expected result and the
 definition of success here — 3 would be a defect. Nothing is signed and
+nothing is verified.";
+
+/// `repack`'s note. The command both reads and writes, and its refusals are
+/// the part a caller will otherwise misread: openkrx edits only a package
+/// already in the layout it writes, and refuses every other one rather than
+/// relaying it out or dropping what it cannot re-emit.
+const REPACK_STATUS_HELP: &str = "\
+The edits file is one JSON object: schema_version 1, a timestamp of the form
+YYYY-MM-DDTHH:MM:SS, an optional metadata object carrying any subset of the
+create manifest's header fields, and the optional arrays add, replace and
+remove. An add or replace path is resolved against the edits file's own
+directory. remove and replace name attachments by their number in the package,
+counted from 1, as inspect lists them. A key the schema does not define is
+refused rather than ignored. The full schema is in docs/architecture.md.
+
+Every attachment no edit names is carried through byte for byte, and the
+numbers, locations, sizes and count in the document are derived from the
+attachments the result actually carries: removing one renumbers the rest.
+
+openkrx repacks only a package that is already in the layout it writes. A
+package under a different root prefix, carrying a signature file or a
+service-specific document, or carrying metadata openkrx reads but cannot write
+back, is refused with a repack.unsupported.* code and exit 7 — it is not
+damaged, and inspect, list, validate-structure and extract all still read it.
+The refusal exists so that repacking can never hand back a package that
+quietly lost part of what it was given.
+
+--out must not exist in any form and its parent must be an existing, real
+directory, so the package being edited is never overwritten; nothing is edited
+in place. --stdout writes the package bytes to standard output instead and
+puts the report on standard error.
+
+The result is written in the layout docs/profile.md documents, which is
+unverified against every real producer, and openkrx reads it back before
+reporting success: validate-structure over it exits 4. Nothing is signed and
 nothing is verified.";
 
 /// `list`'s note. It runs no structural check at all, so saying that a failed
@@ -213,6 +264,29 @@ enum Command {
         /// Write the package bytes to standard output instead, and the report
         /// to standard error.
         #[arg(long, group = "destination")]
+        stdout: bool,
+        /// Emit one JSON object instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit an existing package into a new one, deterministically.
+    #[command(after_help = REPACK_STATUS_HELP)]
+    #[command(group = clap::ArgGroup::new("repacked").required(true))]
+    Repack {
+        /// The package to edit, or `-` to read standard input. It is never
+        /// written to.
+        #[arg(value_name = "FILE")]
+        file: String,
+        /// The JSON document describing the edits to apply.
+        #[arg(long, value_name = "FILE")]
+        edits: PathBuf,
+        /// The package file to create. It must not exist, in any form, and
+        /// its parent must already be a real directory.
+        #[arg(long, value_name = "FILE", group = "repacked")]
+        out: Option<PathBuf>,
+        /// Write the package bytes to standard output instead, and the report
+        /// to standard error.
+        #[arg(long, group = "repacked")]
         stdout: bool,
         /// Emit one JSON object instead of human-readable text.
         #[arg(long)]
@@ -317,6 +391,13 @@ fn run() -> i32 {
             stdout,
             json,
         } => create(&manifest, out.as_deref(), stdout, json),
+        Command::Repack {
+            file,
+            edits,
+            out,
+            stdout,
+            json,
+        } => repack(&file, &edits, out.as_deref(), stdout, json),
     }
 }
 
@@ -336,11 +417,7 @@ fn create(
     to_stdout: bool,
     json: bool,
 ) -> i32 {
-    let destination = match out {
-        Some(path) => create::Destination::File(path),
-        None => create::Destination::Stdout,
-    };
-    match create::run(manifest, destination) {
+    match create::run(manifest, destination(out)) {
         Ok(written) => {
             let text = if json {
                 render::json::success(CREATE, &written.data)
@@ -355,11 +432,11 @@ fn create(
             }
             Category::Success.status()
         }
-        Err(refusal) => refused_creation(&refusal.failure, refusal.cleanup, json, to_stdout),
+        Err(refusal) => refused_writing(CREATE, &refusal.failure, refusal.cleanup, json, to_stdout),
     }
 }
 
-/// Report a refused creation and return its exit status.
+/// Report a refused write and return its exit status.
 ///
 /// The shape is `extract`'s: one JSON object on stdout in JSON mode, and two
 /// lines on stderr in both modes — the failure, and what the undo pass did.
@@ -372,18 +449,66 @@ fn create(
 /// diagnostic. The report therefore goes to stderr exactly as a successful
 /// one does — one JSON object and nothing else in JSON mode, so a caller can
 /// parse stderr whole — and stdout stays empty.
-fn refused_creation(failure: &Failure, cleanup: Cleanup, json: bool, to_stdout: bool) -> i32 {
+fn refused_writing(
+    command: &str,
+    failure: &Failure,
+    cleanup: Cleanup,
+    json: bool,
+    to_stdout: bool,
+) -> i32 {
     if json {
-        let text = render::json::failure_with_cleanup(CREATE, failure, cleanup);
+        let text = render::json::failure_with_cleanup(command, failure, cleanup);
         if to_stdout {
             input::line(&mut std::io::stderr(), &text);
             return failure.category.status();
         }
         input::line(&mut std::io::stdout(), &text);
     }
-    input::line(&mut std::io::stderr(), &failure.line(CREATE));
+    input::line(&mut std::io::stderr(), &failure.line(command));
     input::line(&mut std::io::stderr(), &render::human::cleanup(cleanup));
     failure.category.status()
+}
+
+/// The name `repack`'s JSON envelope carries.
+const REPACK: &str = "repack";
+
+/// Run `repack` and report it, in whichever mode was asked for.
+///
+/// The report goes wherever the package does not, exactly as `create`'s does:
+/// to stdout for `--out`, and to stderr for `--stdout`, so that a caller
+/// piping the package into another process gets the package alone on the pipe.
+fn repack(
+    file: &str,
+    edits: &std::path::Path,
+    out: Option<&std::path::Path>,
+    to_stdout: bool,
+    json: bool,
+) -> i32 {
+    match repack::run(file, edits, destination(out)) {
+        Ok(written) => {
+            let text = if json {
+                render::json::success(REPACK, &written.data)
+            } else {
+                render::human::repack(&written.data, to_stdout)
+            };
+            if to_stdout {
+                input::payload(&mut std::io::stdout(), &written.bytes);
+                input::line(&mut std::io::stderr(), &text);
+            } else {
+                input::line(&mut std::io::stdout(), &text);
+            }
+            Category::Success.status()
+        }
+        Err(refusal) => refused_writing(REPACK, &refusal.failure, refusal.cleanup, json, to_stdout),
+    }
+}
+
+/// Where a written package goes: the file, or standard output.
+fn destination(out: Option<&std::path::Path>) -> output::Destination<'_> {
+    match out {
+        Some(path) => output::Destination::File(path),
+        None => output::Destination::Stdout,
+    }
 }
 
 /// The name `extract`'s JSON envelope carries.

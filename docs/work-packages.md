@@ -222,11 +222,58 @@ between `--out` and `--stdout`, one case per manifest defect, the no-clobber
 and output-failure cases on all three supported operating systems, and canary
 tests holding every manifest value out of both streams.
 
+## KRX-08: Repack, deterministic package editing
+
+Status: **done**.
+
+Dependencies: KRX-02's inventory, KRX-03's parser and check inventory, and
+KRX-06's writer and safe output layer. Owner: writer contributor; the
+repacking module, the CLI command, its edits schema and its tests.
+
+Acceptance, core half, met: `plan` decides the whole edit before anything is
+written and is inspectable — what is preserved, changed, added and removed,
+and which header fields the edits set; `apply` writes the result through
+`create::package` with a caller-supplied timestamp and no clock access; every
+attachment no edit names is preserved byte for byte; header fields are set,
+optional elements are set or removed, attachments are added, replaced by
+number and removed by number, and the `MELLEKLET` references and
+`MELLEKLETEK_SZAMA` are re-derived from the attachments the result carries;
+an input the writer cannot re-emit is refused with a `repack.unsupported.*`
+code rather than repacked into one that lost part of it; an edit naming an
+attachment the package does not hold, or naming one twice, is refused with
+`repack.invalid.*`.
+
+Acceptance, command half, met: `openkrx repack <FILE|-> --edits <FILE> --out
+<FILE>` under the same no-clobber output rules as `create`, so the package
+being edited can never be overwritten and nothing is edited in place; a
+strictly validated edits document in the manifest's own field spelling, with
+a required timestamp; a report naming what was preserved and what changed, by
+attachment number and never by file name; the existing exit-status
+categories, with `repack.unsupported.*` as 7; `capabilities().operations`
+naming `repack`; and no claim about conformance — a repacked package passes
+`validate-structure` with exit 4 and never 3.
+
+Verification, done: preservation asserted on the bytes on disk by extracting
+both packages and comparing the files; an empty edit reproducing the package
+`create` wrote byte for byte, and repacking a repacked package changing
+nothing; every refusal asserted by its stable code over a package differing
+from a canonical control in exactly one respect; `--stdout` byte-identical to
+`--out`; canary tests holding every edits value out of both streams; golden
+cases for the success, the unsupported input, the invalid edits and the
+occupied output; and coverage above the workspace floor.
+
+Unknowns this package must not resolve by assumption: which of the three
+layouts A19 describes a package should use, the `ID-<n>` spelling A22 leaves
+open, the metadata file-name casing M12 leaves open, and the `MERET` unit M13
+leaves open. Repacking reads one layout and refuses the others precisely so
+that none of them is decided here.
+
 ## KRX-07: Consumer contract and first release review
 
 Status: planned, and next: KRX-06's command half is done.
 
-Dependencies: KRX-04, KRX-05, and KRX-06. Owner: integration contributor;
+Dependencies: KRX-04, KRX-05, KRX-06 and KRX-08. Owner: integration
+contributor;
 consumer examples, public contract documentation, and release checklist.
 
 Acceptance: synthetic openPapir import integration with explicit version
@@ -239,8 +286,8 @@ build; all [release gates](releasing.md) have recorded outcomes.
 
 ## Dispatch policy
 
-KRX-01 to KRX-05 are implemented, and so is KRX-06's core half; the `create`
-command is the next scoped change, and KRX-07 follows it. Independent work
+KRX-01 to KRX-06 are implemented, and so is KRX-08; KRX-07 is the next
+scoped change. Independent work
 on the remaining packages is split only with explicit module ownership and
 agreed interfaces. Keep one
 issue/branch per bounded change. File newfound

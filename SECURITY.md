@@ -3,8 +3,8 @@
 ## Current surface
 
 The CLI supports help, version, capability reporting, the three reader
-commands `inspect`, `list` and `validate-structure`, and the two commands
-that write, `extract` and `create`. The
+commands `inspect`, `list` and `validate-structure`, and the three commands
+that write, `extract`, `create` and `repack`. The
 reader commands render the core library's bounded ZIP inventory
 (`openkrx_core::archive::inventory`), bounded metadata parsing
 (`openkrx_core::metadata::parse`) and structural check inventory
@@ -21,15 +21,22 @@ mapped [below](#threat-model-mapping-creation-layer) — and places them in a
 file that must not already exist, under the same output policy. The core
 crate itself still returns bytes and touches no filesystem.
 
-Reading every input a command takes, the manifest and each attachment
-included, is bounded before parsing begins, and writing happens only where
-`extract` or `create` was explicitly pointed. A package openKRX wrote is
-structurally consistent with the documented layout, never a conforming one,
-and openKRX never submits one anywhere. Nothing uses keys or
-accesses government services. The requirements below
-remain implementation gates for the package operations that do not exist
-yet, not claims that a complete secure KRX parser exists. A successful
-inventory, parse, structural report, extraction or creation is an
+`repack` reads and writes: it reads one package with the three reading
+layers, applies a strictly validated edits document — mapped
+[below](#threat-model-mapping-repacking-layer) — and writes the result
+through the same writer, under the same output policy, to a file that must
+not already exist. It never writes to the package it read, and it refuses a
+package it cannot re-emit rather than writing one that lost part of it.
+
+Reading every input a command takes, the manifest, the edits document and
+each local file included, is bounded before parsing begins, and writing
+happens only where `extract`, `create` or `repack` was explicitly pointed. A
+package openKRX wrote is structurally consistent with the documented layout,
+never a conforming one, and openKRX never submits one anywhere. Nothing uses
+keys or accesses government services. The requirements below remain
+implementation gates for the package operations that do not exist yet, not
+claims that a complete secure KRX parser exists. A successful inventory,
+parse, structural report, extraction, creation or repacking is an
 observation, never a conformance or authenticity statement.
 
 Only the current `develop` branch receives fixes. There are no released
@@ -348,6 +355,61 @@ in [codes.md](docs/codes.md#creation-codes).
   so no `create.*` code can reach a caller undocumented. It runs for a bounded
   30 seconds per pull request ([testing.md](docs/testing.md#fuzzing)); the
   named tests in the table above are what hold each individual rule.
+
+## Threat-model mapping: repacking layer
+
+`openkrx_core::repack::{plan, apply}` edits a package that already exists. It
+composes the three reading layers onto the writer and adds no rule of its own,
+so every row of the archive, metadata, creation and output mappings applies to
+it unchanged. **Nothing in the core crate writes a file.** Placing the bytes
+is the `repack` command, in `crates/openkrx-cli/src/repack.rs`, through the
+same module `create` uses.
+
+The layer's premise is that both inputs are untrusted: the package is an
+archive like any other, and the edits document is a caller's request like a
+manifest. Its own two obligations are the rows below — preserve what was not
+edited, and refuse what cannot be re-emitted. Tests are in
+`crates/openkrx-core/tests/repack_plan.rs`,
+`crates/openkrx-core/tests/repack_rejects.rs` and
+`crates/openkrx-cli/tests/repack.rs`; the rules are in
+[architecture.md](docs/architecture.md#repacking-a-package) and the codes in
+[codes.md](docs/codes.md#repacking-codes).
+
+| Required check | Status | Error code prefix | Test |
+| --- | --- | --- | --- |
+| An attachment no edit names is preserved byte for byte, with its description and quantity | Implemented | none; a property of the output | `every_preserved_attachment_keeps_its_bytes_exactly`, `an_attachment_no_edit_names_comes_out_byte_identical` |
+| Repacking with no edit reproduces the package it was given, byte for byte, and repacking a repacked package changes nothing | Implemented | none; a property of the output | `repacking_with_no_edit_writes_the_package_it_was_given`, `repacking_is_idempotent`, `repacking_with_no_edit_rewrites_the_same_package_and_is_idempotent` |
+| Nothing the input carries is dropped silently: a package the writer cannot re-emit is refused whole — another root prefix or file-name spelling, an entry the layout has no place for, elements outside the grammar, a block whose presence alone was recorded, a reference the writer would derive differently | Implemented | `repack.unsupported.*`, ten classes | every test in `repack_rejects.rs`; each asserts its own code |
+| The document describes the package that was written: every reference and the count are re-derived from the attachments the result carries, so removing one renumbers the rest | Implemented | `create.invalid.reference_mismatch` if they could disagree | `removing_adding_and_replacing_together_renumber_the_result`, `adding_an_attachment_appends_it_and_derives_its_reference` |
+| An edit that names nothing real is refused before anything is written, rather than applied to a neighbouring attachment | Implemented | `repack.invalid.no_such_attachment`, `.duplicate_target` | `an_edit_naming_an_attachment_the_package_does_not_hold_is_refused`, `two_edits_naming_the_same_attachment_are_refused` |
+| The package being edited is never written to, and nothing is edited in place: the result is a new file that must not exist in any form | Implemented | `output.exists` and the rest of the output layer | `the_package_being_edited_is_never_written_to`, `repacking_onto_the_package_being_edited_is_refused` |
+| The whole edit is decided before anything is written, and is inspectable first | Implemented | every `repack.*` code | `a_plan_is_a_pure_value_and_writing_it_twice_writes_the_same_bytes` |
+| The result is read back through the structural checks before success is reported | Implemented | `repack.internal.self_check_failed` | `every_repacking_refusal_classifies_and_explains_itself`, `the_report_says_what_changed_and_what_was_preserved` |
+| No clock, no environment and no ambient state: the timestamp is the edits document's, and identical inputs produce identical bytes | Implemented | `manifest.invalid.timestamp` | `an_edits_document_without_a_timestamp_is_refused`, `repacking_with_no_edit_rewrites_the_same_package_and_is_idempotent` |
+| Diagnostics free of personal content and private paths, the edits document's own values included | Implemented | every code; a diagnostic carries the code, an entry index, an attachment number and numbers only | `no_diagnostic_carries_anything_the_edits_or_the_package_said`, `a_successful_report_names_no_file_and_no_value` |
+| No signing, encryption or submission of any kind | By construction; openKRX performs no cryptography | none | — |
+
+### Residual risks of this layer
+
+- **Only a package openKRX could have written is editable.** Everything else
+  is refused with `repack.unsupported.*` and exit 7. That is deliberate while
+  A19 to A22 and M11 to M15 stand — rewriting another producer's layout would
+  mean deciding what the sources leave open — but it does mean `repack` is of
+  no use on a package received from a real service, and a caller must not
+  read the refusal as a defect in that package.
+- **A refusal is a statement about openKRX, not about the package.** The
+  diagnostic says so, and `inspect`, `list`, `validate-structure` and
+  `extract` all still read a package `repack` refuses. A consumer that mapped
+  exit 7 onto "invalid package" would be wrong.
+- **The edited package is not the package that was signed.** openKRX performs
+  no cryptography and never writes a signature document, so a repacked
+  package carries no evidence of who edited it or of what it was before. Any
+  detached signature over the original does not cover the result, and openKRX
+  cannot tell a caller that it does not.
+- **Interoperability is unverified**, exactly as it is for `create`: what
+  repacking writes is structurally consistent with the documented layout and
+  never conforming, and it still reports `Unresolved(A19)` and
+  `Unresolved(M13)` when openKRX reads it back.
 
 ## Threat-model mapping: command-line input layer
 

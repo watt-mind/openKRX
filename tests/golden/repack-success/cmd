@@ -1,0 +1,1 @@
+repack {outdir}/source.krx --edits {fixture}/repack-edits.json --out {outdir}/repacked.krx

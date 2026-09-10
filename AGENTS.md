@@ -10,7 +10,10 @@ writes a package's files into a directory the caller names under a
 no-clobber, no-link, undo-on-failure policy; `create`, which writes one
 package from a strictly validated JSON manifest to a file that must not
 already exist, and reads it back through the structural checks before
-reporting success; and `skill`, which writes the
+reporting success; `repack`, which edits an existing package into a new file
+under the same output rules, preserving every attachment no edit names byte
+for byte and refusing any package the writer cannot re-emit; and `skill`,
+which writes the
 embedded agent skill document to stdout outside the JSON envelope. A package
 openKRX writes is structurally consistent with the documented layout and is
 never a conforming one, and structural validation is not signature
@@ -21,7 +24,7 @@ planned operations as implemented.
 ## Scope and ownership
 
 - `crates/openkrx-core/`: bounded ZIP and XML processing, the profile rules,
-  extraction planning, and deterministic writing. No
+  extraction planning, and deterministic writing and repacking. No
   implicit filesystem, network, process, or clock access; inject I/O where
   needed.
 - `crates/openkrx-cli/`: arguments, human/JSON output, bounded input and safe
@@ -106,7 +109,7 @@ afterwards. The full table is the maintenance map in
 
 `scripts/check-codes.py` enforces the code row automatically: it extracts
 every `archive.*`, `create.*`, `extract.*`, `input.*`, `manifest.*`,
-`metadata.*` and `output.*`
+`metadata.*`, `output.*` and `repack.*`
 literal from `crates/*/src/**`
 and fails when one is missing from `docs/codes.md`, or when that document
 lists a code no source defines. It runs inside `bash scripts/check.sh`. The
