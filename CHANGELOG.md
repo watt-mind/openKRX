@@ -16,6 +16,18 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **Reparse-point confinement is exercised on Windows CI.** The output rules
+  that keep `extract`, `create` and `repack` inside the destination the caller
+  named were proven only on Linux and macOS, because their tests need a
+  symbolic link. A `cfg(windows)` test helper now creates a directory junction
+  with `cmd /c mklink /J`, which needs no elevation and no `unsafe` call, and
+  the same three cases run on the Windows lane: an ancestor junction inside
+  the destination (`output.symlink_in_path`), a junction as the destination or
+  the output directory (`output.destination_symlink`), and a junction at the
+  planned output path (`output.exists`). A runner without the builtin prints
+  `SKIPPED: mklink /J unavailable` rather than passing quietly. No behaviour
+  changed; `docs/testing.md` and `SECURITY.md` record the narrowed skip.
+
 - **`openkrx repack`: deterministic editing of an existing package (KRX-08).**
   `openkrx repack <FILE|-> --edits <FILE.json> --out <FILE.krx> [--json]`
   reads one package, applies a strictly validated JSON document of edits, and

@@ -617,6 +617,61 @@ fn an_output_that_is_a_dangling_symbolic_link_counts_as_occupied() {
     assert_eq!(diagnostic(&output)["code"], "output.exists");
 }
 
+/// The two output-link rules on Windows, against a directory junction.
+///
+/// `--out` names one file in one directory, so the destination *is* the only
+/// ancestor `crate::output::parent` examines: a junction there and a junction
+/// at the path itself are the whole rule on this platform, and they are what
+/// exercises `FILE_ATTRIBUTE_REPARSE_POINT` in
+/// `crate::extract::preflight::is_link` for the writing commands. `mklink /J`
+/// needs no elevation; a runner without it leaves a `SKIPPED:` line and the
+/// test returns.
+#[cfg(windows)]
+mod junctions {
+    use super::{Scratch, create_json, diagnostic, scene, status};
+    use crate::support::junction;
+
+    #[test]
+    fn an_output_directory_that_is_a_junction_is_refused() {
+        let scratch = Scratch::new("create-output-junction");
+        let manifest_path = scene(&scratch, "", &[]);
+        let real = scratch.dir("real");
+        let link = scratch.path().join("link");
+        if !junction(&link, &real) {
+            return;
+        }
+        let output = create_json(&manifest_path, &link.join("package.krx"));
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.destination_symlink");
+        assert!(
+            !real.join("package.krx").exists(),
+            "writing through the junction would have left the destination the \
+caller did not name"
+        );
+    }
+
+    #[test]
+    fn an_output_that_is_a_junction_counts_as_occupied() {
+        let scratch = Scratch::new("create-junction-out");
+        let manifest_path = scene(&scratch, "", &[]);
+        let target = scratch.dir("target");
+        let out = scratch.path().join("package.krx");
+        if !junction(&out, &target) {
+            return;
+        }
+        let output = create_json(&manifest_path, &out);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert_eq!(
+            std::fs::read_dir(&target)
+                .expect("read the junction target")
+                .count(),
+            0,
+            "the junction's target was never written through"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_destination_that_cannot_be_written_reports_an_output_failure() {

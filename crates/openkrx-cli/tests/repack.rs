@@ -615,6 +615,65 @@ fn repacking_onto_the_package_being_edited_is_refused() {
     );
 }
 
+/// The output-link rules on Windows, against a directory junction.
+///
+/// `repack` puts its package through the same output layer as `create`, so the
+/// two rules a reparse point can break are the same: the directory `--out`
+/// names must be real, and nothing may be at `--out` itself. A junction is the
+/// reparse point `mklink /J` makes without elevation, which is what lets this
+/// runner reach `FILE_ATTRIBUTE_REPARSE_POINT` in
+/// `crate::extract::preflight::is_link` at all. A runner without `mklink`
+/// leaves a `SKIPPED:` line and the test returns.
+#[cfg(windows)]
+mod junctions {
+    use super::{Scratch, diagnostic, edits_file, repack_json, source, status};
+    use crate::support::junction;
+
+    #[test]
+    fn an_output_directory_that_is_a_junction_is_refused() {
+        let scratch = Scratch::new("repack-output-junction");
+        let package = source(&scratch);
+        let before = std::fs::read(&package).expect("the source package");
+        let edits = edits_file(&scratch, "");
+        let real = scratch.dir("real");
+        let link = scratch.path().join("link");
+        if !junction(&link, &real) {
+            return;
+        }
+        let output = repack_json(&package, &edits, &link.join("out.krx"));
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.destination_symlink");
+        assert!(
+            !real.join("out.krx").exists(),
+            "writing through the junction would have left the destination the \
+caller did not name"
+        );
+        assert_eq!(std::fs::read(&package).expect("the package"), before);
+    }
+
+    #[test]
+    fn an_output_that_is_a_junction_counts_as_occupied() {
+        let scratch = Scratch::new("repack-junction-out");
+        let package = source(&scratch);
+        let edits = edits_file(&scratch, "");
+        let target = scratch.dir("target");
+        let out = scratch.path().join("out.krx");
+        if !junction(&out, &target) {
+            return;
+        }
+        let output = repack_json(&package, &edits, &out);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert_eq!(
+            std::fs::read_dir(&target)
+                .expect("read the junction target")
+                .count(),
+            0,
+            "the junction's target was never written through"
+        );
+    }
+}
+
 #[test]
 fn an_unreadable_package_is_an_input_failure_and_a_broken_one_a_package_failure() {
     let scratch = Scratch::new("repack-input");

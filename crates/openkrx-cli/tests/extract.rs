@@ -6,11 +6,13 @@
 //! left exactly as it was found. Asserting an exit status alone would not hold
 //! any of it.
 //!
-//! Two tests need a symbolic link and one needs an unwritable directory.
-//! Neither is portable, so each is behind `cfg(unix)` and each has a
-//! documented Windows counterpart or a documented reason for being skipped
-//! there; `docs/testing.md` records both. Everything else runs on Linux, macOS
-//! and Windows alike.
+//! Three tests need a symbolic link and one needs an unwritable directory.
+//! Neither primitive is portable, so each is behind `cfg(unix)`. The link
+//! tests have Windows counterparts in `mod junctions`, which puts a directory
+//! junction — a reparse point `mklink /J` makes without elevation — in each of
+//! the same three positions; the unwritable directory has a documented reason
+//! for being skipped there. `docs/testing.md` records both. Everything else
+//! runs on Linux, macOS and Windows alike.
 mod support;
 
 use std::path::Path;
@@ -373,12 +375,12 @@ fn missing_arguments_are_a_usage_error_rather_than_a_write() {
 
 /// A symbolic link inside the destination, on the platforms that have one.
 ///
-/// Windows can create a directory junction, but only through `mklink /J` or a
-/// reparse-point call this crate cannot make while `unsafe_code` is forbidden,
-/// and a symbolic link there needs developer mode or an elevated process. The
-/// runner may have neither, so the reparse-point half of the rule is held by
-/// `crate::extract::preflight::is_link` reading
-/// `FILE_ATTRIBUTE_REPARSE_POINT`, and by this test on Linux and macOS.
+/// A symbolic link on Windows needs developer mode or an elevated process, so
+/// these three are `cfg(unix)`. Their Windows counterparts are in
+/// [`junctions`] below, which exercises the same three rules against a
+/// directory junction — the reparse point `mklink /J` makes without any
+/// privilege — and so against `FILE_ATTRIBUTE_REPARSE_POINT` in
+/// `crate::extract::preflight::is_link`.
 #[cfg(unix)]
 mod links {
     use super::{MARKER, Scratch, attachment_package, diagnostic, extract, status, stderr, tree};
@@ -426,6 +428,83 @@ mod links {
         let real = scratch.dir("real");
         let link = scratch.path().join("link");
         std::os::unix::fs::symlink(&real, &link).expect("a symlink");
+
+        let output = extract(&attachment_package(), &link, true);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.destination_symlink");
+        assert_eq!(tree(&real), Vec::<String>::new(), "nothing was written");
+        assert!(stderr(&output).contains("symbolic link"));
+    }
+}
+
+/// The same three rules on Windows, against a directory junction.
+///
+/// A junction is a reparse point, not a symbolic link, and `mklink /J` makes
+/// one without developer mode or elevation. That is what lets the Windows
+/// runner exercise the half of `crate::extract::preflight::is_link` that reads
+/// `FILE_ATTRIBUTE_REPARSE_POINT` — the only defence this platform has against
+/// output escaping the destination the caller named.
+///
+/// Each test returns early, with a `SKIPPED:` line already on stderr, if
+/// `mklink` is not there at all: a rule that could not be exercised must say
+/// so rather than fail.
+#[cfg(windows)]
+mod junctions {
+    use super::{MARKER, Scratch, attachment_package, diagnostic, extract, status, stderr, tree};
+    use crate::support::junction;
+
+    #[test]
+    fn an_ancestor_junction_inside_the_destination_is_refused() {
+        let scratch = Scratch::new("extract-ancestor-junction");
+        let destination = scratch.dir("out");
+        let elsewhere = scratch.dir("elsewhere");
+        if !junction(&destination.join("KRX"), &elsewhere) {
+            return;
+        }
+
+        let output = extract(&attachment_package(), &destination, true);
+        assert_eq!(status(&output), 9);
+        let error = diagnostic(&output);
+        assert_eq!(error["code"], "output.symlink_in_path");
+        assert_eq!(error["category"], "output");
+        assert!(error["entry_index"].is_number(), "the entry is named");
+        assert_eq!(
+            tree(&elsewhere),
+            Vec::<String>::new(),
+            "nothing escaped through the junction"
+        );
+        assert!(!std::fs::exists(destination.join(MARKER)).expect("check the marker"));
+    }
+
+    #[test]
+    fn a_leaf_target_that_is_a_pre_existing_junction_is_refused() {
+        let scratch = Scratch::new("extract-leaf-junction");
+        let destination = scratch.dir("out");
+        let target = scratch.dir("target");
+        if !junction(&destination.join("mimetype"), &target) {
+            return;
+        }
+
+        let output = extract(&attachment_package(), &destination, true);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert_eq!(
+            tree(&target),
+            Vec::<String>::new(),
+            "a junction is an existing path, not free space, and its target \
+was never written through"
+        );
+        assert!(!std::fs::exists(destination.join(MARKER)).expect("check the marker"));
+    }
+
+    #[test]
+    fn a_destination_that_is_itself_a_junction_is_refused() {
+        let scratch = Scratch::new("extract-dest-junction");
+        let real = scratch.dir("real");
+        let link = scratch.path().join("link");
+        if !junction(&link, &real) {
+            return;
+        }
 
         let output = extract(&attachment_package(), &link, true);
         assert_eq!(status(&output), 9);
