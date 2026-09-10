@@ -104,6 +104,13 @@ The error, check-outcome and rule-identifier enums are `#[non_exhaustive]`.
 A consumer matches on the stable dotted code, and must treat an unknown code
 as a failure rather than as a success.
 
+Missing public documentation fails the build: both crate roots deny
+`missing_docs`, `openkrx-core` additionally denies
+`rustdoc::broken_intra_doc_links` and `rustdoc::private_intra_doc_links`, and
+`openkrx-cli` — a binary, every item of which is private, so `missing_docs`
+alone could never fire there — denies
+`clippy::missing_docs_in_private_items` in its place.
+
 ### Module map: `openkrx-core`
 
 | File | Responsibility |

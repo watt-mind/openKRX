@@ -44,11 +44,31 @@
 //! but the executable can read the contract it is about to rely on. It is the
 //! one command outside the JSON envelope.
 //!
+//! The binary's contract — the commands, their flags, the JSON envelope, the
+//! exit statuses and the stable codes behind them — is specified in
+//! `docs/architecture.md`, with the code catalogue in `docs/codes.md`. The
+//! same contract in the form an agent harness reads is the skill document
+//! embedded in this executable: `openkrx skill` writes it to stdout, and it is
+//! kept in step with any change to a command, an exit status or the envelope.
+//!
 //! [`inspect`]: crate::commands::inspect
 //! [`extract`]: mod@crate::extract
 //! [`create`]: mod@crate::create
 //! [`repack`]: mod@crate::repack
 //! [`skill`]: mod@crate::skill
+
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+// Every item of this crate is private: it is a binary, and `missing_docs`
+// alone would therefore never fire here. The private-item lint is what makes
+// the documentation gate load-bearing for this crate, so it is denied too.
+#![deny(clippy::missing_docs_in_private_items)]
+// `rustdoc::private_intra_doc_links` is deliberately left at its default for
+// this crate. `cargo doc` documents a binary with `--document-private-items`,
+// so the links above to the modules behind each command do resolve in the
+// rendered output; denying the lint would forbid exactly the links that make
+// the binary's own documentation navigable. The library crate, whose
+// documentation is the published surface, denies it.
 
 use clap::{Parser, Subcommand};
 use openkrx_core::{Limits, MetadataLimits, archive, capabilities, profile};
@@ -71,6 +91,11 @@ use exit::{Category, Failure};
 use extract::cleanup::Cleanup;
 use std::path::PathBuf;
 
+/// The whole command line: the executable name, then exactly one subcommand.
+///
+/// There is no global flag. Every option, `--json` included, belongs to the
+/// subcommand that reads it, so a flag one command does not take is a usage
+/// error rather than a silently ignored argument.
 #[derive(Parser)]
 #[command(
     name = "openkrx",
@@ -82,6 +107,8 @@ the agent skill this binary carries.",
     after_help = EXIT_STATUS_HELP
 )]
 struct Args {
+    /// The subcommand to run. `clap` requires one, so no invocation reaches
+    /// the dispatch below without it.
     #[command(subcommand)]
     command: Command,
 }
@@ -208,6 +235,15 @@ This command runs no structural check and exits 0 whenever it produces its
 listing. Use inspect to see the checks, or validate-structure to get their
 reading as an exit status.";
 
+/// The subcommands the binary offers, in the order `--help` lists them.
+///
+/// Each variant's own documentation comment is what `clap` prints as that
+/// command's short description, and each field's comment is its flag help, so
+/// these comments are part of the user-visible contract and are kept in step
+/// with `docs/architecture.md`, `README.md` and the embedded skill document.
+/// `Capabilities`, `Inspect`, `List` and `ValidateStructure` only read;
+/// `Extract`, `Create` and `Repack` write to paths the caller named; `Skill`
+/// touches no package at all.
 #[derive(Subcommand)]
 enum Command {
     /// Report implemented operations and development status.
@@ -322,8 +358,12 @@ skills, for example: openkrx skill > .claude/skills/openkrx/SKILL.md")]
 /// Which reader command is running, and the name its response carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reader {
+    /// `inspect`: the declaration report plus every structural check.
     Inspect,
+    /// `list`: the archive entries, in central-directory order, and no check.
     List,
+    /// `validate-structure`: the check inventory, outcome by outcome, with the
+    /// reading encoded in the exit status.
     ValidateStructure,
 }
 

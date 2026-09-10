@@ -28,8 +28,20 @@
 //! `docs/profile.md` lists essential rules as unresolved, and each of them maps
 //! to a distinct [`profile::CheckOutcome::Unresolved`] outcome rather than to a
 //! pass or a failure.
+//!
+//! Every refusal is a typed error carrying one stable dotted code, and
+//! `docs/codes.md` is the catalogue of them, section by section: archive,
+//! metadata, structural check, extraction, creation and repacking codes.
+//! `docs/profile.md` holds the profile evidence and the list of essential
+//! rules no primary source settles; `docs/conformance.md` states what a
+//! structural report is and is not; `docs/architecture.md` is the canonical
+//! description of the layers above. Public documentation is a build gate here:
+//! this crate denies `missing_docs`, so a public item without a doc comment
+//! does not compile.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
 
 use serde::Serialize;
 
