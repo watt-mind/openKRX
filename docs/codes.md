@@ -33,7 +33,8 @@ its own: `validate-structure` reports 3 when any check failed. The `extract.*`
 codes follow the same segment rule as the archive ones — `extract.unsafe_path.*`
 and `extract.ambiguous.*` to 6, `extract.unsupported.*` to 7,
 `extract.over_limit.*` to 8 — and every `output.*` code classifies to 9, the
-status the two commands that write, `extract` and `create`, alone exit with.
+status the three commands that write, `extract`, `create` and `repack`, alone
+exit with.
 The `create.*` codes follow it too: `create.over_limit.*` to 8, and
 `create.invalid.*`, `create.unsafe_name.*` and
 `create.internal.self_check_failed` to 6, the status for a package that
@@ -80,8 +81,9 @@ the shape of a filesystem.
 ## Output codes
 
 `openkrx-cli`, defined in `crates/openkrx-cli/src/exit.rs` and produced by
-`crates/openkrx-cli/src/extract/` and `crates/openkrx-cli/src/create.rs`.
-These are the failures of the two commands that write. Every one of them
+`crates/openkrx-cli/src/output.rs`, `crates/openkrx-cli/src/extract/`,
+`crates/openkrx-cli/src/create.rs` and `crates/openkrx-cli/src/repack.rs`.
+These are the failures of the three commands that write. Every one of them
 classifies to exit status 9, and every one of
 them means **nothing incomplete was left behind**: before the first write,
 because the run was refused during preflight; after it, because the undo pass
@@ -92,7 +94,7 @@ No code carries a path. The destination is the caller's own argument and a
 diagnostic that repeated it could not be logged safely; the entry index says
 which planned file the failure concerns, wherever the failure belongs to one.
 
-The four codes both commands reach — `output.destination_missing`,
+The four codes the writing commands share — `output.destination_missing`,
 `output.destination_not_a_directory`, `output.destination_symlink` and
 `output.exists` — carry a different sentence for each of them in human mode,
 because they are fixed by different actions: telling a caller who ran

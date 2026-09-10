@@ -45,7 +45,7 @@ struct Failed<'a> {
     ok: bool,
     command: &'a str,
     error: Diagnostic<'a>,
-    /// What the undo pass removed, present for the two commands that write.
+    /// What the undo pass removed, present for the three commands that write.
     /// `removed` is `0` when nothing had been written, which is every refusal
     /// decided before the first write; for `create` it is `1` when the
     /// half-written package was removed again. Counts, never a path.

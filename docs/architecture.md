@@ -528,8 +528,9 @@ with nothing beneath it produces nothing at all.
 
 ## Extraction output
 
-`extract` is one of the two commands that write — `create` is the other, and
-its output rule is [Creating a package](#creating-a-package) — and
+`extract` is one of the three commands that write — `create` and `repack` are
+the others, and their output rule is
+[Creating a package](#creating-a-package) — and
 `crates/openkrx-cli/src/extract/` is the code that owns an extraction's
 destination. It adds no rule about names, entry kinds, collisions
 or ceilings: those belong to the planner above, and are enforced before this
@@ -1239,7 +1240,7 @@ failed `extract` carries the ordinary failed envelope plus one extra object:
 }
 ```
 
-`cleanup` is present for the two commands that write. It counts paths the run
+`cleanup` is present for the three commands that write. It counts paths the run
 had created and then removed, and paths it created and could not remove; both
 zero means nothing had been written when the run was refused. Human mode
 prints the same fact as a second line on standard error. Neither carries a
