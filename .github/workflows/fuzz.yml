@@ -256,6 +256,13 @@ jobs:
               "$target" -- -rss_limit_mb=2048
             echo "::endgroup::"
           done
+      # Reporting must not be able to lose a campaign. This step sits between
+      # the minimisation and the five saves, so under an unguarded
+      # `set -euo pipefail` a directory that had gone missing or unreadable
+      # would fail `du`, skip every save, and throw away hours of accumulated
+      # inputs over a number in a table. Every measurement therefore falls back
+      # to 0 and a missing directory is reported as such: a zero in this table
+      # is a signal to read the log, not a reason to discard the corpus.
       - name: Report the corpus size before and after
         shell: bash
         run: |
@@ -268,13 +275,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           while read -r target files bytes; do
             directory="fuzz/corpus/${target}"
-            after_files=$(find "$directory" -type f | wc -l)
-            after_bytes=$(du -sb "$directory" | cut -f1)
-            printf '| `%s` | %s | %s | %s | %s |\n' \
-              "$target" "$files" "$bytes" "$after_files" "$after_bytes" \
+            if [ -d "$directory" ]; then
+              after_files=$(find "$directory" -type f 2>/dev/null | wc -l || echo 0)
+              after_bytes=$(du -sb "$directory" 2>/dev/null | cut -f1 || echo 0)
+            else
+              echo "::warning::no corpus directory for ${target} after minimisation"
+              after_files=0
+              after_bytes=0
+            fi
+            printf "| \`%s\` | %s | %s | %s | %s |\n" \
+              "$target" "$files" "$bytes" "${after_files:-0}" "${after_bytes:-0}" \
               >> "$GITHUB_STEP_SUMMARY"
           done < "${RUNNER_TEMP}/corpus-before.txt"
-          cat "$GITHUB_STEP_SUMMARY"
       # Saved before the coverage pass rather than after it: coverage is an
       # ordinary step whose failure fails the job, and a failure there must not
       # cost the campaign the corpus it just spent hours growing. Not on the
