@@ -172,57 +172,37 @@ impl Drop for Scratch {
     }
 }
 
-/// Create a directory junction at `link` pointing at `target`.
+/// Shell out to `cmd /c mklink [flag] link target`, one link kind per `flag`.
 ///
-/// A junction is the one reparse point a Windows runner can make without any
-/// privilege: `mklink /J` needs neither developer mode nor elevation, and it
-/// is a `cmd` builtin, so a subprocess stands in for the reparse-point call
-/// this workspace cannot make while `unsafe_code` is forbidden.
+/// `mklink` is a `cmd` builtin, so a subprocess stands in for the
+/// reparse-point call this workspace cannot make while `unsafe_code` is
+/// forbidden. `/J` makes a junction, which needs no privilege at all; `/D` a
+/// directory symbolic link and no flag at all a file symbolic link, both of
+/// which need developer mode or an elevated process — which a GitHub-hosted
+/// `windows-latest` runner has.
 ///
 /// Returns `false`, after printing one `SKIPPED` line naming the test, when
-/// `mklink` itself did not produce the junction. A caller must return early on
-/// `false` rather than assert, so that a runner without the builtin says so
-/// instead of failing a rule it never exercised. `println!` rather than
-/// `eprintln!` because libtest captures both and shows what it captured on
-/// failure or under `--show-output`, and `--nocapture` passes it straight
-/// through; the word SKIPPED is there to be greppable in a log where a
-/// skipped case would otherwise read as a pass, and
-/// the test name — read from the thread libtest runs the case on — says which
-/// rule went unexercised.
+/// `mklink` did not produce the link. A caller must return early on `false`
+/// rather than assert, so that a runner without the builtin or the privilege
+/// says so instead of failing a rule it never exercised. `println!` rather
+/// than `eprintln!` because libtest captures both and shows what it captured
+/// on failure or under `--show-output`, and `--nocapture` passes it straight
+/// through; the word SKIPPED is there to be greppable in a log where a skipped
+/// case would otherwise read as a pass, and the test name — read from the
+/// thread libtest runs the case on — says which rule went unexercised.
 ///
-/// `cmd` wants backslashes. Every path a test builds comes from `Path::join`,
-/// so its separators are already the platform's; the replacement covers only a
-/// forward slash the temporary root itself might carry.
-///
-/// Both paths are asserted to hold none of `&^|<>"` before anything is
-/// spawned. They are scratch paths this module composed, so a metacharacter
-/// could only arrive from the temporary root, and `cmd` would read one as
-/// syntax rather than as part of a name: a loud failure is the honest outcome
-/// there, not a junction quietly made somewhere else.
+/// `symlink_metadata` rather than `exists`, because a *dangling* file symbolic
+/// link is one of the shapes under test: a path that exists with nothing
+/// behind it.
 #[cfg(windows)]
-#[must_use]
-pub fn junction(link: &Path, target: &Path) -> bool {
-    /// The characters `cmd` reads as syntax rather than as part of a name.
-    const METACHARACTERS: [char; 6] = ['&', '^', '|', '<', '>', '"'];
-
-    fn backslashes(path: &Path) -> String {
-        let text = path.to_string_lossy().replace('/', "\\");
-        assert!(
-            !text.contains(METACHARACTERS),
-            "a path bound for `cmd /c mklink /J` holds one of {METACHARACTERS:?}, \
-which `cmd` would read as syntax"
-        );
-        text
-    }
+fn mklink(flag: Option<&str>, link: &Path, target: &Path) -> bool {
+    let mut arguments = vec!["/c".to_owned(), "mklink".to_owned()];
+    arguments.extend(flag.map(str::to_owned));
+    arguments.push(cmd_path(link));
+    arguments.push(cmd_path(target));
 
     let made = Command::new("cmd")
-        .args([
-            "/c",
-            "mklink",
-            "/J",
-            &backslashes(link),
-            &backslashes(target),
-        ])
+        .args(&arguments)
         .stdin(Stdio::null())
         .output();
     match made {
@@ -234,10 +214,70 @@ which `cmd` would read as syntax"
             // all, so that the line keeps its shape rather than losing a
             // field.
             let test = std::thread::current().name().unwrap_or("<test>").to_owned();
-            println!("SKIPPED {test}: mklink /J unavailable");
+            let spelling =
+                flag.map_or_else(|| "mklink".to_owned(), |flag| format!("mklink {flag}"));
+            println!("SKIPPED {test}: {spelling} unavailable");
             false
         }
     }
+}
+
+/// `path` as the backslash-separated text `cmd` wants, guarded.
+///
+/// Every path a test builds comes from `Path::join`, so its separators are
+/// already the platform's; the replacement covers only a forward slash the
+/// temporary root itself might carry.
+///
+/// The text is asserted to hold none of `&^|<>"` before anything is spawned.
+/// These are scratch paths this module composed, so a metacharacter could only
+/// arrive from the temporary root, and `cmd` would read one as syntax rather
+/// than as part of a name: a loud failure is the honest outcome there, not a
+/// link quietly made somewhere else.
+#[cfg(windows)]
+fn cmd_path(path: &Path) -> String {
+    /// The characters `cmd` reads as syntax rather than as part of a name.
+    const METACHARACTERS: [char; 6] = ['&', '^', '|', '<', '>', '"'];
+
+    let text = path.to_string_lossy().replace('/', "\\");
+    assert!(
+        !text.contains(METACHARACTERS),
+        "a path bound for `cmd /c mklink` holds one of {METACHARACTERS:?}, \
+which `cmd` would read as syntax"
+    );
+    text
+}
+
+/// Create a directory junction at `link` pointing at `target`.
+///
+/// A junction is the one reparse point a Windows runner can make without any
+/// privilege, so it keeps the reparse-point rules exercised even on a runner
+/// that cannot make a symbolic link. See [`mklink`] for the skip contract.
+#[cfg(windows)]
+#[must_use]
+pub fn junction(link: &Path, target: &Path) -> bool {
+    mklink(Some("/J"), link, target)
+}
+
+/// Create a *directory symbolic link* at `link` pointing at `target`.
+///
+/// A different reparse-point tag from a junction, reached through the same
+/// `FILE_ATTRIBUTE_REPARSE_POINT` check, and the one an attacker on this
+/// platform would actually plant. See [`mklink`] for the skip contract.
+#[cfg(windows)]
+#[must_use]
+pub fn windows_dir_symlink(link: &Path, target: &Path) -> bool {
+    mklink(Some("/D"), link, target)
+}
+
+/// Create a *file symbolic link* at `link` pointing at `target`.
+///
+/// `target` need not exist: `mklink` with no flag makes a dangling link
+/// happily, which is the shape the no-clobber rule has to read as an occupied
+/// path rather than as free space. See [`mklink`] for the skip contract.
+#[cfg(windows)]
+#[must_use]
+pub fn windows_file_symlink(link: &Path, target: &Path) -> bool {
+    mklink(None, link, target)
 }
 
 /// The timestamp every creation test writes, so that its bytes are fixed.

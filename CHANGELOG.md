@@ -16,6 +16,25 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **Windows *symbolic* links are exercised by CI, not just junctions.** The
+  Windows lane already put a directory junction in every position the output
+  layer refuses; a symbolic link is a different reparse-point tag behind the
+  same `FILE_ATTRIBUTE_REPARSE_POINT` bit, and it is the tag an attacker would
+  actually plant. `mod symbolic_links` in `crates/openkrx-cli/tests/extract.rs`,
+  `create.rs` and `repack.rs` now runs the same scenarios against one: a
+  destination that is a directory symbolic link
+  (`output.destination_symlink`), an intermediate directory that is one
+  (`output.symlink_in_path`), a leaf target that is a file symbolic link,
+  dangling and live (`output.exists`), and for `create` and `repack` a `--out`
+  parent that is a directory symbolic link and an `--out` that is a dangling
+  file symbolic link. Each case asserts the code and that nothing was written
+  through the link. Two helpers beside the junction one,
+  `windows_dir_symlink` and `windows_file_symlink`, shell out to `mklink /D`
+  and `mklink` through the same metacharacter guard, and skip the case with a
+  `SKIPPED <test>:` line on a runner that cannot make a symbolic link — a
+  GitHub-hosted `windows-latest` runner is elevated and can. Tests only; no
+  production code changed. The residual risk "Windows symbolic links are not
+  exercised by CI" is retired in `SECURITY.md`.
 - **Shell completions and a manual page ship with the CLI.** `openkrx
   completions <bash|zsh|fish|powershell|elvish>` writes that shell's
   completion script to standard output, and `openkrx man` writes the roff

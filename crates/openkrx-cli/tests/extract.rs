@@ -8,11 +8,13 @@
 //!
 //! Three tests need a symbolic link and one needs an unwritable directory.
 //! Neither primitive is portable, so each is behind `cfg(unix)`. The link
-//! tests have Windows counterparts in `mod junctions`, which puts a directory
+//! tests have two Windows counterparts: `mod junctions` puts a directory
 //! junction — a reparse point `mklink /J` makes without elevation — in each of
-//! the same three positions; the unwritable directory has a documented reason
-//! for being skipped there. `docs/testing.md` records both. Everything else
-//! runs on Linux, macOS and Windows alike.
+//! the same three positions, and `mod symbolic_links` puts a real Windows
+//! symbolic link there, which `mklink /D` and `mklink` make on an elevated
+//! runner. The unwritable directory has a documented reason for being skipped
+//! there. `docs/testing.md` records all of it. Everything else runs on Linux,
+//! macOS and Windows alike.
 mod support;
 
 use std::path::Path;
@@ -503,6 +505,103 @@ was never written through"
         let real = scratch.dir("real");
         let link = scratch.path().join("link");
         if !junction(&link, &real) {
+            return;
+        }
+
+        let output = extract(&attachment_package(), &link, true);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.destination_symlink");
+        assert_eq!(tree(&real), Vec::<String>::new(), "nothing was written");
+        assert!(stderr(&output).contains("symbolic link"));
+    }
+}
+
+/// The same rules on Windows again, against a real *symbolic* link.
+///
+/// A junction and a symbolic link are different reparse-point tags behind the
+/// same `FILE_ATTRIBUTE_REPARSE_POINT` bit, so the junction cases above cover
+/// the code path — but a symbolic link is what an attacker on this platform
+/// would actually plant, and the tag that reaches the check is only ever the
+/// one CI created. `mklink /D` and `mklink` need developer mode or an elevated
+/// process, which a GitHub-hosted `windows-latest` runner has; a runner
+/// without it leaves a `SKIPPED <test>:` line and the test returns.
+///
+/// The leaf case is run twice, dangling and live: a dangling link is the one
+/// shape where "exists" and "has a target" disagree, and the live one proves
+/// nothing was written through to the file behind it.
+#[cfg(windows)]
+mod symbolic_links {
+    use super::{MARKER, Scratch, attachment_package, diagnostic, extract, status, stderr, tree};
+    use crate::support::{windows_dir_symlink, windows_file_symlink};
+
+    #[test]
+    fn an_ancestor_symbolic_link_inside_the_destination_is_refused() {
+        let scratch = Scratch::new("extract-ancestor-symlink");
+        let destination = scratch.dir("out");
+        let elsewhere = scratch.dir("elsewhere");
+        if !windows_dir_symlink(&destination.join("KRX"), &elsewhere) {
+            return;
+        }
+
+        let output = extract(&attachment_package(), &destination, true);
+        assert_eq!(status(&output), 9);
+        let error = diagnostic(&output);
+        assert_eq!(error["code"], "output.symlink_in_path");
+        assert_eq!(error["category"], "output");
+        assert!(error["entry_index"].is_number(), "the entry is named");
+        assert_eq!(
+            tree(&elsewhere),
+            Vec::<String>::new(),
+            "nothing escaped through the link"
+        );
+        assert!(!std::fs::exists(destination.join(MARKER)).expect("check the marker"));
+    }
+
+    #[test]
+    fn a_leaf_target_that_is_a_dangling_symbolic_link_is_refused() {
+        let scratch = Scratch::new("extract-leaf-dangling");
+        let destination = scratch.dir("out");
+        let target = scratch.path().join("target.txt");
+        if !windows_file_symlink(&destination.join("mimetype"), &target) {
+            return;
+        }
+
+        let output = extract(&attachment_package(), &destination, true);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert!(
+            !std::fs::exists(&target).expect("check the link target"),
+            "a dangling link is an existing path, not free space"
+        );
+        assert!(!std::fs::exists(destination.join(MARKER)).expect("check the marker"));
+    }
+
+    #[test]
+    fn a_leaf_target_that_is_a_live_symbolic_link_is_refused() {
+        let scratch = Scratch::new("extract-leaf-live");
+        let destination = scratch.dir("out");
+        let target = scratch.file("target.txt", b"someone else's file");
+        if !windows_file_symlink(&destination.join("mimetype"), &target) {
+            return;
+        }
+
+        let output = extract(&attachment_package(), &destination, true);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert_eq!(
+            std::fs::read(&target).expect("the link target"),
+            b"someone else's file",
+            "the file behind the link was never written through"
+        );
+        assert!(!std::fs::exists(destination.join(MARKER)).expect("check the marker"));
+    }
+
+    #[test]
+    fn a_destination_that_is_itself_a_symbolic_link_is_refused() {
+        let scratch = Scratch::new("extract-dest-symlink");
+        let real = scratch.dir("real");
+        let link = scratch.path().join("link");
+        if !windows_dir_symlink(&link, &real) {
             return;
         }
 
