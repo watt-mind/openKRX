@@ -1204,6 +1204,62 @@ host reported ratios of 16.6, 6.4 and 7.3 in a debug build and 15.1, 8.0 and
 7.4 in a release one, against a threshold of 32 — every path linear, and none
 of the three has a superlinear ceiling to report.
 
+## Measuring the limits
+
+The benchmarks above measure library calls and the scaling guard measures
+their *shape*. Neither says what a caller of the executable pays for a package
+that sits exactly on a published limit, which is what an operator sizing a
+container actually needs. `scripts/measure-limits.py` measures that, end to
+end, through the release binary:
+
+```sh
+python3 scripts/measure-limits.py
+```
+
+It builds the executable and the package generator, writes every package into
+a temporary directory outside the repository, drives `inspect`,
+`validate-structure` and `extract --json` over each one, records peak resident
+memory and wall time, rewrites [limits-measured.md](limits-measured.md) and
+removes the packages. Six limits are covered — `max_entries`,
+`max_text_bytes`, `max_entry_decoded_bytes`, `max_total_decoded_bytes`,
+`max_compression_ratio` and the planner's `max_depth` — each with one package
+exactly at the limit and one a single step past it.
+
+**The packages are generated, not committed**, for the reason the fixture
+policy gives, and one of them decodes 128 MiB.
+`crates/openkrx-core/examples/limit_packages.rs` writes them with the same
+test-only writer behind the `synthetic-writer` feature that the golden
+fixtures and the benchmarks use, so the limits, the archive layout and the
+metadata grammar keep exactly one definition. It checks every at-limit package
+against `archive::inventory`, `profile::check` and `extract::plan` before
+writing it, and emits a `packages.json` naming each case and the stable code
+its over-limit package must be reported with; the script reads that file and
+knows none of it itself.
+
+**Peak memory has two sources, and the report names the one it used.**
+`/usr/bin/time -v` where Linux offers it, otherwise the kernel's own
+`ru_maxrss` for the single measured child through `os.wait4` — the portable
+form of `resource.getrusage(RUSAGE_CHILDREN)`, scoped to one process so an
+earlier run cannot inflate it. Where a platform has neither, wall time is
+still measured and the memory column says so.
+
+**It reports drift; it does not gate it.** A wall time from a shared runner is
+not a threshold, so a number that moved changes nothing about the exit status.
+The script exits non-zero for two reasons only: a run that ended in a way no
+command contract describes, and an over-limit package that no command reported
+the expected code for — which would mean a published limit is not enforced end
+to end, and which makes the run double as an end-to-end limit test.
+`--compare <file>` prints what moved against a previous report, at a factor of
+two and above a 50 ms floor, and `--summary <file>` appends the table to a
+file, which is how the workflow fills a job summary.
+
+The [limits measurement workflow](../.github/workflows/limits.yml) runs it
+weekly and on demand. It is **not** a required check and is not on pull
+requests: it measures a machine, and a pull request must not be blocked by
+one. The checked-in [limits-measured.md](limits-measured.md) is what the
+weekly run compares against, and updating it is a deliberate commit rather
+than something CI does.
+
 ## API compatibility report
 
 The golden output contract above holds the CLI's contract: the bytes a

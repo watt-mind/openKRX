@@ -375,6 +375,7 @@ moved, because a tag-triggered run reads the workflow from the tagged commit.
 | `security.yml` | push, pull request, weekly cron, dispatch | Gitleaks over the full history, `actionlint` over every workflow, and CodeQL, on every trigger; the advisory scan on the weekly cron and on dispatch only. |
 | `mutants.yml` | weekly cron; dispatch | Mutation testing with per-crate floors. Deliberately not a required check. |
 | `fuzz.yml` | weekly cron; dispatch with `minutes_per_target`; pull request changing `fuzz.yml` or `seed.py` | The long fuzzing campaign over a [cumulative corpus](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#the-cumulative-corpus): restore, seed, fuzz, minimise, save, plus a coverage report for `inventory`. Deliberately not a required check. |
+| `limits.yml` | weekly cron; dispatch | Drives the release binary over a package at each published limit and one a step past it, and prints peak resident memory, wall time and the drift against `docs/limits-measured.md` into the job summary. Deliberately not a required check. |
 | `release.yml` | push of a `v*` tag; dispatch with `dry_run`; pull request changing `release.yml` or `release-notes.py` | Everything in [Watch the run](#4-watch-the-run). Creates a draft release and nothing else, and on anything but a `v*` tag creates nothing at all. |
 
 `release.yml` is hand-maintained. There is no generator, no install step to
@@ -391,7 +392,9 @@ moves both files together.
 Every `actions/upload-artifact` step sets `retention-days` explicitly. The
 baseline is **one day**: run-scoped intermediates whose durable home is
 somewhere else. That covers the `fuzz-artifacts` crash upload in `ci.yml`
-(retained regressions live in `fuzz/regressions/`) and all three `release.yml`
+(retained regressions live in `fuzz/regressions/`), the `limits-measured`
+upload in `limits.yml` (the table and the drift report are in the job summary,
+and the committed document is the durable copy) and all three `release.yml`
 uploads — `release-notes`, `archive-<target>` and `checksums` — whose durable
 home is the draft release the run creates.
 
