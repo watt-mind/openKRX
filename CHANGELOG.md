@@ -28,6 +28,28 @@ and such a change is recorded here explicitly.
   `SKIPPED: mklink /J unavailable` rather than passing quietly. No behaviour
   changed; `docs/testing.md` and `SECURITY.md` record the narrowed skip.
 
+- **Property-based tests for repacking.**
+  `crates/openkrx-core/tests/property_repack.rs` asserts over generated
+  packages and generated edit lists what `repack_plan.rs` and
+  `repack_rejects.rs` pin by example: an empty `Edits` reproducing the package
+  byte for byte, an add and the removal of exactly those numbers restoring it,
+  every attachment a valid edit did not name reading back byte-identical with
+  the result failing no structural check, an edit naming an attachment the
+  package does not carry refused with its `repack.invalid.*` code, and planning
+  the same package twice deciding the same thing. The `Edits` strategies live
+  beside the writer ones in `tests/support/strategies.rs`.
+
+  Writing them surfaced one **documented asymmetry**, now pinned by its own
+  property: adding an attachment to a dispatch that carried no `MELLEKLETEK`
+  container and removing it again leaves an empty container behind. M7 makes
+  the container and `MELLEKLETEK_SZAMA` separate elements, the writer must emit
+  one to hold the added reference, and the later removal cannot know the
+  original had none. The property asserts where the difference stops — the
+  marker and every attachment byte-identical, exactly one empty `MELLEKLETEK`
+  more in the document and nothing else, the parsed documents equal apart from
+  `attachments_present`, and a second add-and-remove an exact identity. See
+  [docs/testing.md](docs/testing.md#the-container-asymmetry).
+
 - **`openkrx repack`: deterministic editing of an existing package (KRX-08).**
   `openkrx repack <FILE|-> --edits <FILE.json> --out <FILE.krx> [--json]`
   reads one package, applies a strictly validated JSON document of edits, and
