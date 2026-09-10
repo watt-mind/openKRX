@@ -1254,10 +1254,14 @@ two and above a 50 ms floor, and `--summary <file>` appends the table to a
 file, which is how the workflow fills a job summary.
 
 The [limits measurement workflow](../.github/workflows/limits.yml) runs it
-weekly and on demand. It is **not** a required check and is not on pull
-requests: it measures a machine, and a pull request must not be blocked by
-one. The checked-in [limits-measured.md](limits-measured.md) is what the
-weekly run compares against, and updating it is a deliberate commit rather
+weekly and on demand. It is **not** a required check and does not run on
+ordinary pull requests: it measures a machine, and a pull request must not be
+blocked by one. The one exception is a pull request that changes the workflow
+or the script itself, which runs the identical job once — the rehearsal
+`fuzz.yml` needs for the same reason, because GitHub registers a
+`workflow_dispatch` workflow only from the default branch. The checked-in
+[limits-measured.md](limits-measured.md) is what the weekly run compares
+against, and updating it is a deliberate commit rather
 than something CI does.
 
 ## API compatibility report

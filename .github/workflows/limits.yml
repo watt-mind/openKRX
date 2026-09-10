@@ -1,7 +1,9 @@
 name: Limits measurement
 
-# Deliberately NOT a required check, and deliberately not on pull requests.
-# It measures a machine: peak resident memory and wall time for a package
+# Deliberately NOT a required check, and deliberately off the ordinary
+# pull-request path — the only pull request it runs on is one that changes this
+# workflow or the script it drives, which is how the lane is rehearsed before
+# it lands. It measures a machine: peak resident memory and wall time for a package
 # sitting on each published limit, taken on whichever shared runner GitHub
 # hands out that week. A number from such a runner is evidence about the
 # runner as much as about this repository, so it must never block a merge and
@@ -26,12 +28,24 @@ on:
     # do not queue against each other.
     - cron: "0 6 * * 1"
   workflow_dispatch:
+  # GitHub registers a `workflow_dispatch` workflow only from the default
+  # branch, so a brand-new workflow cannot be dispatched from the branch that
+  # adds it — fuzz.yml and release.yml carry the same note, and this trigger
+  # is the same answer they give: a pull request touching this workflow or the
+  # measurement script runs the identical job once, before the lane lands.
+  # The filter is deliberately just these two files. Every other pull request
+  # is untouched by this lane, which measures a machine and must never be able
+  # to block a merge.
+  pull_request:
+    paths:
+      - ".github/workflows/limits.yml"
+      - "scripts/measure-limits.py"
 
 permissions:
   contents: read
 
 concurrency:
-  group: limits-${{ github.ref }}
+  group: limits-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 env:
