@@ -68,6 +68,7 @@ because no other target has a stronger resolution to fall back from.
 | `crates/openkrx-core/tests/repack_rejects.rs` | Everything repacking refuses, each by its stable code, over packages that differ from a canonical control in exactly one respect: another root prefix, another metadata file-name spelling, no metadata document and two of them, a marker that is missing, displaced or holding something else, an entry the layout has no place for, elements outside the grammar, each block the reader records only the presence of, an unqualified handling-instruction element, two dispatch blocks, a reference or a declared count the writer would derive differently, a reference naming another entry, a payload entry no reference declares, a document that does not parse reporting the parser's own code, an edit naming an attachment number the package does not carry or naming one twice, a plan applied to another package, and a result above the entry ceiling refused while planning. |
 | `crates/openkrx-core/tests/property_round_trip.rs` | The five [property-based tests](#property-based-tests) over generated requests: a written package read back with byte-identical attachments, the documented normalised document and no failing check; byte-identical output across two writes; a single-byte mutation refused or read back inside every ceiling; a request over one documented ceiling refused with that ceiling's code; and every written name accepted by the extraction planner. Its strategies live in `crates/openkrx-core/tests/support/strategies.rs`. |
 | `crates/openkrx-core/tests/property_repack.rs` | The six [property-based tests](#property-based-tests) over repacking: an empty edit reproducing the package byte for byte, an add and the removal of exactly those numbers restoring it, the one documented asymmetry where a dispatch that carried no `MELLEKLETEK` container gains an empty one and nothing else, every attachment a valid edit did not name reading back byte-identical with no failing structural check, an edit naming an attachment the package does not carry refused with its `repack.invalid.*` code, and planning the same package twice deciding the same thing. Shares `crates/openkrx-core/tests/support/strategies.rs` with the writer properties. |
+| `crates/openkrx-core/tests/differential_inflate.rs` | The [differential inflate](#differential-inflate) comparison: every committed `.krx` fixture, every retained fuzzing regression, packages the synthetic writer builds, and every deflate level the compressor accepts, each entry decoded by the reader and by an independent reference decoder and asserted byte-identical, with the two properties over generated payloads and the three decoded-byte ceilings shown to be what refused a package rather than a disagreement between the decoders. |
 | `crates/openkrx-core/tests/scaling_guard.rs` | The [scaling guard](#the-scaling-guard): `archive::inventory` at 4 MiB and 64 MiB of stored entries, `extract::plan` at 32 and 256 entries with long Unicode names, and `profile::check` at 32 and 254 referenced attachments, each asserted to cost no more than 32 times as much at the ceiling as at the small size. It measures wall time, so it holds a shape rather than a number. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
@@ -679,6 +680,63 @@ passes.
 Property tests are not a mutation-testing target: `cargo mutants` mutates
 `crates/*/src/**` only, and everything here lives under `tests/`. See
 [mutation testing](#mutation-testing).
+
+## Differential inflate
+
+Deflate is the one algorithm the reader does not implement itself: the archive
+layer drives `miniz_oxide` and checks what comes out against a CRC and a set of
+ceilings. `crates/openkrx-core/tests/differential_inflate.rs` decodes the same
+streams a second time with
+[`zune-inflate`](https://crates.io/crates/zune-inflate) — a dev-dependency of
+`openkrx-core` alone, with default features off — and asserts the two agree.
+The reason that crate and not another is in
+[research.md](research.md#zune-inflate-as-a-reference-decoder).
+
+The test locates entries itself, with a plain central-directory walk that reads
+sizes from the central record and the data offset from the local header. That
+walk is a way to find compressed bytes, never a second opinion on whether a
+container is well formed: the reader's public surface reports what it decoded
+rather than what it decoded *from*, and a package the reader refused reports
+nothing at all, so a package refused over a ceiling can still be pointed at the
+reference decoder.
+
+Three things are asserted:
+
+- **Agreement.** Where the reader accepted an entry, the reference decoder
+  produces exactly the same bytes, and exactly as many as the entry reports
+  having counted in `decoded_size()`.
+- **Refusals are the ceilings.** Where the reader refused a package over
+  `max_entry_decoded_bytes`, `max_total_decoded_bytes` or
+  `max_compression_ratio`, the reference decoder — which runs under none of
+  openKRX's limits — is shown to produce output that crosses that same ceiling.
+  A refusal is therefore a limit doing its job rather than one decoder
+  disagreeing with the other about what the stream says.
+- **No silent acceptance of a broken stream.** Where the reader called a
+  deflate stream malformed, the reference decoder never returns more than the
+  declared size. It may well return *less*, or an error of its own: the two
+  implementations draw the line between "corrupt" and "truncated" differently
+  and neither is authoritative, so the assertion is deliberately the narrow
+  one.
+
+The corpus is everything the repository can produce:
+
+| Input | Where it comes from |
+| --- | --- |
+| Committed packages | Every `.krx` file under `tests/`, found by a recursive walk, so a package added later is covered without editing the test. |
+| The fuzzing seed corpus | `fuzz/seed.py` sorts `tests/fixtures/golden/*.krx` and writes each one unchanged as a seed for all three package-shaped targets, so the committed packages above *are* those seeds. Reproducing the walk in Rust covers them without an interpreter on the path. |
+| Retained fuzzing regressions | Every file under `fuzz/regressions/{inventory,structure,extract_plan}/`, which are archive images. Empty today, and covered the moment one is retained. |
+| Written packages | Stored and deflated entries built by the synthetic writer over five payload shapes, including the empty one. |
+| Every deflate level | Levels 0 to 10, which is how all three block types — stored, fixed Huffman and dynamic Huffman — are reached; the crate's own writers emit level 6 only. |
+| Generated payloads | Two [properties](#property-based-tests): random noise, a two-symbol alphabet and a five-symbol alphabet up to 16 KiB, compressed at every level and inflated by both decoders, and the same payloads written into a package and read back. |
+
+Both properties run 48 cases, overridable with `PROPTEST_CASES`, and persist a
+shrunk failing seed under `crates/openkrx-core/proptest-regressions/` like every
+other property here. The whole file runs in about a second.
+
+**What it cannot show.** The reference decoder is itself unverified. Two
+implementations agreeing is evidence, not proof: a stream both read the same
+wrong way would pass here, and neither is a conformance statement about RFC
+1951. What the test removes is the case where one decoder is wrong on its own.
 
 ## Fixture policy
 

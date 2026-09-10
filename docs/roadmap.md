@@ -198,8 +198,14 @@ list weakens the other; if one changes, change both in the same pull request.
   emit any such archive is unknown.
 - **Deflate correctness is inherited.** `miniz_oxide` is the only place
   where openKRX trusts an external implementation on hostile bytes. Its
-  output is CRC-checked and size-bounded, which limits the consequences but
-  does not remove the dependency.
+  output is CRC-checked, size-bounded, and now also compared against a second,
+  independent decoder over every package the repository can produce, at every
+  deflate level and over generated payloads — see [differential
+  inflate](testing.md#differential-inflate), which also shows each decoded-byte
+  refusal to be the ceiling rather than a disagreement between the two. What
+  that cannot show is that either decoder is right: the reference decoder is
+  itself unverified, so a stream both read the same wrong way still passes. The
+  dependency is narrowed, not removed.
 - **The limits are reasoned, not measured.** They were sized from what the
   format description implies, not from a corpus. A real package larger than
   a ceiling would be refused as over-limit, correctly by the contract and
