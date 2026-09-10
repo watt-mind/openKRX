@@ -161,8 +161,21 @@ Stated plainly, because the tests that would remove them do not exist yet.
 
 ## Private-corpus policy for maintainers
 
-No private-corpus harness exists. If one is ever introduced, these rules
-bind, and they bind the maintainer personally as well as the code.
+One private-corpus harness exists. `scripts/private-corpus.py` runs the built
+executable over a directory of real `.krx` packages the maintainer holds
+locally and prints aggregate counts alone: packages read, exit status and
+`error.code` per command, every structural check as check, outcome and
+code-or-rule, the root-prefix, metadata file-name casing, format-marker
+position and payload subdirectory spelling classes, and an entry-count
+histogram. Nothing invokes it — not `scripts/check.sh`, not CI, not
+`cargo test` — it refuses a directory inside the repository tree unless
+`--allow-in-repo` is given, and its `--self-test` proves against the
+committed synthetic fixtures that no planted file name, identifier or entry
+name reaches the output. [testing.md](testing.md#private-opt-in-corpus-check)
+says how to run it and how a finding becomes a rule.
+
+These rules bind that harness and any successor, and they bind the maintainer
+personally as well as the code.
 
 - **Opt-in and local.** Excluded from public CI, off by default, and never
   reachable by a default `cargo test`.

@@ -16,6 +16,23 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **An opt-in private-corpus harness that reports only aggregate counts.**
+  `scripts/private-corpus.py --bin <path> --dir <directory>` runs the built
+  executable's `inspect`, `list` and `validate-structure` over a
+  maintainer-local directory of real `.krx` packages and prints counts alone:
+  packages read, exit status and `error.code` and `error.category` per
+  command, every structural check as check, outcome and code-or-rule, the
+  root-prefix, metadata file-name casing, format-marker position and payload
+  subdirectory spelling classes, an entry-count histogram, and the runs that
+  timed out or produced no envelope. It never prints a file name, entry name,
+  path, metadata value, hash, timestamp or identifier — every label is a
+  fixed class, check, outcome, rule or stable code — and it refuses a
+  directory inside the repository tree unless `--allow-in-repo` is given.
+  Nothing invokes it: not `scripts/check.sh`, not CI, not `cargo test`.
+  `--self-test` copies the five committed golden fixtures under loud file
+  names, asserts the buckets they must produce, and asserts that no canary —
+  file name, temporary directory, synthetic identifier, attachment name or
+  metadata entry name — reaches the output.
 - **An embedded agent skill, and the `skill` command.**
   `crates/openkrx-cli/skills/openkrx/SKILL.md` states the rules an AI agent
   follows when driving openkrx: bounded local reading, no conformance,

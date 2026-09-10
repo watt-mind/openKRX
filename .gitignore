@@ -1,4 +1,6 @@
 /target/
+# The conventional local corpus directory for scripts/private-corpus.py.
+# A real package never becomes a tracked file.
 /samples/
 /refs/
 /tmp/

@@ -290,8 +290,13 @@ Public fixtures are synthetic originals under their own
 [licence](tests/fixtures/LICENSE). Do not commit private files, secrets,
 `.env` files, private keys, or complete PEM private-key armour lines.
 Do not derive public fixtures from private submissions. Secret-scanner
-allowlisting is prohibited. Local private-corpus checks, if explicitly
-introduced later, may report only counts and stable error-code buckets.
+allowlisting is prohibited. Local private-corpus checks may report only
+counts and stable error-code buckets: the one that exists,
+`scripts/private-corpus.py`, is opt-in, is run by no test and no CI job, and
+prints class counts, check outcomes and stable codes alone — never a file
+name, entry name, path, metadata value, hash, timestamp or identifier. The
+rules that bind it, and the maintainer running it, are in
+[docs/roadmap.md](docs/roadmap.md#private-corpus-policy-for-maintainers).
 
 ## Interpretation boundary
 
