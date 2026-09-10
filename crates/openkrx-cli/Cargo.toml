@@ -23,6 +23,14 @@ clap_mangen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+# Linux only: `openat2` with `RESOLVE_BENEATH` is what makes an extraction's
+# path resolution race-resistant, and no portable standard-library call
+# offers it. `default-features = false` keeps the `linux_raw` backend, so no
+# C library is linked, and the two features are the filesystem calls and the
+# `std` types they are handed. See `docs/research.md`.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
+
 [dev-dependencies]
 # The subprocess tests build every package they read from the core crate's
 # test-only writer. No binary fixture is committed and no released build

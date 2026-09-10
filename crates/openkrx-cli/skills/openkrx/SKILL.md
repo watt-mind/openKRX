@@ -394,13 +394,25 @@ and no timestamp from the package. Extracting a file is not a statement that
 it is authentic or safe to open.
 
 On success, `data` carries `files_written`, `directories_created`,
-`bytes_written`, `items[]` and `marker_removed`. Each element of `items[]`
+`bytes_written`, `items[]`, `marker_removed` and
+`path_resolution_fallback`. Each element of `items[]`
 has `entry_index`, `path` (relative to the destination, joined with `/`) and
 `bytes`. `items[].path` is the only place outside `inspect` where a name
 from the package reaches the output, and it appears on success only.
 `marker_removed` is `true` in every successful report; assert it rather than
 assume it. The destination you named is never echoed back — you already know
 it.
+
+`path_resolution_fallback` says whether the run resolved its paths more
+weakly than it asked to. On Linux, openkrx has the kernel resolve every
+destination path beneath one directory descriptor with `openat2`, so a path
+component replaced while the command runs is refused rather than followed;
+a kernel too old for that call sends the run down the portable
+check-then-create path and reports `true`. It is `false` both when that
+resolution was used and on a platform where there is no stronger mode to ask
+for, so do not read `false` as "this platform is race-resistant" — read
+`true` as "this run gave something up, and the destination should be a
+directory only the caller can write to".
 
 **The marker.** While a run is in progress the destination holds
 `.openkrx-extract.partial`. It is removed when the run finishes, so a

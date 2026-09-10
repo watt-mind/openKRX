@@ -1,14 +1,17 @@
 //! Creating the marker, the directories and the files, in plan order.
 //!
-//! Every creation here is exclusive. Directories are created one level at a
-//! time with `create_dir`, never `create_dir_all`, so no parent is invented
-//! behind the caller's back, and each one is re-examined with
-//! `symlink_metadata` after creation. Files are created with
-//! `OpenOptions::create_new`, which is `O_EXCL` on Unix and
-//! `CREATE_NEW` on Windows: it fails rather than truncating, and it does not
-//! follow a symbolic link at the leaf. Preflight already refused an existing
-//! path; `create_new` is the second, narrower guard that closes the window
-//! between the two.
+//! Every creation here is exclusive, and every one of them goes through the
+//! [`Resolver`], which owns how a path is resolved: beneath a directory
+//! descriptor with `openat2` on Linux, and by path everywhere else. Nothing in
+//! this module opens a path itself, so neither arm can drift from the other.
+//!
+//! Directories are created one level at a time, never `create_dir_all`, so no
+//! parent is invented behind the caller's back. Files are created with
+//! `O_CREAT | O_EXCL | O_NOFOLLOW`, or the `CREATE_NEW` that stands for it on
+//! Windows: it fails rather than truncating, and it does not follow a symbolic
+//! link at the leaf. Preflight already refused an existing path; exclusive
+//! creation is the second, narrower guard that closes the window between the
+//! two.
 //!
 //! Nothing is copied from the archive except the bytes. No mode bit, no
 //! timestamp and no attribute is carried across: a package is untrusted input,
@@ -20,19 +23,16 @@
 //! Each successful creation is recorded in the [`Ledger`] before the next step
 //! begins, so a failure at any point can undo exactly this run's work.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
 use openkrx_core::{ExtractionPlan, archive::ArchiveInventory};
 
 use super::cleanup::Ledger;
-use super::preflight::{is_link, join};
+use super::preflight::join;
+use super::resolver::{Directory, Resolver};
 use crate::commands::extract::{ExtractData, WrittenView};
-use crate::exit::{
-    Failure, OUTPUT_IO, OUTPUT_NOT_A_DIRECTORY, OUTPUT_PARTIAL_MARKER_PRESENT,
-    OUTPUT_SYMLINK_IN_PATH,
-};
+use crate::exit::{Failure, OUTPUT_IO};
 
 /// Create the marker that says an extraction into this destination is running.
 ///
@@ -40,19 +40,9 @@ use crate::exit::{
 ///
 /// `output.partial_marker_present` when another run got there first, and
 /// `output.io` when the destination refuses the file.
-pub fn marker(path: &Path, ledger: &mut Ledger) -> Result<(), Failure> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                Failure::output(OUTPUT_PARTIAL_MARKER_PRESENT)
-            } else {
-                Failure::output(OUTPUT_IO)
-            }
-        })?;
-    ledger.file(path.to_path_buf());
+pub fn marker(resolver: &Resolver, destination: &Path, ledger: &mut Ledger) -> Result<(), Failure> {
+    resolver.marker(destination)?;
+    ledger.file(destination.join(super::MARKER_NAME));
     Ok(())
 }
 
@@ -63,13 +53,22 @@ pub fn marker(path: &Path, ledger: &mut Ledger) -> Result<(), Failure> {
 /// `output.io`. The run has written every file it planned by this point, so
 /// the failure is reported rather than ignored: a destination still carrying
 /// the marker must be read as incomplete.
-pub fn remove_marker(path: &Path, ledger: &mut Ledger) -> Result<(), Failure> {
-    std::fs::remove_file(path).map_err(|_| Failure::output(OUTPUT_IO))?;
-    ledger.forget(path);
+pub fn remove_marker(
+    resolver: &Resolver,
+    destination: &Path,
+    ledger: &mut Ledger,
+) -> Result<(), Failure> {
+    resolver.remove_marker(destination)?;
+    ledger.forget(&destination.join(super::MARKER_NAME));
     Ok(())
 }
 
 /// Create every planned directory, parent before child, then every file.
+///
+/// `between` is called once, after the last directory and before the first
+/// file. It does nothing in a real run: it is the seam the race test plants a
+/// symbolic link through, so that the window this writer has to survive is
+/// exercised rather than described.
 ///
 /// # Errors
 ///
@@ -80,26 +79,25 @@ pub fn write(
     inventory: &ArchiveInventory<'_>,
     destination: &Path,
     plan: &ExtractionPlan,
+    resolver: &Resolver,
     ledger: &mut Ledger,
+    between: &mut dyn FnMut(),
 ) -> Result<ExtractData, Failure> {
-    let directories_created = directories(destination, plan, ledger)?;
+    let directories_created = directories(destination, plan, resolver, ledger)?;
+    between();
     let mut data = ExtractData {
         files_written: 0,
         directories_created,
         bytes_written: 0,
         items: Vec::with_capacity(plan.len()),
         marker_removed: false,
+        path_resolution_fallback: resolver.fell_back(),
     };
     for item in plan.items() {
         let entry = item.entry_index();
-        let path = join(destination, item.components());
         let bytes = inventory.entry_bytes(entry)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|_| Failure::output_at(OUTPUT_IO, entry))?;
-        ledger.file(path);
+        let mut file = resolver.file(destination, item.components(), entry)?;
+        ledger.file(join(destination, item.components()));
         file.write_all(&bytes)
             .map_err(|_| Failure::output_at(OUTPUT_IO, entry))?;
         data.files_written = data.files_written.saturating_add(1);
@@ -116,36 +114,35 @@ pub fn write(
 /// Create the plan's directories, and count the ones this run created.
 ///
 /// The plan lists every implicit parent, deduplicated and sorted so a parent
-/// precedes its child, which is why one `create_dir` per entry suffices. A
+/// precedes its child, which is why one creation per entry suffices. A
 /// directory that already exists was accepted by preflight as a real
 /// directory, and is not counted or recorded: this run did not create it, so
 /// this run must not remove it.
+///
+/// A refusal that *did* create the directory first — the portable arm reading
+/// back a link someone put there between the creation and the check — records
+/// it before returning, so the undo pass removes it. The count is not raised:
+/// it reports a completed run, and this run is about to fail.
 fn directories(
     destination: &Path,
     plan: &ExtractionPlan,
+    resolver: &Resolver,
     ledger: &mut Ledger,
 ) -> Result<u32, Failure> {
     let mut created = 0_u32;
     for components in plan.directories() {
-        let path = join(destination, components);
-        match std::fs::create_dir(&path) {
-            Ok(()) => {
-                ledger.directory(path.clone());
+        match resolver.directory(destination, components) {
+            Ok(Directory::Created) => {
+                ledger.directory(join(destination, components));
                 created = created.saturating_add(1);
             }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(Failure::output(OUTPUT_IO)),
-        }
-        // Re-read after creating it. The check costs one `lstat` per planned
-        // directory and closes the case where what is at the path now is not
-        // what preflight saw: it is the writer's own confirmation that it is
-        // about to descend into a real directory rather than through a link.
-        let metadata = std::fs::symlink_metadata(&path).map_err(|_| Failure::output(OUTPUT_IO))?;
-        if is_link(&metadata) {
-            return Err(Failure::output(OUTPUT_SYMLINK_IN_PATH));
-        }
-        if !metadata.is_dir() {
-            return Err(Failure::output(OUTPUT_NOT_A_DIRECTORY));
+            Ok(Directory::AlreadyThere) => {}
+            Err(error) => {
+                if error.created {
+                    ledger.directory(join(destination, components));
+                }
+                return Err(error.failure);
+            }
         }
     }
     Ok(created)

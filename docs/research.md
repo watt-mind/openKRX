@@ -152,6 +152,34 @@ a package depends on either. The cost of that choice is that the bytes follow
 the dependency version, which is why neither command has a golden case; see
 [the golden output contract](testing.md#golden-output-contract).
 
+### `rustix` on Linux, for `openat2` and nothing else
+
+`extract` writes into a directory the caller names, and until this change it
+checked each path and then created it. A principal with write access to that
+destination can replace a component between the two steps, and the creation
+follows the replacement out of the destination. No portable standard-library
+call closes that window: `symlink_metadata` answers a question about the
+past, and `O_NOFOLLOW` covers only the last component. `openat2(2)`, which
+Linux 5.6 added, does close it — `RESOLVE_BENEATH` with `RESOLVE_NO_SYMLINKS`
+makes the kernel decide at the moment of the operation.
+
+Reaching that syscall means either raw bindings, which the workspace's
+`unsafe_code = "forbid"` rules out, or a crate that has already written them.
+`rustix` is that crate: `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT`,
+which `deny.toml` accepts on the MIT arm; `default-features = false` keeps the
+`linux_raw` backend, so no C library is linked and the only crates it brings
+are `bitflags` and `linux-raw-sys`; and the two features it is given, `fs` and
+`std`, are the filesystem calls and the standard types they are handed. It is
+declared under `[target.'cfg(target_os = "linux")'.dependencies]`, so no other
+platform's build or lockfile resolution sees it, and it is used from exactly
+one module, `extract/linux_fd.rs`, which does nothing but make the calls.
+
+The alternative considered and rejected was doing without: keeping the
+check-then-create path everywhere and continuing to state the race as a
+residual risk. It was rejected because the risk is one a caller cannot
+mitigate except by controlling the destination directory, and the platform
+most openKRX runs on can simply not have it.
+
 ### No vendored XSD
 
 `KER_META_V0_9.xsd` is embedded in a posta.hu document that states only
