@@ -33,7 +33,12 @@ and such a change is recorded here explicitly.
   job. Their bytes follow the `clap_complete` and `clap_mangen` versions
   rather than openKRX's own contract, so neither has a golden case;
   `crates/openkrx-cli/tests/completions.rs` holds what does matter, deriving
-  the subcommand list from the binary's own `--help`.
+  the subcommand list from the binary's own `--help`. The release job now also
+  marks the draft as a pre-release whenever the tag carries a hyphen — the
+  SemVer pre-release form, so `v0.1.0-alpha.1` is one and `v0.1.0` is not —
+  rather than leaving the flag to the person publishing the draft, who cannot
+  undo a stable release once tooling has fetched it. The draft is still created
+  by the workflow and still published by a human.
 
 - **Reparse-point confinement is exercised on Windows CI.** The output rules
   that keep `extract`, `create` and `repack` inside the destination the caller

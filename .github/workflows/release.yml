@@ -527,12 +527,29 @@ jobs:
             echo "::error::a release for ${TAG} already exists; delete it or pick another tag"
             exit 1
           fi
+          # A SemVer pre-release carries a hyphen in its version — the
+          # `plan` job has already checked the tag against the workspace
+          # version, so `v0.1.0-alpha.1` is a pre-release and `v0.1.0` is
+          # not. The marker is set here rather than left to the publisher,
+          # because a draft published without it is a stable release the
+          # moment the button is pressed, and there is no undo a user's
+          # tooling would notice.
+          prerelease=()
+          case "$TAG" in
+            *-*) prerelease=(--prerelease) ;;
+          esac
+          if [ "${#prerelease[@]}" -gt 0 ]; then
+            echo "${TAG} is a SemVer pre-release; the draft is marked --prerelease"
+          else
+            echo "${TAG} is not a pre-release; the draft carries no marker"
+          fi
           # --draft, never --latest, never published here. The maintainer
           # reads the body and the assets and presses publish.
           gh release create "$TAG" \
             --draft \
+            "${prerelease[@]}" \
             --title "openKRX ${VERSION}" \
             --notes-file notes/release-notes.md \
             dist/SHA256SUMS dist/openkrx-*
-          gh release view "$TAG" --json isDraft,assets \
-            --jq '"draft: \(.isDraft)  assets: \(.assets | length)"'
+          gh release view "$TAG" --json isDraft,isPrerelease,assets \
+            --jq '"draft: \(.isDraft)  prerelease: \(.isPrerelease)  assets: \(.assets | length)"'
