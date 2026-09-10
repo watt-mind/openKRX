@@ -303,6 +303,58 @@ why, and a removed, renamed or redefined envelope field also raises
 `update` to make a red build green, without that justification, is the one
 thing this gate exists to prevent.
 
+## The envelope schema
+
+The goldens pin the **bytes** of 26 JSON envelopes. They say nothing about the
+envelope a case does not happen to cover, and a consumer reading them has to
+infer which fields are always there and which are optional.
+[docs/schema/openkrx-envelope.v1.schema.json](schema/openkrx-envelope.v1.schema.json)
+states that instead — one JSON Schema (draft 2020-12) with a `$defs` entry for
+the failure envelope and for each command's success `data` — and three gates
+keep it true:
+
+- **`scripts/check-schema.py`** validates every `tests/golden/<case>/stdout`
+  that parses as JSON, and then six failure envelopes it renders by running
+  the executable over synthetic inputs in a temporary directory: an input that
+  does not exist, for each of the five commands that read one, and bytes that
+  are not an archive. Those cover refusal shapes no golden records. It reports
+  the first violation with the case name, the JSON Pointer into the instance
+  and the schema path that rejected it, and exits non-zero.
+- **CI** runs it in the `Golden output contract` job, after the golden check
+  and against the same release binary that step built, with
+  `jsonschema==4.23.0` installed in that step. `bash scripts/check.sh` runs it
+  too when `jsonschema` is importable and prints a skip line naming the
+  install command when it is not — the package is a repository tool, and no
+  Rust dependency was added for this check.
+- **Four unit tests** in `crates/openkrx-cli/src/render/json.rs` read the
+  schema back with `include_str!` and compare what it names with what the
+  build has: the `schema_version` it pins against `SCHEMA_VERSION`, its
+  command list against `capabilities().operations` plus `capabilities`, the
+  heads of its code pattern against the `HEADS` line of
+  `scripts/check-codes.py`, and its category list against `Category::as_str`.
+  Without them a renamed command or a new code head would leave the schema and
+  the goldens agreeing with each other while both drifted away from the
+  executable.
+
+Run it locally against the same build the goldens use:
+
+```sh
+python3 -m pip install --user jsonschema==4.23.0
+cargo build --release --locked -p openkrx-cli
+python3 scripts/check-schema.py --bin target/release/openkrx
+```
+
+Without `--bin` the script looks for `target/release/openkrx` and then
+`target/debug/openkrx`, and validates the goldens alone if neither is there,
+saying so rather than reporting a pass it did not make.
+
+The schema is part of the contract rather than a description of it: it is
+updated in the same pull request as any envelope change, and a removed,
+renamed or redefined field raises `schema_version` there too. Loosening a
+`required` list, or opening one of the two closed objects, to make this check
+pass is the same mistake as running `golden.py update` to make the build
+green.
+
 ## Mutation testing
 
 Coverage says a line ran. It does not say a test would notice the line doing

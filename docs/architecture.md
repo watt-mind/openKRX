@@ -1175,6 +1175,37 @@ name, and a name that is not valid UTF-8 is reported as `name_hex` rather
 than as an invented string. Output is bounded without a further rule, because
 the inventory refuses more than 256 entries and a name longer than 255 bytes.
 
+### The published schema
+
+The envelope described in the rest of this section also exists in
+machine-readable form, as a JSON Schema (draft 2020-12):
+[docs/schema/openkrx-envelope.v1.schema.json](schema/openkrx-envelope.v1.schema.json).
+It defines the failure shape and each command's success `data`, and it is the
+document a consumer generates types from or validates against; the prose here
+stays the reason for each field. It describes the executable in this
+repository and states nothing about any external format, profile or service.
+
+**The compatibility rule is `schema_version`'s rule.** Adding a field does not
+raise `schema_version`, so every report object leaves `additionalProperties`
+open and a consumer must ignore what it does not recognise; removing,
+renaming or redefining a field raises it, and the schema is republished
+alongside the envelope in the same change — never afterwards. Two objects are
+closed instead, and deliberately: `error` and `cleanup`. A diagnostic may
+carry only a stable code, its category, an entry index, a JSON Pointer into a
+document the caller wrote and counts — never an input path, an entry name or a
+value from a package — so refusing an unknown field there turns the privacy
+rule stated below into something a validator can check.
+
+`scripts/check-schema.py` validates every JSON golden under `tests/golden/`
+and a small set of failure envelopes it renders by running the executable, and
+CI runs it in the `Golden output contract` job. Four unit tests in
+`crates/openkrx-cli/src/render/json.rs` read the schema back and assert that
+the `schema_version` it pins, the commands, the stable-code heads and the
+diagnostic categories it names are the ones this build actually has, so the
+schema cannot drift away from the executable while still agreeing with the
+goldens. See
+[the envelope schema](testing.md#the-envelope-schema) for what each gate does.
+
 ### The successful envelope
 
 ```json
