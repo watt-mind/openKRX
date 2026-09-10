@@ -551,10 +551,76 @@ of which was found; see
 
 ## Private-corpus policy
 
-No private-corpus harness exists, and none may be added casually. If one is
-ever authorised, the rules are in
+One private-corpus harness exists, the opt-in corpus check below, and no
+second one may be added casually. The rules it obeys are in
 [roadmap.md](roadmap.md#private-corpus-policy-for-maintainers) and
 [SECURITY.md](../SECURITY.md#data-and-key-policy): opt-in, excluded from
 public CI, and reporting aggregate counts and stable error-code buckets
 only. No filename, path, metadata field, payload, certificate identity or
 hash may enter a report, an issue, a commit or a pull request.
+
+## Private opt-in corpus check
+
+`scripts/private-corpus.py` runs the built executable over a maintainer-local
+directory of real `.krx` packages and prints counts alone. It is opt-in: no
+test, no `scripts/check.sh` run and no CI job invokes it. It exists so a
+maintainer can learn which of the layouts left open by rules A19, A20, M10
+and M12 real producers actually emit, without a private byte reaching the
+repository.
+
+```sh
+cargo build --release --locked -p openkrx-cli
+python3 scripts/private-corpus.py --bin target/release/openkrx --dir ~/corpus
+```
+
+It reads `*.krx` case-insensitively, in the named directory alone; add
+`--recursive` to descend. Each file is passed to `inspect --json`,
+`list --json` and `validate-structure --json` under a per-file, per-command
+timeout (`--timeout`, 60 seconds by default). A directory inside the
+repository tree is refused unless `--allow-in-repo` is given; the
+conventional place for a corpus is the gitignored `/samples/`, and anywhere
+outside the tree is better.
+
+What it prints, and the whole of what it prints: the number of packages read;
+the exit status per command; the `error.code` and `error.category` per
+command; every structural check as check, outcome and code-or-rule; the
+root-prefix class (`KRX/OCD/`, `OCD/`, none, other); the metadata file-name
+casing class; the format-marker position class; the payload subdirectory
+spelling class (`ID-<n>`, `ID<n>`, `ID_<n>`, other); the entry-count
+histogram in the buckets 1-4, 5-9, 10-49 and 50+; and the runs that timed out
+or produced no envelope.
+
+What it never prints: a file name, an entry name, a path, a metadata value, a
+hash, a timestamp or an identifier. Every label in the report is a fixed
+string written in the script — a class name, a check name, an outcome, a rule
+identifier or a stable dotted code the CLI already documents. A value read
+out of a package is classified and then dropped; even an error is counted
+rather than rendered, because an exception's text can carry the path it
+failed on. The report's own header says as much, and it is for local reading:
+it does not belong in an issue, a pull request, a commit or a comment.
+
+The self-test is what keeps that promise honest:
+
+```sh
+python3 scripts/private-corpus.py --self-test --bin target/release/openkrx
+```
+
+It copies the five committed golden fixtures into a temporary directory under
+deliberately loud file names, runs the same report over them, asserts the
+bucket counts those fixtures must produce — five packages, the exit statuses
+0, 3, 4, 6 and 8 where each fixture earns them, two `KRX/OCD/` prefixes
+against one package with none, `root_prefix unresolved A19` once — and then
+asserts that none of a canary set appears anywhere in the output: the planted
+file names, the temporary directory, the synthetic consignment identifier,
+the synthetic attachment names and the metadata entry name. A canary in the
+output is a privacy bug, and the run exits non-zero.
+
+A finding is turned into a rule, never into a document. Cite the *class
+count* in [profile.md](profile.md) — "N of M local packages carry the `KRX/`
+prefix, and none carried another" — and let that sentence be the evidence the
+rule moves on. The package that showed it is not named, not quoted, not
+attached and not turned into a fixture: when a real package reveals a
+behaviour worth testing, the fixture is written from scratch to exhibit the
+property. Those rules bind the maintainer personally as well as the code, and
+are stated in full in
+[roadmap.md](roadmap.md#private-corpus-policy-for-maintainers).
