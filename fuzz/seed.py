@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -61,20 +62,38 @@ PACKAGE_TARGETS = ("inventory", "structure", "extract_plan")
 METADATA_SUFFIX = "Metalayer/KULDEMENY_META.xml"
 
 
+class SeedingFailure(Exception):
+    """A fixture could not be read far enough to derive the seeds it should.
+
+    The message names the fixture by its index in `packages()` and never by
+    path: like every other diagnostic in this repository it is written for a
+    CI log, and an index is enough for anyone holding the same checkout.
+    """
+
+
 def packages() -> list[Path]:
     """Every committed `.krx` fixture, in a stable order."""
     return sorted(FIXTURES.glob("*.krx"))
 
 
-def members(package: Path) -> dict[str, bytes]:
+def members(package: Path, index: int) -> dict[str, bytes]:
     """The entries of a package, or nothing when it is not a readable ZIP.
 
     `malformed.krx` is deliberately not a container; it is still a seed for
     the byte-string targets, and simply contributes no extracted member here.
+
+    A container that opens but holds a member whose deflate stream is corrupt
+    is a different thing entirely — a fixture that is not what it claims to
+    be — and is reported as a seeding failure rather than silently yielding an
+    empty set of members.
     """
     try:
         with zipfile.ZipFile(package) as archive:
             return {info.filename: archive.read(info) for info in archive.infolist()}
+    except zlib.error as error:
+        raise SeedingFailure(
+            f"fixture {index} holds a member that does not decompress: {error}"
+        ) from None
     except (zipfile.BadZipFile, OSError):
         return {}
 
@@ -107,14 +126,14 @@ def build() -> dict[str, int]:
         (CORPUS / target).mkdir(parents=True, exist_ok=True)
 
     written = {target: 0 for target in TARGETS}
-    for package in packages():
+    for index, package in enumerate(packages()):
         stem = package.stem
         raw = package.read_bytes()
         for target in PACKAGE_TARGETS:
             write(target, f"fixture-{stem}", raw)
             written[target] += 1
 
-        entries = members(package)
+        entries = members(package, index)
         document = metadata_document(entries)
         if document is not None:
             # The parser's own input, not the container around it: without
@@ -183,7 +202,13 @@ def main() -> int:
     if not FIXTURES.is_dir():
         print(f"no fixture directory at {FIXTURES}", file=sys.stderr)
         return 1
-    build()
+    try:
+        build()
+    except SeedingFailure as failure:
+        # One line on stderr, not a traceback: the caller is a CI step whose
+        # log is read by whoever the campaign wakes up.
+        print(f"seeding failed: {failure}", file=sys.stderr)
+        return 1
     report(counts())
     return 0
 

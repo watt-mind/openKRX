@@ -35,8 +35,30 @@ const IMAGE_ENTRIES: usize = 8;
 const MAX_ENTRIES: usize = 256;
 /// Decoded bytes each entry of the count-bound package carries.
 const SMALL_ENTRY_BYTES: usize = 4 * 1024;
+/// Bytes reserved per stored entry for its local header, name and directory
+/// record, subtracted from that entry's share of a requested image size.
+const STORED_OVERHEAD: usize = 256;
+/// The same reservation for a deflated entry, which also has to absorb the
+/// expansion deflate adds to content it cannot shrink.
+const DEFLATED_OVERHEAD: usize = 8 * 1024;
 
 // --------------------------------------------------------------- the packages
+
+/// One entry's payload in an image of about `bytes`, less `overhead`.
+///
+/// `saturating_sub` rather than `-`: every size a benchmark asks for is
+/// megabytes, but a smaller one added later would underflow here and panic in a
+/// debug build with nothing but an arithmetic message. The assertion is what
+/// rejects such a size, and it names the size and the reservation.
+fn per_entry_bytes(bytes: usize, overhead: usize) -> usize {
+    let per_entry = (bytes / IMAGE_ENTRIES).saturating_sub(overhead);
+    assert!(
+        per_entry > 0,
+        "an image of {bytes} bytes leaves no payload across {IMAGE_ENTRIES} entries \
+         reserving {overhead} bytes each"
+    );
+    per_entry
+}
 
 /// The name of the payload entry at `index`, in the documented layout.
 fn payload_name(index: usize) -> String {
@@ -49,7 +71,7 @@ fn payload_name(index: usize) -> String {
 /// is written verbatim, so its content changes nothing the reader does with it,
 /// and generating 64 MiB of xorshift would dominate the setup.
 fn stored_image(bytes: usize) -> Vec<u8> {
-    let per_entry = bytes / IMAGE_ENTRIES - 256;
+    let per_entry = per_entry_bytes(bytes, STORED_OVERHEAD);
     let entries = (0..IMAGE_ENTRIES)
         .map(|index| {
             let data: Vec<u8> = (0..per_entry)
@@ -68,7 +90,7 @@ fn stored_image(bytes: usize) -> Vec<u8> {
 /// reader's compression-ratio ceiling out of the measurement, which is the
 /// point — this measures inflate, not a refusal.
 fn deflated_image(bytes: usize) -> Vec<u8> {
-    let per_entry = bytes / IMAGE_ENTRIES - 8 * 1024;
+    let per_entry = per_entry_bytes(bytes, DEFLATED_OVERHEAD);
     let entries = (0..IMAGE_ENTRIES)
         .map(|index| {
             let data = openkrx_core::synthetic::pseudo_random(per_entry);

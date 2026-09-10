@@ -533,6 +533,20 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **Missing documentation now fails the build.** Both crate roots deny
+  `missing_docs`; `openkrx-core` also denies
+  `rustdoc::broken_intra_doc_links` and `rustdoc::private_intra_doc_links`,
+  so a link in the published surface that resolves only to a private item is
+  an error rather than a silently broken link. `openkrx-cli` is a binary
+  whose every item is private, which `missing_docs` alone can never reach, so
+  it denies `clippy::missing_docs_in_private_items` in its place and every
+  item it flagged — the argument types, the subcommand list, the reader
+  discriminant, the undo ledger's record and every field of the JSON
+  envelope and its diagnostic — now carries a doc comment. The crate-level
+  documentation of both crates now names where the stable code catalogue, the
+  profile evidence and the CLI contract live. Comments and lint attributes
+  only: no behaviour changed.
+
 - **The failed JSON envelope may carry `attachment_number`.** `repack` sets
   it when a refusal concerns one attachment of the package being edited: it
   is that attachment's `CSATOLMANY_SZAMA`, counted from 1, and is a different

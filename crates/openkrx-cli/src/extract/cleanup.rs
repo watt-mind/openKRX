@@ -52,6 +52,11 @@ impl Cleanup {
 /// Every path this run created, in creation order.
 #[derive(Debug, Default)]
 pub struct Ledger {
+    /// The paths this run created, oldest first, each with what it is. The
+    /// undo pass walks this in reverse so a directory is removed only after
+    /// everything the run put inside it, and it holds only paths this run
+    /// created itself: nothing found already in place is ever recorded, and
+    /// so nothing found already in place can ever be removed.
     created: Vec<(PathBuf, Created)>,
 }
 
