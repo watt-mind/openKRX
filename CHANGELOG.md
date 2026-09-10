@@ -621,6 +621,25 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **Every workflow artifact now sets an explicit retention, and the required
+  check list is reconciled with branch protection (PC-04).** The one-day
+  baseline applies to the run-scoped intermediates: the `fuzz-artifacts` crash
+  upload in `ci.yml`, whose durable copy is `fuzz/regressions/`, and the
+  `release-notes`, `archive-<target>` and `checksums` uploads in `release.yml`,
+  whose durable home is the draft release. `fuzz.yml`'s `fuzz-campaign` and
+  `mutants.yml`'s `mutants-out` stay at 14 days as a documented exception owned
+  by the repository maintainer — both lanes are weekly, so a run's evidence has
+  to outlive the next scheduled run, the campaign artifact is the only
+  surviving copy of the corpus when a campaign fails, and the mutants report is
+  what the per-crate floors are argued from. The rationale is repeated as a
+  comment beside each setting and tabulated under "Artifact retention" in
+  `docs/releasing.md`. Alongside it, `.factory.yaml`'s
+  `merge_ci.required_checks` gained `Fuzz (build only)` and `Commit hygiene`,
+  the two CI-workflow contexts branch protection requires that the list was
+  missing; the `security.yml` contexts stay out of the list because
+  `merge_ci.workflow` scopes it to the CI workflow, and `docs/releasing.md`
+  now describes the required set by reference instead of naming a count.
+
 - **The weekly fuzz campaign is cumulative, and retained crashes are replayed
   on every push (KRX-11).** `.github/workflows/fuzz.yml` used to reseed from
   the fixtures every week and throw the result away when the runner shut down.

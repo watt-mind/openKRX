@@ -150,6 +150,7 @@ jobs:
         with:
           name: release-notes
           path: release-notes.md
+          retention-days: 1
           if-no-files-found: error
 
   build:
@@ -258,6 +259,7 @@ jobs:
           path: |
             dist/${{ steps.archive.outputs.archive }}
             dist/${{ steps.archive.outputs.archive }}.sha256
+          retention-days: 1
           if-no-files-found: error
 
   smoke:
@@ -445,15 +447,19 @@ jobs:
           cd dist
           rm -f ./*.sha256 SHA256SUMS
           # Written beside the archives and moved in, not redirected into
-          # place: `> SHA256SUMS` creates the file before `ls` runs, and the
-          # file would then list itself with the hash of zero bytes.
-          ls -1 | LC_ALL=C sort | xargs sha256sum > ../SHA256SUMS
+          # place: `> SHA256SUMS` creates the file before `find` runs, and
+          # the file would then list itself with the hash of zero bytes.
+          # NUL-delimited throughout, so a name with a space or a newline in
+          # it reaches `sha256sum` whole.
+          find . -maxdepth 1 -type f -printf '%P\0' \
+            | LC_ALL=C sort -z | xargs -0 sha256sum > ../SHA256SUMS
           mv ../SHA256SUMS SHA256SUMS
           cat SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: checksums
           path: dist/SHA256SUMS
+          retention-days: 1
           if-no-files-found: error
 
   attest:

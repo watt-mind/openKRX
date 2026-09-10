@@ -257,6 +257,7 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
+          retention-days: 1
           if-no-files-found: ignore
   hygiene:
     name: Commit hygiene
@@ -348,14 +349,14 @@ jobs:
             echo '## API compatibility (informational)'
             echo
             if [ "$CHANGED" != 'true' ]; then
-              echo 'SKIPPED: `crates/openkrx-core`, `Cargo.toml` and `Cargo.lock` are unchanged against the base commit, so there is no public API to compare.'
+              echo "SKIPPED: \`crates/openkrx-core\`, \`Cargo.toml\` and \`Cargo.lock\` are unchanged against the base commit, so there is no public API to compare."
             else
               case "$OUTCOME" in
                 success)
-                  echo 'PASS: `cargo-semver-checks` found no breaking change in the public API of `openkrx-core` against the base commit.'
+                  echo "PASS: \`cargo-semver-checks\` found no breaking change in the public API of \`openkrx-core\` against the base commit."
                   ;;
                 failure)
-                  echo 'BREAK: `cargo-semver-checks` reported a public API change in `openkrx-core` against the base commit. It does not fail the build, because nothing is published and there is no downstream build to break; the report below is what one would have seen.'
+                  echo "BREAK: \`cargo-semver-checks\` reported a public API change in \`openkrx-core\` against the base commit. It does not fail the build, because nothing is published and there is no downstream build to break; the report below is what one would have seen."
                   ;;
                 *)
                   # `skipped` or `cancelled`: the toolchain, the cache or the

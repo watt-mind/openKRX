@@ -21,7 +21,9 @@
       "Minimum supported Rust (1.88)",
       "Dependencies",
       "Coverage",
-      "Golden output contract"
+      "Golden output contract",
+      "Fuzz (build only)",
+      "Commit hygiene"
     ]
   }
 }
