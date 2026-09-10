@@ -139,8 +139,9 @@ openkrx capabilities --json
 exits `0`, and returns `data.project`, `data.stage` and `data.operations`,
 the list of package operations this build implements. Use it to confirm the
 binary is openkrx and that the operation you are about to run exists in this
-build, rather than assuming from the version number. `skill` is not listed
-in `operations`: it operates on no package.
+build, rather than assuming from the version number. `skill`, `completions`
+and `man` are not listed in `operations`: they are helper commands that
+describe the binary itself and operate on no package.
 
 The binary carries this document, so installing the skill needs no checkout.
 Save it where your harness looks for skills — `.claude/skills/openkrx/` for
@@ -156,6 +157,17 @@ openkrx skill > .claude/skills/openkrx/SKILL.md
 envelope, no `--json`, no file argument, nothing on stderr, exit `0`. Adding
 either an argument or a flag to it is a usage error and exits `2`.
 
+Two further helper commands describe the binary the same way, outside the
+envelope, and are equally not package operations. `openkrx completions
+<bash|zsh|fish|powershell|elvish>` writes the shell completion script for
+that shell to stdout, and `openkrx man` writes the roff manual page for the
+whole binary — every subcommand is a section inside the one page. Both are
+generated from this executable's own argument definition, so they describe
+the build in front of you rather than a documented ideal; both exit `0` on
+success with nothing on stderr, and an unknown shell, a missing shell, a
+`--json` or a file argument is a usage error that exits `2`. Neither is
+useful for reading a package: do not run them as part of a package task.
+
 If there is no openkrx on PATH, build it from a checkout of the repository
 with `cargo build --release -p openkrx-cli`; the binary lands in
 `target/release/openkrx`. There are no published releases yet, so do not
@@ -166,7 +178,7 @@ invent an installer command.
 | Status | Category | When it happens | What to do |
 | --- | --- | --- | --- |
 | `0` | `success` | The command produced its report. For `validate-structure`, nothing failed and nothing was undecided. | Read `data`. |
-| `2` | `usage` | The arguments were rejected: unknown command, missing `FILE`, missing `--into`, unknown flag. Also `openkrx skill --json` or `openkrx skill FILE`. | Fix the command line. **No envelope is written**; nothing was read. |
+| `2` | `usage` | The arguments were rejected: unknown command, missing `FILE`, missing `--into`, unknown flag. Also `openkrx skill --json` or `openkrx skill FILE`, and `openkrx completions` without a shell, with a shell it does not know, or `openkrx man` with any argument at all. | Fix the command line. **No envelope is written**; nothing was read. |
 | `3` | `structure_inconsistent` | `validate-structure` only: at least one check failed. | Report which checks failed, by `check` and `code`. |
 | `4` | `structure_unresolved` | `validate-structure` only: nothing failed, at least one rule could not be decided. | Report the rules in `unresolved_rules`. Not a defect. |
 | `5` | `input` | The input could not be opened or read, or it reached the 64 MiB cap. For `create` and `repack`, the manifest or edits document, or one of the local files it names. | Check the path, permissions, and that it is a file. Read `attachment_index` to see which one. |
@@ -634,6 +646,8 @@ openkrx create             --manifest <FILE> --stdout [--json]
 openkrx repack             <FILE|-> --edits <FILE> --out <FILE> [--json]
 openkrx repack             <FILE|-> --edits <FILE> --stdout [--json]
 openkrx skill
+openkrx completions        <bash|zsh|fish|powershell|elvish>
+openkrx man
 ```
 
 | Command | Reads | Writes | Exit statuses |
@@ -646,12 +660,15 @@ openkrx skill
 | `create` | a manifest and its attachment files | stdout and `--out FILE`, or the package on stdout | `0`, `2`, `5`, `6`, `8`, `9` |
 | `repack` | one package, an edits file and the files it names | stdout and `--out FILE`, or the package on stdout | `0`, `2`, `5`, `6`, `7`, `8`, `9` |
 | `skill` | nothing | stdout, no envelope | `0`, `2` |
+| `completions` | nothing | stdout, no envelope | `0`, `2` |
+| `man` | nothing | stdout, no envelope | `0`, `2` |
 
 Every command that reads a package takes exactly one input: a path, opened
 exactly as written with no normalisation or globbing, or `-` for standard
 input, read as binary. There are no limit-override flags, no configuration
-file, no colour detection and no shell completions; the same arguments
-produce the same bytes on every supported system.
+file and no colour detection; the same arguments produce the same bytes on
+every supported system. `completions` generates a script a shell reads, which
+changes nothing about how openkrx itself parses a command line.
 
 The full reference is `docs/architecture.md` in the openKRX repository, the
 code catalogue is `docs/codes.md`, and the evidence behind every rule id

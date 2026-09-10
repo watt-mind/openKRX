@@ -18,6 +18,8 @@ too_many_lines = "warn"
 
 [workspace.dependencies]
 clap = { version = "4.5.48", features = ["derive"] }
+clap_complete = { version = "4.6.9", default-features = false }
+clap_mangen = { version = "0.3.3", default-features = false }
 miniz_oxide = "0.9.1"
 quick-xml = { version = "0.42.0", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }

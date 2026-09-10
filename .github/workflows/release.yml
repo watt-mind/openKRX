@@ -209,9 +209,10 @@ jobs:
         shell: bash
         run: cargo build --release --locked -p openkrx-cli --target "$TARGET"
       # The archive carries the binary, the licence, the two documents a user
-      # needs to read it, and the agent skill. SKILL.md is written by the
-      # binary itself (`openkrx skill`), not copied from the sources, so the
-      # shipped document is the one compiled into the shipped executable.
+      # needs to read it, the agent skill, the five shell completion scripts
+      # and the manual page. SKILL.md, the scripts and the page are all
+      # written by the binary itself, not copied from the sources, so every
+      # document in the archive is the one the shipped executable generates.
       - name: Stage and archive
         id: archive
         env:
@@ -228,6 +229,13 @@ jobs:
           cp "$bin" "dist/${stage}/openkrx${EXE:-}"
           cp LICENSE README.md CHANGELOG.md "dist/${stage}/"
           "$bin" skill > "dist/${stage}/SKILL.md"
+          mkdir -p "dist/${stage}/completions" "dist/${stage}/man"
+          "$bin" completions bash       > "dist/${stage}/completions/openkrx.bash"
+          "$bin" completions zsh        > "dist/${stage}/completions/openkrx.zsh"
+          "$bin" completions fish       > "dist/${stage}/completions/openkrx.fish"
+          "$bin" completions powershell > "dist/${stage}/completions/openkrx.ps1"
+          "$bin" completions elvish     > "dist/${stage}/completions/openkrx.elv"
+          "$bin" man                    > "dist/${stage}/man/openkrx.1"
           cd dist
           if [ "$FORMAT" = "zip" ]; then
             archive="${stage}.zip"
@@ -324,12 +332,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in LICENSE README.md CHANGELOG.md SKILL.md; do
+          for name in LICENSE README.md CHANGELOG.md SKILL.md \
+                      completions/openkrx.bash completions/openkrx.zsh \
+                      completions/openkrx.fish completions/openkrx.ps1 \
+                      completions/openkrx.elv man/openkrx.1; do
             test -s "${STAGE}/${name}" || { echo "::error::${name} missing from the archive"; exit 1; }
           done
           # The shipped SKILL.md must be what the shipped binary emits.
           "$BIN" skill > packaged-skill.md
           diff -u "${STAGE}/SKILL.md" packaged-skill.md
+          # And so must the completion scripts and the manual page: they are
+          # generated from the parser, so a mismatch would mean the archive
+          # describes a different build from the one it carries.
+          "$BIN" completions bash > packaged-completions.bash
+          diff -u "${STAGE}/completions/openkrx.bash" packaged-completions.bash
+          "$BIN" man > packaged-man.1
+          diff -u "${STAGE}/man/openkrx.1" packaged-man.1
       - name: Report the version
         env:
           VERSION: ${{ needs.plan.outputs.version }}
@@ -356,7 +374,7 @@ jobs:
             *) echo "::error::capabilities --json did not report schema_version 1"; exit 1 ;;
           esac
           case "$out" in
-            *'"operations":["inspect","list","validate-structure","extract"]'*) ;;
+            *'"operations":["inspect","list","validate-structure","extract","create","repack"]'*) ;;
             *) echo "::error::capabilities --json reported an unexpected operation list"; exit 1 ;;
           esac
       - name: Write out the agent skill
@@ -366,6 +384,26 @@ jobs:
           first=$("$BIN" skill | head -1)
           printf '%s\n' "$first"
           test "$first" = "---"
+      # Every shell openkrx offers must produce a script, and an unknown one
+      # must be a usage error rather than an empty file the user would install.
+      - name: Write out the completion scripts and the manual page
+        shell: bash
+        run: |
+          set -euo pipefail
+          for shell in bash zsh fish powershell elvish; do
+            "$BIN" completions "$shell" > "completions-${shell}"
+            test -s "completions-${shell}" || { echo "::error::${shell} completions were empty"; exit 1; }
+          done
+          status=0
+          "$BIN" completions nosuchshell > rejected.txt 2>/dev/null || status=$?
+          test "$status" = "2"
+          test ! -s rejected.txt
+          "$BIN" man > openkrx.1
+          head -3 openkrx.1
+          case "$(head -3 openkrx.1 | tr '\n' ' ')" in
+            *".TH openkrx 1"*) ;;
+            *) echo "::error::man did not write a roff page"; exit 1 ;;
+          esac
       # `consistent.krx` is the fixture in which no check fails and some
       # profile rules are undecidable, which is exit status 4 (unresolved) by
       # design and documented as such. A 0 here would mean the binary had

@@ -230,6 +230,16 @@ The only absolute path any case is given is its `{outdir}`, and the runner
 because an output that carried it would be a privacy bug in the executable,
 not a gap in the script.
 
+`completions` and `man` have no golden case either, and for a different
+reason: their bytes are produced by `clap_complete` and `clap_mangen`, so a
+recorded script or page would pin the dependency version rather than openKRX's
+own contract, and a routine dependency bump would rewrite a golden without
+anything about the CLI having changed. What matters about them is held in
+`crates/openkrx-cli/tests/completions.rs` instead: every subcommand the
+binary's own `--help` lists must appear in each of the five completion scripts
+and in the man page, the page must reproduce every exit-status digit, and both
+commands must bypass the envelope and exit 2 on a usage error.
+
 `create --stdout` and `repack --stdout` have no golden case, because a golden
 compares the two text streams and that mode writes a binary package to one of
 them. The subprocess tests cover it instead: for each command, one test
