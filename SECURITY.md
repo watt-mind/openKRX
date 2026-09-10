@@ -406,6 +406,12 @@ edited, and refuse what cannot be re-emitted. Tests are in
   package carries no evidence of who edited it or of what it was before. Any
   detached signature over the original does not cover the result, and openKRX
   cannot tell a caller that it does not.
+- **One preservation gap is known and undetectable in this layer.** The reader
+  records that a dispatch carries attachment references, but not whether the
+  `MELLEKLETEK` container element was present, and the writer always emits it.
+  A dispatch carrying none — possible only with no references — gains an empty
+  one, and nothing here can report that it happened. Closing it needs the
+  reader to retain the fact, and is tracked separately.
 - **Interoperability is unverified**, exactly as it is for `create`: what
   repacking writes is structurally consistent with the documented layout and
   never conforming, and it still reports `Unresolved(A19)` and

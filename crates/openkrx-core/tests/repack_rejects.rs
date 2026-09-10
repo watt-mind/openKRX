@@ -299,6 +299,49 @@ fn a_declared_count_that_disagrees_with_the_references_is_refused() {
 }
 
 #[test]
+fn a_dispatch_that_declares_no_count_at_all_is_refused() {
+    // The writer derives `MELLEKLETEK_SZAMA` and always emits it, while the
+    // reader records an absent element as `None` (M7). Repacking a document
+    // that omitted it would therefore *add* it — a change nobody asked for —
+    // so the absence is refused exactly as a wrong count is. Without this the
+    // empty edit would not be the identity it is documented to be, which the
+    // second half of this test asserts directly.
+    let mut document = document(1);
+    document.declared_count = None;
+    let names = payload_names(1);
+    let image = package(
+        &document.bytes(),
+        &names.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    assert_eq!(refused(&image), "repack.unsupported.attachment_reference");
+
+    // The same document with the element present is accepted, so the refusal
+    // above is about the count alone and not about the rest of the package.
+    let accepted = canonical(1);
+    let inventory = archive::inventory(&accepted, &Limits::DEFAULT).expect("an archive");
+    let plan = repack::plan(
+        &inventory,
+        &Limits::DEFAULT,
+        &MetadataLimits::DEFAULT,
+        &Edits::default(),
+    )
+    .expect("a declared count that agrees is repackable");
+    let bytes = repack::apply(
+        &inventory,
+        &plan,
+        openkrx_core::create::FixedTimestamp::EPOCH,
+        &Limits::DEFAULT,
+    )
+    .expect("bytes");
+    let rewritten = archive::inventory(&bytes, &Limits::DEFAULT).expect("an archive");
+    assert_eq!(
+        rewritten.entry_bytes(1).expect("the document"),
+        inventory.entry_bytes(1).expect("the document"),
+        "an empty edit must not add or drop a single element"
+    );
+}
+
+#[test]
 fn a_reference_naming_another_entry_is_refused() {
     let mut document = document(1);
     document.attachments[0].file_name = "another-name.bin".to_owned();

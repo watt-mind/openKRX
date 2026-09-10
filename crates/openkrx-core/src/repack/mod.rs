@@ -31,8 +31,22 @@
 //! | More than one `EXPEDIALAS` block | There is no single place for the derived references (M7) |
 //! | A reference the writer would derive differently | Repacking would rewrite a `MERET`, a location or a number nobody asked it to |
 //!
-//! The rule behind every row is one sentence: **repacking with no edit must
-//! produce the package it was given.** A package this module accepts is one
+//! `MELLEKLETEK_SZAMA` is refused in both directions for the same reason: the
+//! writer derives the count and always emits it, so a dispatch that declared
+//! none would gain one.
+//!
+//! **One residual gap is known and not detectable here.** The reader records
+//! that a dispatch has attachment references, but not whether the
+//! `MELLEKLETEK` container element itself was present, and the writer always
+//! emits it. A dispatch that carried no `MELLEKLETEK` element at all —
+//! possible only with no references, since the references live inside it —
+//! therefore gains an empty one, and nothing in this module can tell that it
+//! happened. It needs the reader to retain the fact, which is tracked
+//! separately; until then it is the one case where "the package it was given"
+//! is not exact, and it is stated here rather than left for someone to find.
+//!
+//! The rule behind every other row is one sentence: **repacking with no edit
+//! must produce the package it was given.** A package this module accepts is one
 //! openKRX could have written itself, which is why the refusals are a feature
 //! rather than a limitation — openKRX will not hand back a package that
 //! quietly lost part of someone's correspondence.
@@ -78,8 +92,20 @@ pub use plan::RepackPlan;
 /// attachments that stay byte-identical, the ones whose bytes change, the ones
 /// that go, the numbers the new ones take, and the header fields the edits set.
 ///
-/// Every refusal is decided here rather than in [`apply`], so a caller that
-/// obtained a plan knows the edits are ones this package can carry.
+/// What this function decides is the input and the shape of the result: that
+/// the package is in the layout the writer emits, that nothing it carries
+/// would be lost or rewritten, that every edit names an attachment the package
+/// actually holds and names it once, and that the result stays inside the
+/// entry-count and per-entry ceilings. A plan therefore says the *package* can
+/// carry these edits.
+///
+/// It is not the whole refusal surface. The writer's own rules — the name
+/// classes an attachment file name must satisfy, the characters XML 1.0 can
+/// carry, the text the reader would trim, and the remaining ceilings — apply
+/// to the values an edit supplies, and they are enforced by
+/// [`crate::create::package`] inside [`apply`], reported as `create.*`. An
+/// added attachment with an unsafe file name is the ordinary case: it plans
+/// and then refuses.
 ///
 /// # Errors
 ///

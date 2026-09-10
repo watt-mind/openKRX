@@ -186,9 +186,12 @@ fn header(root: &Map<String, Value>) -> Result<HeaderEdits, Failure> {
 
 /// A key that is present and not null, or nothing at all.
 ///
-/// `null` is refused for every field but the four optional header elements,
-/// where [`optional`] reads it as a removal: nothing else in either document
-/// has a state for it to mean.
+/// `null` reads as absent here, exactly as it does in `create`'s manifest: a
+/// null `metadata`, `add`, `replace` or `remove` is the same as writing no key
+/// at all, and leaves that part of the package alone. The four optional header
+/// elements are the one exception in this document, and they do not come
+/// through this function: [`optional`] reads `null` on one of them as a
+/// removal, because "leave it" and "take it out" are two different edits.
 fn present<'a>(map: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     match map.get(key) {
         None | Some(Value::Null) => None,

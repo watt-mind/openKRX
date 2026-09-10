@@ -48,7 +48,10 @@ and such a change is recorded here explicitly.
   it, an entry the layout has no place for — a signature document (A7) or a
   service-specific one (A11–A16) — elements outside the grammar (A9), a block
   whose presence alone the reader records (M2, M8), more than one dispatch
-  block (M7), and a reference or count the writer would derive differently.
+  block (M7), and a reference or count the writer would derive differently —
+  including a dispatch that declares *no* `MELLEKLETEK_SZAMA`, which would
+  otherwise gain the element, because the writer derives the count and always
+  emits it.
   Such a package is **not damaged**: `inspect`, `list`,
   `validate-structure` and `extract` all still read it, and the diagnostic
   says so. Three `repack.invalid.*` codes cover an edit naming an attachment

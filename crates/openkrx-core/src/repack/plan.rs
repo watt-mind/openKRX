@@ -226,6 +226,14 @@ fn check_reproducible(metadata: &Metadata) -> Result<(), RepackError> {
 /// produce that package again. A reference the writer would rewrite — another
 /// number, another location, another `MERET` — therefore refuses the package
 /// instead of being quietly corrected.
+///
+/// `MELLEKLETEK_SZAMA` is checked in both directions for the same reason. The
+/// schema requires it beside the list and M7 makes the two a check rather than
+/// an assumption, so the reader records an absent element as `None` — but the
+/// writer derives the count from the attachments and always emits it. A
+/// document that omitted the element would therefore *gain* one, which is a
+/// change nobody asked for, so a dispatch that does not declare a count is
+/// refused exactly as one that declares the wrong count is.
 fn references(
     metadata: &Metadata,
     payloads: &[Payload],
@@ -238,12 +246,14 @@ fn references(
             number: None,
         });
     }
-    let declared = metadata
-        .dispatches
-        .first()
-        .and_then(|dispatch| dispatch.declared_attachment_count);
     let counted = i64::try_from(references.len()).ok();
-    if declared.is_some() && declared != counted {
+    // At most one dispatch reaches this: `check_reproducible` refused more.
+    // A document with no dispatch at all declares no count and gets none
+    // written, so there is nothing to compare.
+    if let Some(dispatch) = metadata.dispatches.first()
+        && (dispatch.declared_attachment_count.is_none()
+            || dispatch.declared_attachment_count != counted)
+    {
         return Err(RepackError::Unsupported {
             kind: UnsupportedKind::AttachmentReference,
             entry: None,
