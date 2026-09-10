@@ -35,6 +35,27 @@ and such a change is recorded here explicitly.
   GitHub-hosted `windows-latest` runner is elevated and can. Tests only; no
   production code changed. The residual risk "Windows symbolic links are not
   exercised by CI" is retired in `SECURITY.md`.
+- **An informational public-API compatibility report.** A new
+  `API compatibility (informational)` job in `ci.yml` runs
+  `cargo-semver-checks` for `openkrx-core` on every pull request, comparing
+  the branch against the pull request's base commit — the crate is
+  unpublished, so a commit stands in for the released baseline the tool
+  normally uses — and writes a `PASS`, `BREAK`, `NOT RUN` or `SKIPPED` line
+  plus the tool's own output into the job summary. It is a report and not a
+  gate: the
+  step carries `continue-on-error: true` and the job is not a required check,
+  because nothing is published and no downstream build exists that a break
+  could break. The comparison is forced to `--release-type minor`, without
+  which the unchanged `0.1.0-dev.0` version on both sides would make the tool
+  assume a major bump and skip every breaking-change lint. The job skips
+  cleanly, installing nothing, when none of `crates/openkrx-core`,
+  `Cargo.toml` and `Cargo.lock` changed, and reports `NOT RUN` rather than a
+  finding when setup failed before the comparison started.
+  `scripts/api-check.sh [base-rev] [crate]` is the same comparison for a
+  maintainer, defaulting to `origin/develop` and `openkrx-core`.
+  `docs/testing.md` describes both, `docs/releasing.md` adds reviewing the
+  report to the release runbook and records why the gate is still deferred,
+  and `docs/roadmap.md` carries the remaining work as an engineering item.
 - **Shell completions and a manual page ship with the CLI.** `openkrx
   completions <bash|zsh|fish|powershell|elvish>` writes that shell's
   completion script to standard output, and `openkrx man` writes the roff
