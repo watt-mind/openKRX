@@ -38,3 +38,26 @@ openkrx-core = { path = ".", features = ["synthetic-writer"] }
 # and `regex-syntax` pull in `rusty-fork`, `tempfile`, `wait-timeout` and a
 # regex parser that nothing here uses; `std` is all the properties need.
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+# The benchmarks under `benches/`, and nothing else: no binary, no test and no
+# other crate carries it. Default features are off because `rayon` and
+# `plotters` pull a thread pool and a plotting stack in for reports nothing
+# here reads; `cargo_bench_support` is the one default kept, because without it
+# criterion refuses to run under `cargo bench` at all. Its declared minimum
+# Rust is 1.86, inside the workspace's 1.88.
+criterion = { version = "0.8.2", default-features = false, features = [
+    "cargo_bench_support",
+] }
+
+# One target per layer, each with criterion's own harness rather than libtest's.
+# See `docs/testing.md`, "Benchmarks".
+[[bench]]
+name = "reader"
+harness = false
+
+[[bench]]
+name = "planner"
+harness = false
+
+[[bench]]
+name = "writer"
+harness = false
