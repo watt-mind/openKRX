@@ -355,7 +355,7 @@ fn create(
             }
             Category::Success.status()
         }
-        Err(refusal) => refused_creation(&refusal.failure, refusal.cleanup, json),
+        Err(refusal) => refused_creation(&refusal.failure, refusal.cleanup, json, to_stdout),
     }
 }
 
@@ -364,9 +364,21 @@ fn create(
 /// The shape is `extract`'s: one JSON object on stdout in JSON mode, and two
 /// lines on stderr in both modes — the failure, and what the undo pass did.
 /// Neither mode names the manifest, the output file or any attachment.
-fn refused_creation(failure: &Failure, cleanup: Cleanup, json: bool) -> i32 {
+///
+/// **`--stdout` moves the whole report to stderr, failures included.** In that
+/// mode stdout is the package pipe, and a caller reading it is entitled to
+/// find a package there or nothing at all: writing a JSON envelope into it
+/// would hand the next process in the pipeline a "package" that is a
+/// diagnostic. The report therefore goes to stderr exactly as a successful
+/// one does — one JSON object and nothing else in JSON mode, so a caller can
+/// parse stderr whole — and stdout stays empty.
+fn refused_creation(failure: &Failure, cleanup: Cleanup, json: bool, to_stdout: bool) -> i32 {
     if json {
         let text = render::json::failure_with_cleanup(CREATE, failure, cleanup);
+        if to_stdout {
+            input::line(&mut std::io::stderr(), &text);
+            return failure.category.status();
+        }
         input::line(&mut std::io::stdout(), &text);
     }
     input::line(&mut std::io::stderr(), &failure.line(CREATE));

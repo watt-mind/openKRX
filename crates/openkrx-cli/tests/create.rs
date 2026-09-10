@@ -268,6 +268,57 @@ fn stdout_writes_the_same_bytes_and_keeps_the_report_off_the_pipe() {
 }
 
 #[test]
+fn a_failed_stdout_run_keeps_its_report_off_the_package_pipe() {
+    // stdout is the package pipe in --stdout mode, so a caller reading it must
+    // find a package or nothing at all. A JSON envelope written there would
+    // hand the next process in the pipeline a diagnostic as if it were bytes
+    // of a package.
+    let scratch = Scratch::new("create-stdout-failure");
+    let manifest_path = scene(
+        &scratch,
+        "{\"path\":\"present.txt\"},{\"path\":\"absent.txt\"}",
+        &[("present.txt", b"alpha")],
+    );
+    let manifest_argument = manifest_path.to_str().expect("a UTF-8 manifest path");
+
+    let json = run(&[
+        "create",
+        "--manifest",
+        manifest_argument,
+        "--stdout",
+        "--json",
+    ]);
+    assert_eq!(status(&json), 5);
+    assert!(
+        json.stdout.is_empty(),
+        "stdout is the package pipe and must stay empty: {:?}",
+        stdout(&json)
+    );
+    let text = stderr(&json);
+    assert_eq!(
+        text.lines().count(),
+        1,
+        "exactly one JSON object on stderr, so a caller can parse it whole: {text}"
+    );
+    let response: serde_json::Value =
+        serde_json::from_str(&text).expect("one JSON object on stderr");
+    assert_eq!(response["command"], "create");
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"]["code"], "input.unreadable");
+    assert_eq!(response["error"]["attachment_index"], 1);
+    assert_eq!(response["cleanup"]["removed"], 0);
+
+    // Human mode keeps the same rule: the diagnostic and the cleanup line are
+    // on stderr, and nothing reaches the pipe.
+    let human = run(&["create", "--manifest", manifest_argument, "--stdout"]);
+    assert_eq!(status(&human), 5);
+    assert!(human.stdout.is_empty(), "stdout must stay empty");
+    let lines = stderr(&human);
+    assert!(lines.contains("input.unreadable"), "{lines}");
+    assert!(lines.contains("nothing had been written"), "{lines}");
+}
+
+#[test]
 fn the_human_report_says_what_was_written_and_what_stays_undecided() {
     let scratch = Scratch::new("create-human");
     let manifest = scene(

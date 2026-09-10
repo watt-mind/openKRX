@@ -446,7 +446,10 @@ and the same attachment files always produce byte-identical bytes:
   directory. Nothing is overwritten (`output.exists`, exit `9`), and a
   failure after the file was created removes it again. Use `--stdout` to
   write the package bytes to stdout instead; the report then goes to stderr,
-  including the JSON object under `--json`.
+  including the JSON object under `--json`. **In `--stdout` mode stdout
+  carries the package or nothing**: a failure leaves it empty and puts the
+  whole report on stderr, so read the exit status first and parse stderr, not
+  stdout, when you piped the package somewhere.
 
 On success `data` carries `bytes_written`, `entries` (the marker, the
 metadata document and one per attachment), `unresolved_rules[]` and

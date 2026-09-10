@@ -22,7 +22,9 @@ and such a change is recorded here explicitly.
   attachments, and writes the bytes `openkrx_core::create::package` produces
   to a file that must not already exist. `--stdout` writes the package to
   standard output instead and puts the report, JSON object included, on
-  standard error. openKRX reads no clock, so the manifest's `timestamp` is
+  standard error — a failure included, so stdout carries the package or
+  nothing and a caller piping it never receives a diagnostic in its place.
+  openKRX reads no clock, so the manifest's `timestamp` is
   required and the same manifest and files always produce byte-identical
   output.
 

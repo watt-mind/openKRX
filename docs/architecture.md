@@ -806,6 +806,13 @@ half-written package behind for someone to send. `--stdout` writes the
 package bytes to standard output instead and puts the report, JSON object
 included, on standard error.
 
+**In `--stdout` mode stdout carries the package or nothing.** A failure puts
+its whole report on standard error too — one JSON object and nothing else in
+JSON mode, so a caller can parse that stream whole — and leaves stdout empty.
+A caller reading the pipe is entitled to find a package there or nothing at
+all: an envelope written into it would hand the next process in the pipeline
+a diagnostic as if it were bytes of a package.
+
 **The self-check is the gate.** After writing, openKRX reads the file back
 and runs `archive::inventory`, `metadata::parse` and `profile::check` over
 it. A single failing check is a defect in openKRX rather than in the
