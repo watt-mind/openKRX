@@ -71,7 +71,7 @@ criteria and verification.
 | [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | **Done** | `openkrx_core::extract::plan` and the `extract` command: the whole plan decided before a byte is written, a destination that must already exist, no overwrite, no link escape, exit status 9, and an undo pass that removes only what the run created. |
 | [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | **Done** for the documented layout; interoperability unverified | `openkrx_core::create::package` and the `create` command: deterministic bytes for the canonical documented layout, derived attachment references, the reader's ceilings enforced on the output, 24 stable `create.*` codes and 7 `manifest.invalid.*` codes, a strictly validated JSON manifest, a no-clobber output file and a self-check that reads the written package back before reporting success. Built on an operator decision, not on new evidence — the layout is unverified, and A19 to A22 and M11 to M15 are as unresolved as before. |
 | [KRX-08: repack, deterministic package editing](work-packages.md#krx-08-repack-deterministic-package-editing) | **Done** for the layout openKRX writes; nothing else is editable | `openkrx_core::repack::{plan, apply}` and the `repack` command: a plan a caller can inspect before anything is written, every untouched attachment preserved byte for byte, header fields, additions, replacements and removals applied with the references and the count re-derived, 14 stable `repack.*` codes, and a refusal of every package the writer cannot re-emit rather than a silent relayout. Resolves no profile rule: a repacked package reports `Unresolved(A19)` and `Unresolved(M13)` exactly as a created one does. |
-| [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned, and next | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |
+| [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | **In progress**: the openKRX side is assessed, the openPapir consumer contract is pending | The first-release readiness review is done and recorded, dated and evidence-linked, in [releasing.md](releasing.md#readiness-status): one row per gate with a first pre-release proposal. Gates 4 and 5 are met, gate 2 partially, gate 3 per commit and re-checked on the release commit, and gates 1 and 6 not met — so a first release could only be a labelled pre-release. The openPapir integration contract and the openSzigno attachment handoff are openPapir's half of the package and are untouched here. |
 
 KRX-05 was the first milestone that writes to a filesystem, so the whole
 extraction threat model is now live; its residual risks are recorded in
@@ -143,6 +143,18 @@ Unordered, and independent of the milestone sequence.
 ## Residual risks in the current state
 
 Stated plainly, because the tests that would remove them do not exist yet.
+
+These are the same facts the 2026-09-10 readiness assessment in
+[releasing.md](releasing.md#readiness-status) weighs, read from the other
+end: the first two risks below are why release gate 1 is not met and why a
+first release could only be a labelled pre-release, and the extraction race,
+the uncovered Windows symbolic link and the smoke-only fuzzing are why gate 2
+is only partially met. The rest — strictness never measured against real
+archives, inherited deflate correctness, reasoned rather than measured
+limits, the classifier keying on a code's category — are disclosed
+limitations that no gate turns into a blocker, and they belong in the
+limitations a release states rather than in the decision to cut one. Neither
+list weakens the other; if one changes, change both in the same pull request.
 
 - **No agreement with a real service has ever been demonstrated.** No public
   sample archive and no independent implementation were found, so every

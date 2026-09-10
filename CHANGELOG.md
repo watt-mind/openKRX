@@ -555,6 +555,30 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **First-release readiness is assessed against the six gates (KRX-07,
+  openKRX side).** `docs/releasing.md` gains a dated "Readiness status"
+  section: one row per gate with a status, public evidence links and what
+  would change it. Gates 4 (fixtures, licences, privacy, documentation,
+  changelog, vulnerability reporting) and 5 (the separate release change) are
+  met; gate 2 is partially met, because the extraction check-to-create race
+  and a Windows *symbolic* link are stated rather than tested; gate 3 is met
+  per commit and is re-checked on the release commit itself; gates 1 and 6
+  are not met. Gate 1 is not met because **independent conformance evidence
+  is absent** — nine of thirty-seven rules stay unresolved, and the only two
+  routes are the aggregate-only private-corpus report and the outreach
+  questions in `docs/research.md`, neither of which is code — so a first
+  release could only be a pre-release labelled as such. A concrete proposal
+  follows: `0.1.0-alpha.1`, the tag `v0.1.0-alpha.1` that the `plan` job
+  requires to equal the workspace version, the `[Unreleased]` entries moving
+  under one version heading, the six archives, `SHA256SUMS`, the provenance
+  attestations and the draft release the held workflow would produce, and the
+  runbook steps a human performs. `publish = false` stays and no crates.io
+  publish is part of it. `docs/roadmap.md` and `docs/work-packages.md` record
+  KRX-07 as in progress with its consumer half pending, and the residual-risk
+  list is reconciled with the assessment. Documentation only; no behaviour,
+  no output and no workflow changed, and nothing here claims conformance,
+  interoperability, a security guarantee or production readiness.
+
 - **Missing documentation now fails the build.** Both crate roots deny
   `missing_docs`; `openkrx-core` also denies
   `rustdoc::broken_intra_doc_links` and `rustdoc::private_intra_doc_links`,
