@@ -16,6 +16,44 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **`openkrx create`: writing one package from a manifest file (KRX-06,
+  command half).** `openkrx create --manifest <FILE> --out <FILE.krx>
+  [--json]` reads one JSON manifest, reads the local files it names as
+  attachments, and writes the bytes `openkrx_core::create::package` produces
+  to a file that must not already exist. `--stdout` writes the package to
+  standard output instead and puts the report, JSON object included, on
+  standard error. openKRX reads no clock, so the manifest's `timestamp` is
+  required and the same manifest and files always produce byte-identical
+  output.
+
+  The manifest is one object carrying `schema_version` 1, a `metadata`
+  object mirroring the document's own fields, an optional `attachments`
+  array of local files, and `timestamp`. It is validated strictly in both
+  directions: a required field that is absent is refused, and **a key the
+  schema does not define is refused rather than ignored**, because a
+  misspelled `attachments` would otherwise write a package with no
+  attachment and report success. An attachment path is resolved against the
+  manifest's own directory; the name inside the package is its last
+  component, or the `file_name` the manifest gives, and goes through the
+  writer's name rules either way. The schema is documented in
+  [docs/architecture.md](docs/architecture.md#creating-a-package).
+
+  The output rule is `extract`'s: `--out` must not exist in any form, its
+  parent must already be a real directory that openKRX never creates, the
+  file is created with `create_new`, and a failure after that removes it
+  again and reports the removal in `cleanup`. After writing, openKRX reads
+  the file back through `archive::inventory`, `metadata::parse` and
+  `profile::check`; a failing check is a defect in openKRX, reported as
+  `create.internal.self_check_failed` with the file removed.
+
+  **A package `create` wrote passes `validate-structure` with exit 4, and
+  never 3.** Nothing fails; the marker's place cites unresolved rule A19 and
+  any declared attachment size cites M13. That is the documented definition
+  of success. The layout is the canonical documented one and is
+  **unverified against every real producer**: a created package is
+  structurally consistent with the documented layout, never conforming, not
+  signed, and not something any receiving service has agreed to accept.
+
 - **A deterministic package writer, in the library only (KRX-06, core half).**
   `openkrx_core::create::package` turns a `PackageSpec` — typed metadata,
   attachment bytes, a caller-supplied `FixedTimestamp` and a `Layout` — into
@@ -357,6 +395,23 @@ and such a change is recorded here explicitly.
   committed. No library or command behaviour changed.
 
 ### Changed
+
+- **`capabilities` reports `stage: "reader-writer"` and names `create`.**
+  `capabilities().operations` is now `["inspect", "list",
+  "validate-structure", "extract", "create"]`. A consumer branching on the
+  operation list sees the new operation; a consumer branching on `stage`
+  sees a new word. The `capabilities` goldens changed with it.
+- **Two fields may appear in a failed envelope's `error` object.** `field`
+  is the JSON Pointer of the manifest field a `create` refusal concerns, and
+  `attachment_index` the position in the manifest's `attachments` array.
+  Both are absent from every other command's diagnostics, and neither
+  carries a value from the manifest, so `schema_version` stays `1`: adding a
+  field does not raise it.
+- **The three shared `output.*` sentences now cover both writing commands.**
+  `output.destination_missing`, `.destination_not_a_directory` and
+  `.exists` name the `--into` directory and the `--out` file rather than
+  `--into` alone. The codes and their exit status are unchanged; the human
+  sentences, and the two `extract` no-clobber goldens, changed.
 
 - Archive inventory internals: the end-of-central-directory record is read
   as its 22 fixed bytes, proven present before parsing begins, so locating

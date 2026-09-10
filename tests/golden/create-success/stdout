@@ -1,0 +1,5 @@
+Wrote 1117 bytes in 4 entries.
+Layout: canonical-documented, which docs/profile.md documents and no real producer has been checked against. Nothing was signed.
+Reading it back left A19, M13 undecided, so validate-structure over this package exits 4. That is the expected outcome for a package openkrx wrote, not a defect in it.
+Nothing was overwritten: the file was created new, and no existing file was changed or removed.
+Structural checking is not signature verification and not delivery evidence. Nothing is verified.

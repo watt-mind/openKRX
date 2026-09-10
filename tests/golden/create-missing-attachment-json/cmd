@@ -1,0 +1,1 @@
+create --manifest {fixture}/create-missing-attachment.json --out {outdir}/created.krx --json

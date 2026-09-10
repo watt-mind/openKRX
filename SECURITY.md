@@ -3,7 +3,8 @@
 ## Current surface
 
 The CLI supports help, version, capability reporting, the three reader
-commands `inspect`, `list` and `validate-structure`, and `extract`. The
+commands `inspect`, `list` and `validate-structure`, and the two commands
+that write, `extract` and `create`. The
 reader commands render the core library's bounded ZIP inventory
 (`openkrx_core::archive::inventory`), bounded metadata parsing
 (`openkrx_core::metadata::parse`) and structural check inventory
@@ -14,16 +15,22 @@ undo-on-failure policy mapped
 [below](#threat-model-mapping-extraction-output-layer). The core crate itself
 performs no I/O of any kind.
 
-Reading the one input a command takes is bounded before parsing begins, and
-writing happens only where `extract` was explicitly pointed. No command
-creates a package: the library writes one — `openkrx_core::create::package`,
-mapped [below](#threat-model-mapping-creation-layer) — but it returns bytes,
-touches no filesystem, and no command exposes it. Nothing uses keys or
+`create` writes too: it turns one JSON manifest and the local files that
+manifest names into the bytes of a package — `openkrx_core::create::package`,
+mapped [below](#threat-model-mapping-creation-layer) — and places them in a
+file that must not already exist, under the same output policy. The core
+crate itself still returns bytes and touches no filesystem.
+
+Reading every input a command takes, the manifest and each attachment
+included, is bounded before parsing begins, and writing happens only where
+`extract` or `create` was explicitly pointed. A package openKRX wrote is
+structurally consistent with the documented layout, never a conforming one,
+and openKRX never submits one anywhere. Nothing uses keys or
 accesses government services. The requirements below
 remain implementation gates for the package operations that do not exist
 yet, not claims that a complete secure KRX parser exists. A successful
-inventory, parse, structural report or extraction is an observation, never a
-conformance or authenticity statement.
+inventory, parse, structural report, extraction or creation is an
+observation, never a conformance or authenticity statement.
 
 Only the current `develop` branch receives fixes. There are no released
 versions, and no tags, to support yet; when releases begin, this section
@@ -200,13 +207,15 @@ rules in
 
 ## Threat-model mapping: extraction output layer
 
-`crates/openkrx-cli/src/extract/` is the only code in openKRX that writes to
-a filesystem. It adds no rule about names, entry kinds, collisions or
-ceilings — those are the planner's, above — and owns the destination alone.
-The policy, phase by phase, is in
-[architecture.md](docs/architecture.md#extraction-output); the codes are
+`crates/openkrx-cli/src/extract/` and `crates/openkrx-cli/src/create.rs` are
+the only code in openKRX that writes to a filesystem. Neither adds a rule
+about names, entry kinds, collisions or ceilings — those are the planner's
+and the writer's — and each owns its destination alone. The policy, phase by
+phase, is in [architecture.md](docs/architecture.md#extraction-output) and
+[architecture.md](docs/architecture.md#creating-a-package); the codes are
 catalogued in [codes.md](docs/codes.md#output-codes). Test names in this
-table are in `crates/openkrx-cli/tests/extract.rs`, except where noted.
+table are in `crates/openkrx-cli/tests/extract.rs`, except where noted;
+`create`'s are in `crates/openkrx-cli/tests/create.rs`.
 
 Every failure exits 9 and leaves the destination as it was found: either the
 run was refused before the first write, or the undo pass removed everything
@@ -214,15 +223,15 @@ this run had created. A partial result is never reported as a success.
 
 | Required check | Error code prefix | Test |
 | --- | --- | --- |
-| Confinement to a caller-selected destination: it must already exist, be a real directory, and not be a symbolic link or reparse point; `extract` never creates it | `output.destination_missing`, `.destination_not_a_directory`, `.destination_symlink` | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `a_destination_that_is_a_file_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused` |
-| No overwrite: a planned path that exists in any form — file, directory, symbolic link, or a link with a missing target — refuses the whole extraction before anything is written, as does an entry named like the marker this run creates | `output.exists` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code` |
+| Confinement to a caller-selected destination: it must already exist, be a real directory, and not be a symbolic link or reparse point; `extract` never creates it, and `create` never creates the parent directory of `--out` | `output.destination_missing`, `.destination_not_a_directory`, `.destination_symlink` | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `a_destination_that_is_a_file_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused`, `an_output_directory_that_is_missing_or_not_a_directory_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_symbolic_link_is_refused` (`tests/create.rs`) |
+| No overwrite: a planned path, or a `create --out` file, that exists in any form — file, directory, symbolic link, or a link with a missing target — refuses the whole run before anything is written, as does an entry named like the marker an extraction creates | `output.exists` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`), `an_output_that_is_a_dangling_symbolic_link_counts_as_occupied` (`tests/create.rs`) |
 | No symlink or reparse-point escape through the path: every existing ancestor inside the destination must be a real directory, checked in preflight and again after each directory this run creates | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_symlink_inside_the_destination_is_refused`, `a_destination_or_write_problem_is_nine` (`src/exit.rs`) |
-| Exclusive creation: files with `create_new` (`O_EXCL` / `CREATE_NEW`), directories with `create_dir` and never `create_dir_all` | `output.exists`, `output.io` | `a_package_is_extracted_with_byte_identical_payloads`, `a_target_file_that_already_exists_refuses_the_whole_extraction` |
+| Exclusive creation: files with `create_new` (`O_EXCL` / `CREATE_NEW`), directories with `create_dir` and never `create_dir_all`; `create` opens its output the same way | `output.exists`, `output.io` | `a_package_is_extracted_with_byte_identical_payloads`, `a_target_file_that_already_exists_refuses_the_whole_extraction`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`) |
 | Interrupted-write detection: a `.openkrx-extract.partial` marker exists for the length of the run, and its presence refuses the next one | `output.partial_marker_present` | `a_marker_left_by_an_interrupted_run_refuses_the_next_one`, `the_json_report_names_every_file_and_the_marker_it_removed` |
 | Cleanup that never deletes pre-existing data: only paths this run created are removed, newest first, with `remove_dir` rather than `remove_dir_all` | `output.io`, and the `cleanup` counts | `a_failed_write_removes_this_runs_files_and_leaves_everything_else` |
-| A failure never reports success, and never leaves partial output as a completed run | every `output.*` code, exit status 9 | every refusal test above; each reads the destination back |
+| A failure never reports success, and never leaves partial output as a completed run; a `create` that fails after opening its output removes the file again, and one whose self-check finds a failing structural check removes it too | every `output.*` code and `create.internal.self_check_failed`, exit statuses 9 and 6 | every refusal test above; each reads the destination back, and each `create` refusal test asserts the output file does not exist |
 | Payload bytes preserved exactly, with no mode bits, timestamps, links, special files or nested unpacking | not applicable: a preservation rule, not a refusal | `a_package_is_extracted_with_byte_identical_payloads`, `a_planner_refusal_keeps_its_own_category_and_names_no_path` |
-| Diagnostics free of the destination path, an entry name and payload bytes; the written paths appear only in a successful report | every code; the diagnostic carries the code, its category and an entry index | `extract_never_carries_a_canary_in_a_diagnostic` (`tests/privacy.rs`), `a_planner_refusal_keeps_its_own_category_and_names_no_path` |
+| Diagnostics free of the destination path, an entry name and payload bytes; the written paths appear only in a successful report, and no `create` output carries a manifest value, an attachment path or the spelling of a key the schema does not define | every code; the diagnostic carries the code, its category, an entry index, and for `create` a fixed schema path and an attachment position | `extract_never_carries_a_canary_in_a_diagnostic` (`tests/privacy.rs`), `a_planner_refusal_keeps_its_own_category_and_names_no_path`, `no_manifest_value_reaches_a_diagnostic` (`tests/create.rs`), `a_successful_report_carries_no_value_from_the_manifest_either` (`tests/create.rs`) |
 | No implicit execution or nested extraction | not applicable: the writer creates regular files and directories only, and never opens what it wrote | reviewed by construction |
 
 ### Residual risks of the output layer
@@ -264,10 +273,13 @@ this run had created. A partial result is never reported as a success.
 `openkrx_core::create::package` writes the bytes of one package. It is a pure
 function of the request: no filesystem, clock, process or network access, no
 randomness, and no environment, so the same request always produces the same
-bytes. **Nothing here writes a file.** Placing the bytes somewhere is the
-command half of KRX-06 and does not exist; when it does, the no-clobber and
-destination rules of the
-[output layer](#threat-model-mapping-extraction-output-layer) apply to it.
+bytes. **Nothing in the core crate writes a file.** Placing the bytes
+somewhere is the `create` command, in `crates/openkrx-cli/src/create.rs`,
+and every no-clobber and destination rule of the
+[output layer](#threat-model-mapping-extraction-output-layer) applies to it.
+The manifest it reads is untrusted input like any other: it is read under the
+input cap, validated strictly against a fixed schema, and a key the schema
+does not define refuses the run rather than being ignored.
 
 The layer's premise is that a caller's request is as untrusted as an archive:
 a file name, a description or a metadata value may come from anywhere, so

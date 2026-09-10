@@ -16,8 +16,8 @@ fn capabilities_names_exactly_the_implemented_operations() {
             "command": "capabilities",
             "data": {
                 "project": "openKRX",
-                "stage": "reader",
-                "operations": ["inspect", "list", "validate-structure", "extract"],
+                "stage": "reader-writer",
+                "operations": ["inspect", "list", "validate-structure", "extract", "create"],
             },
             "verified": false,
         })
@@ -30,8 +30,8 @@ fn human_capabilities_state_the_boundary_rather_than_a_verdict() {
     assert_eq!(status(&output), 0);
     assert!(output.stderr.is_empty());
     let text = stdout(&output);
-    assert!(text.contains("openKRX: reader"));
-    assert!(text.contains("inspect, list, validate-structure, extract"));
+    assert!(text.contains("openKRX: reader-writer"));
+    assert!(text.contains("inspect, list, validate-structure, extract, create"));
     assert!(text.contains("not signature verification"));
     assert!(text.contains("Nothing is verified"));
 }
@@ -47,6 +47,7 @@ fn help_lists_every_command_and_the_exit_statuses() {
         "list",
         "validate-structure",
         "extract",
+        "create",
     ] {
         assert!(text.contains(command), "help must mention {command}");
     }
@@ -78,8 +79,8 @@ fn the_help_says_which_statuses_belong_to_which_command() {
     assert!(top.contains("validate-structure only: nothing failed"));
     assert!(top.contains("inspect and list exit 0 whenever they produce"));
     assert!(
-        top.contains("extract only: the destination could not be used"),
-        "status 9 belongs to extract alone"
+        top.contains("extract and create only: the destination could not be used"),
+        "status 9 belongs to the two commands that write"
     );
     assert!(
         top.contains("`ok` says only that the command produced a report"),
@@ -120,13 +121,24 @@ fn version_is_the_package_version() {
 
 #[test]
 fn argument_errors_exit_with_the_usage_status() {
-    let cases: [&[&str]; 6] = [
+    let cases: [&[&str]; 9] = [
         &[],
         &["extract"],
         &["capabilities", "--unknown"],
         &["inspect"],
         &["list", "--json"],
         &["validate-structure", "a", "b"],
+        // `create` needs a manifest, and exactly one destination.
+        &["create"],
+        &["create", "--manifest", "m.json"],
+        &[
+            "create",
+            "--manifest",
+            "m.json",
+            "--out",
+            "p.krx",
+            "--stdout",
+        ],
     ];
     for args in cases {
         let output = run(args);

@@ -1,0 +1,2 @@
+openkrx: input.unreadable (attachment 0) — the input could not be read: check that the file exists, is readable, is a file rather than a directory, and is not larger than the 64 MiB input cap (exit 5)
+openkrx: nothing had been written, so the destination is as it was found

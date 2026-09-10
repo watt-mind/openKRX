@@ -45,21 +45,32 @@ struct Failed<'a> {
     ok: bool,
     command: &'a str,
     error: Diagnostic<'a>,
-    /// What the extraction undo pass removed, present for `extract` alone.
+    /// What the undo pass removed, present for the two commands that write.
     /// `removed` is `0` when nothing had been written, which is every refusal
-    /// decided before the first write. Counts, never a path.
+    /// decided before the first write; for `create` it is `1` when the
+    /// half-written package was removed again. Counts, never a path.
     #[serde(skip_serializing_if = "Option::is_none")]
     cleanup: Option<Cleanup>,
     verified: bool,
 }
 
-/// The diagnostic itself: a code, its category, an index and numbers.
+/// The diagnostic itself: a code, its category, where it happened, and numbers.
+///
+/// `field` and `attachment_index` belong to `create` and say where in the
+/// manifest the refusal was decided. `field` is a JSON Pointer into the
+/// manifest, such as `/metadata/source_system`; neither carries a value a
+/// manifest author wrote, so the object stays as safe to log as every other
+/// diagnostic.
 #[derive(Serialize)]
 struct Diagnostic<'a> {
     code: &'a str,
     category: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     entry_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachment_index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,10 +98,10 @@ pub fn failure(command: &str, failure: &Failure) -> String {
     failed(command, failure, None)
 }
 
-/// The same, carrying what the extraction undo pass removed.
+/// The same, carrying what the undo pass removed.
 ///
-/// A caller of `extract` needs to know whether the destination was left as it
-/// was found. `removed` is how many of this run's paths are gone and
+/// A caller of `extract` or `create` needs to know whether the destination was
+/// left as it was found. `removed` is how many of this run's paths are gone and
 /// `left_in_place` how many could not be removed; both are counts, because a
 /// diagnostic may never carry a path.
 pub fn failure_with_cleanup(command: &str, failure: &Failure, cleanup: Cleanup) -> String {
@@ -108,6 +119,8 @@ fn failed(command: &str, failure: &Failure, cleanup: Option<Cleanup>) -> String 
             code: failure.code,
             category: failure.category.as_str(),
             entry_index: failure.entry_index,
+            field: failure.field,
+            attachment_index: failure.attachment_index,
             limit: failure.limit,
             observed: failure.observed,
         },

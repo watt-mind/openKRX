@@ -17,8 +17,14 @@
 //! a code and asserts that the heads it saw are exactly the ones the `HEADS`
 //! line of `scripts/check-codes.py` names, so a new head cannot be added to
 //! one side alone.
+//!
+//! This module holds the codes and the classifier; [`Failure`], the value a
+//! refused run is reported as, and the sentence each code explains itself
+//! with, are in [`failure`].
 
-use openkrx_core::{ArchiveError, PlanError, ProfileError};
+mod failure;
+
+pub use failure::Failure;
 
 /// Refusing to read more than this many bytes from the input.
 ///
@@ -48,6 +54,24 @@ pub const OUTPUT_NOT_A_DIRECTORY: &str = "output.not_a_directory";
 /// A create, write or remove failed. The underlying reason is never reported.
 pub const OUTPUT_IO: &str = "output.io";
 
+/// The manifest is not one JSON object.
+pub const MANIFEST_SYNTAX: &str = "manifest.invalid.syntax";
+/// The manifest declares a `schema_version` this build does not implement.
+pub const MANIFEST_SCHEMA_VERSION: &str = "manifest.invalid.schema_version";
+/// The manifest carries a key the schema does not define.
+pub const MANIFEST_UNKNOWN_FIELD: &str = "manifest.invalid.unknown_field";
+/// A required manifest field is absent.
+pub const MANIFEST_MISSING_FIELD: &str = "manifest.invalid.missing_field";
+/// A manifest field carries a value of the wrong JSON type.
+pub const MANIFEST_TYPE: &str = "manifest.invalid.type";
+/// A manifest field carries a token outside the fixed set the schema allows.
+pub const MANIFEST_ENUMERATION: &str = "manifest.invalid.enumeration";
+/// `timestamp` is not a time the MS-DOS fields of a ZIP record can express.
+pub const MANIFEST_TIMESTAMP: &str = "manifest.invalid.timestamp";
+
+/// A package `create` wrote did not read back cleanly. A defect in openKRX.
+pub const CREATE_SELF_CHECK_FAILED: &str = "create.internal.self_check_failed";
+
 /// What kind of outcome a run had, and therefore which status it exits with.
 ///
 /// This enum is deliberately not `#[non_exhaustive]`: adding a category must
@@ -71,7 +95,8 @@ pub enum Category {
     Unsupported,
     /// A documented resource limit was exceeded.
     Limit,
-    /// The destination could not be used, or a write failed. `extract` only.
+    /// The destination could not be used, or a write failed. The two
+    /// commands that write, `extract` and `create`, alone.
     Output,
 }
 
@@ -155,8 +180,11 @@ have to overwrite, and must be writable"
     /// entry kind is an unsupported feature, an ambiguous or unsafe
     /// destination is a package problem, and a ceiling is a limit. `create.*`
     /// follows it too: a ceiling the output would exceed is a limit, and a
-    /// request describing a package that contradicts itself, or a name the
-    /// writer refuses, is a package problem. Every
+    /// request describing a package that contradicts itself, a name the
+    /// writer refuses, or a package that did not read back cleanly, is a
+    /// package problem. `manifest.invalid.*` joins them: a manifest describes
+    /// a package that cannot be written, which is the same reading before
+    /// anything exists to read. Every
     /// `output.*` code is [`Category::Output`], because each one is a fact
     /// about the destination rather than about the package.
     /// Returns `None` for a code shape this build does not know, which the
@@ -174,7 +202,8 @@ have to overwrite, and must be writable"
                 Self::Package
             }
             ("archive", "unsafe_name" | "no_such_entry") => Self::Package,
-            ("create", "invalid" | "unsafe_name") => Self::Package,
+            ("create", "invalid" | "unsafe_name" | "internal") => Self::Package,
+            ("manifest", "invalid") => Self::Package,
             ("extract", "unsafe_path") => Self::Package,
             ("metadata", "missing" | "reference" | "count_mismatch") => Self::Inconsistent,
             (
@@ -190,216 +219,6 @@ have to overwrite, and must be writable"
             ) => Self::Output,
             _ => return None,
         })
-    }
-}
-
-/// What a diagnostic says when the code's category segment is unknown.
-///
-/// The fallback category is [`Category::Package`], which is the fail-safe
-/// reading — never a success — but its explanation would describe a damaged
-/// package, which an unclassified code is no evidence of.
-const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this build does not classify; see docs/codes.md for what it means";
-
-/// The sentence one particular code deserves instead of its category's.
-///
-/// Eight codes share [`Category::Output`], and the one sentence that covers
-/// all of them tells a caller with a missing destination about overwriting,
-/// which is noise at the moment they need one instruction. Each `output.*`
-/// code therefore names its own condition and what to do about it. Every
-/// sentence is content-free: no path, no file name, no operating-system
-/// message, so the line stays safe to log wherever the others are.
-const fn advice(code: &str) -> Option<&'static str> {
-    Some(match code.as_bytes() {
-        b"output.destination_missing" => {
-            "the destination directory does not exist, and extract never \
-creates one: create it first, or correct the --into argument"
-        }
-        b"output.destination_not_a_directory" => {
-            "the --into argument names something that is not a directory"
-        }
-        b"output.destination_symlink" => {
-            "the destination is a symbolic link or a reparse point; extraction \
-writes only into a real directory, so name the directory itself"
-        }
-        b"output.partial_marker_present" => {
-            "the destination still holds .openkrx-extract.partial from an \
-interrupted run, so what is in it may be incomplete: review it and remove \
-that file, or extract into a different directory"
-        }
-        b"output.exists" => {
-            "a file this package would create is already in the destination; \
-nothing is ever overwritten, so extract into an empty directory, or move the \
-existing file out of the way first"
-        }
-        b"output.symlink_in_path" => {
-            "a directory this package would write through is a symbolic link \
-or a reparse point, which could place output outside the destination"
-        }
-        b"output.not_a_directory" => {
-            "a path this package needs as a directory is something else in the \
-destination already"
-        }
-        b"output.io" => {
-            "a create, write or remove failed: check that the destination is \
-writable and has free space"
-        }
-        _ => return None,
-    })
-}
-
-/// A run that ended before a report could be produced.
-///
-/// The fields are exactly what a diagnostic may carry: a stable code, its
-/// category, an entry index and numbers. An input path, an entry name and a
-/// metadata value are never reachable from here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Failure {
-    /// The stable dotted code.
-    pub code: &'static str,
-    /// The category the code classifies to.
-    pub category: Category,
-    /// Central-directory index of the entry the failure concerns, if any.
-    pub entry_index: Option<u32>,
-    /// The configured ceiling, when the failure is a limit.
-    pub limit: Option<u64>,
-    /// The value that reached the ceiling, when it is known.
-    pub observed: Option<u64>,
-    /// Whether the code's category segment is one this build knows.
-    ///
-    /// An unclassified code still fails, as [`Category::Package`], because a
-    /// code openKRX cannot read must never become a success. The flag only
-    /// keeps the human explanation honest about which of the two happened.
-    pub classified: bool,
-}
-
-impl Failure {
-    /// Classify `code`, treating an unknown shape as a package problem.
-    fn new(code: &'static str) -> Self {
-        let category = Category::of_code(code);
-        Self {
-            code,
-            category: category.unwrap_or(Category::Package),
-            entry_index: None,
-            limit: None,
-            observed: None,
-            classified: category.is_some(),
-        }
-    }
-
-    /// The input could not be opened or read.
-    #[must_use]
-    pub fn unreadable() -> Self {
-        Self::new(INPUT_UNREADABLE)
-    }
-
-    /// A destination or write failure, carrying no path and no reason.
-    #[must_use]
-    pub fn output(code: &'static str) -> Self {
-        Self::new(code)
-    }
-
-    /// The same, scoped to the entry whose output the failure concerns.
-    #[must_use]
-    pub fn output_at(code: &'static str, entry: u32) -> Self {
-        Self {
-            entry_index: Some(entry),
-            ..Self::new(code)
-        }
-    }
-
-    /// The input is larger than the cap; `observed` is the cap itself, because
-    /// the reader stops there and never learns the real length.
-    #[must_use]
-    pub fn over_input_cap() -> Self {
-        Self {
-            limit: Some(openkrx_core::Limits::DEFAULT.max_archive_bytes),
-            observed: Some(INPUT_CAP_BYTES),
-            ..Self::new(INPUT_OVER_LIMIT)
-        }
-    }
-
-    /// The message a human-mode diagnostic prints: code, numbers, entry index.
-    #[must_use]
-    pub fn message(&self) -> String {
-        let mut text = self.code.to_owned();
-        if let Some(limit) = self.limit {
-            text.push_str(&format!(" (limit {limit}"));
-            if let Some(observed) = self.observed {
-                text.push_str(&format!(", observed {observed}"));
-            }
-            text.push(')');
-        }
-        if let Some(entry) = self.entry_index {
-            text.push_str(&format!(" at entry {entry}"));
-        }
-        text
-    }
-
-    /// The one line human mode writes on stderr: the code, its numbers, and
-    /// one sentence saying what the category means. It carries no part of the
-    /// input, so it stays safe to log.
-    #[must_use]
-    pub fn line(&self) -> String {
-        let explanation = if self.classified {
-            advice(self.code).unwrap_or_else(|| self.category.explanation())
-        } else {
-            UNCLASSIFIED_EXPLANATION
-        };
-        format!(
-            "openkrx: {} — {explanation} (exit {})",
-            self.message(),
-            self.category.status()
-        )
-    }
-}
-
-impl From<ArchiveError> for Failure {
-    fn from(error: ArchiveError) -> Self {
-        let (limit, observed) = match error {
-            ArchiveError::OverLimit {
-                limit_value,
-                observed,
-                ..
-            } => (Some(limit_value), observed),
-            ArchiveError::Unsupported { value, .. } => (None, value),
-            _ => (None, None),
-        };
-        Self {
-            entry_index: error.entry_index(),
-            limit,
-            observed,
-            ..Self::new(error.code())
-        }
-    }
-}
-
-impl From<PlanError> for Failure {
-    fn from(error: PlanError) -> Self {
-        let (limit, observed) = match error {
-            PlanError::OverLimit {
-                limit_value,
-                observed,
-                ..
-            } => (Some(limit_value), observed),
-            _ => (None, None),
-        };
-        Self {
-            entry_index: error.entry_index(),
-            limit,
-            observed,
-            ..Self::new(error.code())
-        }
-    }
-}
-
-impl From<ProfileError> for Failure {
-    fn from(error: ProfileError) -> Self {
-        match error {
-            ProfileError::Archive(archive) => Self::from(archive),
-            // The enum is `#[non_exhaustive]`; a future variant still carries
-            // a stable code, which is all a diagnostic is allowed to report.
-            _ => Self::new(error.code()),
-        }
     }
 }
 
@@ -433,10 +252,10 @@ mod tests {
     ];
 
     /// The catalogue `scripts/check-codes.py` forces to stay complete.
-    const CATALOGUE: &str = include_str!("../../../docs/codes.md");
+    const CATALOGUE: &str = include_str!("../../../../docs/codes.md");
 
     /// The checker that owns the one head list, read for that list alone.
-    const CHECKER: &str = include_str!("../../../scripts/check-codes.py");
+    const CHECKER: &str = include_str!("../../../../scripts/check-codes.py");
 
     #[test]
     fn success_is_zero() {
@@ -560,6 +379,87 @@ mod tests {
         let missing = Failure::output(super::OUTPUT_DESTINATION_MISSING).line();
         assert!(missing.contains("does not exist"));
         assert!(!missing.contains("overwritten"), "{missing}");
+    }
+
+    #[test]
+    fn a_manifest_refusal_names_its_field_and_never_a_value() {
+        // Every manifest code is a package problem, and the diagnostic says
+        // which field it concerns using the schema's own path — the manifest's
+        // values, and the spelling of an unknown key, are not reachable here.
+        for code in [
+            super::MANIFEST_SYNTAX,
+            super::MANIFEST_SCHEMA_VERSION,
+            super::MANIFEST_UNKNOWN_FIELD,
+            super::MANIFEST_MISSING_FIELD,
+            super::MANIFEST_TYPE,
+            super::MANIFEST_ENUMERATION,
+            super::MANIFEST_TIMESTAMP,
+        ] {
+            assert_eq!(Category::of_code(code), Some(Category::Package), "{code}");
+            let failure = Failure::manifest(code, "/metadata/source_system");
+            assert_eq!(failure.category.status(), 6);
+            assert!(
+                failure
+                    .message()
+                    .ends_with("at field /metadata/source_system")
+            );
+            assert!(failure.line().ends_with("(exit 6)"));
+            // Each code carries its own sentence rather than the category's.
+            assert!(!failure.line().contains("truncated in transit"), "{code}");
+        }
+        let scoped = Failure::manifest_at(super::MANIFEST_TYPE, "/attachments/path", 2);
+        assert_eq!(scoped.attachment_index, Some(2));
+        assert_eq!(
+            scoped.message(),
+            "manifest.invalid.type at field /attachments/path (attachment 2)"
+        );
+        assert_eq!(scoped.entry_index, None, "no archive exists yet");
+    }
+
+    #[test]
+    fn the_self_check_code_is_a_package_problem() {
+        // A package openKRX wrote that its own reader refuses is a defect in
+        // openKRX; the status must still be a failure, and the sentence must
+        // say so rather than blame the caller's manifest.
+        let failure = Failure::self_check_failed();
+        assert_eq!(failure.code, "create.internal.self_check_failed");
+        assert_eq!(failure.category, Category::Package);
+        assert_eq!(failure.category.status(), 6);
+        assert!(failure.line().contains("defect in openkrx"));
+        assert!(failure.line().contains("nothing was left behind"));
+    }
+
+    #[test]
+    fn a_creation_refusal_points_at_the_attachment_rather_than_an_entry() {
+        use openkrx_core::create::{CreateError, CreateLimitKind, InvalidKind, UnsafeNameKind};
+
+        let invalid = Failure::from(CreateError::Invalid {
+            kind: InvalidKind::ReferenceMismatch,
+            index: Some(1),
+        });
+        assert_eq!(invalid.code, "create.invalid.reference_mismatch");
+        assert_eq!(invalid.category, Category::Package);
+        assert_eq!(invalid.attachment_index, Some(1));
+        assert_eq!(invalid.entry_index, None);
+
+        let unsafe_name = Failure::from(CreateError::UnsafeName {
+            kind: UnsafeNameKind::Separator,
+            index: Some(0),
+        });
+        assert_eq!(unsafe_name.code, "create.unsafe_name.separator");
+        assert_eq!(unsafe_name.category, Category::Package);
+
+        let over = Failure::from(CreateError::OverLimit {
+            limit: CreateLimitKind::Entries,
+            limit_value: 256,
+            observed: Some(300),
+            index: None,
+        });
+        assert_eq!(over.category, Category::Limit);
+        assert_eq!(
+            over.message(),
+            "create.over_limit.entries (limit 256, observed 300)"
+        );
     }
 
     #[test]

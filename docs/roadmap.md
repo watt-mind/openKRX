@@ -14,17 +14,18 @@ what the code asserts from them in [conformance.md](conformance.md).
 
 ## Not yet implemented
 
-The three reader commands expose the three library layers and `extract`
-writes what the planner decided, so `capabilities().operations` names all
-four. Reading and protected extraction are the package operations that exist.
-The authoritative, code-level version of this list is
-[architecture.md](architecture.md#not-yet-implemented).
+The three reader commands expose the three library layers, `extract` writes
+what the planner decided and `create` writes what the deterministic writer
+produced, so `capabilities().operations` names all five and the stage reads
+`reader-writer`. Reading, protected extraction and deterministic creation are
+the package operations that exist. The authoritative, code-level version of
+this list is [architecture.md](architecture.md#not-yet-implemented).
 
-- A command that creates a package. The library writes one —
-  `openkrx_core::create::package`, deterministic and in the canonical
-  documented layout — but no command exposes it, nothing writes a file, and
-  `capabilities().operations` does not name it. What it writes is unverified
-  against every real producer; see the KRX-06 row below.
+- Any claim that a package openKRX wrote is interoperable. `create` writes
+  the canonical documented layout and reads it back through its own
+  structural checks, which is the only gate available; what it writes is
+  unverified against every real producer, and no output says otherwise. See
+  the KRX-06 row below.
 - Atomic whole-tree extraction. Files are created directly in the
   destination, so a crash leaves partial output plus the
   `.openkrx-extract.partial` marker that makes it detectable; rename-based
@@ -65,8 +66,8 @@ criteria and verification.
 | [KRX-03: metadata and structural validation](work-packages.md#krx-03-metadata-and-structural-validation) | **Done** | `openkrx_core::metadata::parse` and `openkrx_core::profile::check`: bounded `KER_META_V0_9`-shaped parsing and the eleven-check structural inventory, with each unresolved rule reported as `Unresolved(rule)`. No verdict, no CLI exposure. |
 | [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | **Done** | `inspect`, `list` and `validate-structure` over the existing layers, with bounded input, eight stable exit statuses, a one-object JSON contract and content-free diagnostics. The first milestone that makes any of this usable without writing Rust; its output stays within [profile.md](profile.md) and reports observations, never a conformance verdict. |
 | [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | **Done** | `openkrx_core::extract::plan` and the `extract` command: the whole plan decided before a byte is written, a destination that must already exist, no overwrite, no link escape, exit status 9, and an undo pass that removes only what the run created. |
-| [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | Core half **done**; the command is next | `openkrx_core::create::package`: deterministic bytes for the canonical documented layout, derived attachment references, the reader's ceilings enforced on the output, and 23 stable `create.*` codes. Built on an operator decision, not on new evidence — the layout is unverified, and A19 to A22 and M11 to M15 are as unresolved as before. |
-| [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |
+| [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | **Done** for the documented layout; interoperability unverified | `openkrx_core::create::package` and the `create` command: deterministic bytes for the canonical documented layout, derived attachment references, the reader's ceilings enforced on the output, 24 stable `create.*` codes and 7 `manifest.invalid.*` codes, a strictly validated JSON manifest, a no-clobber output file and a self-check that reads the written package back before reporting success. Built on an operator decision, not on new evidence — the layout is unverified, and A19 to A22 and M11 to M15 are as unresolved as before. |
+| [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned, and next | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |
 
 KRX-05 was the first milestone that writes to a filesystem, so the whole
 extraction threat model is now live; its residual risks are recorded in
@@ -86,8 +87,11 @@ does not mean:
 
 Nothing in that decision moves a profile rule. A19 to A22 and M11 to M15 are
 still unresolved, a package openKRX writes still reports `Unresolved(A19)`
-and `Unresolved(M13)` when openKRX reads it back, and no output may say that
-a written package is valid, conforming or acceptable to a service. The two
+and `Unresolved(M13)` when openKRX reads it back — which is why
+`validate-structure` over a package `create` just wrote exits 4 and never 3,
+and why that is the definition of success rather than a defect — and no
+output may say that a written package is valid, conforming or acceptable to a
+service. The two
 requests that would settle the rules — one to the format owner, one for the
 SPOCS OCD deliverable — are recorded in
 [research.md](research.md#open-evidence-gaps), and both are still for a
