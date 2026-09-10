@@ -109,7 +109,7 @@ fn the_skill_names_every_command() {
     let help = stdout(&run(&["--help"]));
     let commands = commands_from_help(&help);
     assert!(
-        commands.len() > 1,
+        commands.len() >= 6,
         "the Commands section of the help did not parse: {commands:?}"
     );
     for command in commands {
@@ -129,7 +129,7 @@ fn the_skill_names_every_exit_status() {
     let help = stdout(&run(&["--help"]));
     let statuses = exit_statuses_from_help(&help);
     assert!(
-        statuses.len() > 1,
+        statuses.len() >= 9,
         "the exit-status table of the help did not parse: {statuses:?}"
     );
     assert!(
@@ -177,10 +177,35 @@ fn json_keys(value: &serde_json::Value, into: &mut BTreeSet<String>) {
     }
 }
 
+/// The document with its fenced code blocks removed, fences included.
+///
+/// Segmentation below counts every odd run between backticks as inline code.
+/// A fence is three backticks on a line of its own, so leaving fences in
+/// would flip that parity for the rest of the file and make prose read as
+/// code and code as prose. Dropping the blocks entirely also means a JSON
+/// example never counts as documentation on its own: a field an agent is told
+/// to read must be named in prose.
+fn without_fenced_blocks(skill: &str) -> String {
+    let mut fenced = false;
+    skill
+        .lines()
+        .filter(|line| {
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+                return false;
+            }
+            !fenced
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Every identifier the document writes inside backticks, one path segment at
 /// a time, so that `data.entries[]` documents `data` and `entries` both.
+///
+/// Fenced blocks are stripped first, so only prose counts as documentation.
 fn documented_identifiers(skill: &str) -> BTreeSet<String> {
-    skill
+    without_fenced_blocks(skill)
         .split('`')
         .skip(1)
         .step_by(2)

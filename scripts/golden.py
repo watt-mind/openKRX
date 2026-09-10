@@ -6,14 +6,14 @@ it must produce. A case directory holds:
 
     cmd     one line: the arguments to pass to the executable
     setup   optional; one line of arguments run first, output discarded
+    stdout  the exact bytes expected on standard output
+    stderr  the exact bytes expected on standard error
+    status  the expected exit status, followed by a newline
 
 `cmd` and `setup` are split with `shlex`, so an argument containing spaces is
 written quoted, exactly as it would be in a POSIX shell. No other shell
 behaviour applies: nothing is expanded, globbed or interpolated, and the
 executable is run directly rather than through a shell.
-    stdout  the exact bytes expected on standard output
-    stderr  the exact bytes expected on standard error
-    status  the expected exit status, followed by a newline
 
 Two placeholders may appear in `cmd` and `setup`:
 
@@ -21,6 +21,11 @@ Two placeholders may appear in `cmd` and `setup`:
                written as a repository-relative path so no machine-local
                path can reach a golden
     {outdir}   a fresh, empty directory this case owns, for `extract`
+
+`{outdir}` is substituted already quoted for the shell, so a case writes it
+bare — `--into {outdir}` — and it survives a `TMPDIR` containing a space.
+Do not quote it again in the case file: `"{outdir}"` would nest the quoting
+and pass the quote characters through as part of the argument.
 
 A directory under `tests/golden/` without a `cmd` file is an error, not a
 case that is quietly skipped: a case with no command pins nothing, and a
@@ -102,14 +107,17 @@ def arguments_of(path, outdir):
     """The argument list one `cmd` or `setup` file describes.
 
     Split with `shlex`, so an argument that contains spaces can be written
-    quoted. Placeholders are substituted first and then split, so a
-    `{outdir}` whose path contains a space still becomes one argument only
-    if the placeholder itself is quoted in the file — the same rule a shell
-    would apply, made explicit here.
+    quoted. `{outdir}` is substituted through `shlex.quote`, because it is a
+    machine-local path the case file cannot see: under a `TMPDIR` containing
+    a space, a bare `{outdir}` would otherwise split into two arguments. A
+    case therefore writes the placeholder bare and must not quote it again —
+    quoting it in the file would nest the quoting and leak quote characters
+    into the argument. `{fixture}` is a fixed repository-relative path with
+    no shell metacharacters, so it is substituted literally.
     """
     line = path.read_text(encoding="utf-8").strip()
     substituted = line.replace("{fixture}", FIXTURE_RELATIVE).replace(
-        "{outdir}", str(outdir)
+        "{outdir}", shlex.quote(str(outdir))
     )
     return shlex.split(substituted)
 
@@ -151,8 +159,7 @@ def run(binary, case, temp):
                 f"exited {prepared.returncode}. The case pins what the "
                 "command does to the state that step leaves behind, so a "
                 "failed setup makes its goldens meaningless.\n"
-                f"setup stderr:\n"
-                + prepared.stderr.decode("utf-8", "replace")
+                "setup stderr:\n" + prepared.stderr.decode("utf-8", "replace")
             )
     completed = subprocess.run(
         [str(binary)] + arguments_of(case / COMMAND, outdir),
@@ -276,9 +283,19 @@ def verify_fixtures(temp):
             "remove any stray file or regenerate the directory."
         )
         return 1
-    nested = [name for name in expected if not (FIXTURES / name).is_file()]
+    # Both sides: a directory on the generated side would otherwise reach
+    # filecmp.cmp and raise IsADirectoryError instead of failing the contract.
+    nested = [
+        name
+        for name in expected
+        if not (FIXTURES / name).is_file() or not (produced / name).is_file()
+    ]
     if nested:
-        print(f"tests/fixtures/golden/ holds a non-file entry: {nested}")
+        print(f"a fixture entry is not a regular file on one side: {nested}")
+        print(
+            "tests/fixtures/golden/ and the generator's output must both hold "
+            "regular files only."
+        )
         return 1
     differing = [
         name
