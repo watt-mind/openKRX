@@ -124,6 +124,14 @@ fn assert_normalised(
         dispatch.handling_instructions_unqualified,
         input.dispatches[0].handling_instructions_unqualified
     );
+    // The `MELLEKLETEK` container comes back as the input carried it, except
+    // that a reference to list puts one there: M7 makes the container and the
+    // count separate elements, so an empty container and no container at all
+    // are different documents and neither is normalised into the other.
+    prop_assert_eq!(
+        dispatch.attachments_present,
+        input.dispatches[0].attachments_present || !attachments.is_empty()
+    );
     prop_assert_eq!(
         dispatch.declared_attachment_count,
         Some(attachments.len() as i64)

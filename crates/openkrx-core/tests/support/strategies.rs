@@ -109,6 +109,10 @@ pub fn limit_case() -> impl Strategy<Value = LimitCase> {
 /// The writer needs exactly one `EXPEDIALAS` block to place references in, and
 /// refuses attachments with none, so the drafted document grows a dispatch
 /// block whenever the request carries an attachment.
+///
+/// The block it grows may carry the `MELLEKLETEK` container or not: the writer
+/// adds one as soon as it has a reference to list, and a request carrying no
+/// attachment is written with whichever form the document had (M7).
 fn package_spec(
     count: std::ops::RangeInclusive<usize>,
     bytes: BoxedStrategy<Vec<u8>>,
@@ -116,12 +120,12 @@ fn package_spec(
     (
         prop::collection::vec(attachment(bytes), count),
         metadata_draft(),
-        any::<bool>(),
+        (any::<bool>(), any::<bool>()),
         fixed_timestamp(),
     )
-        .prop_map(|(attachments, mut draft, handling, timestamp)| {
+        .prop_map(|(attachments, mut draft, dispatch, timestamp)| {
             if !attachments.is_empty() {
-                draft.dispatch = Some(handling);
+                draft.dispatch = Some(dispatch);
             }
             let mut spec = PackageSpec::with_attachments(draft.metadata(), attachments);
             spec.timestamp = timestamp;
@@ -316,9 +320,15 @@ struct MetadataDraft {
     receipt: bool,
     openings: bool,
     return_receipt: bool,
-    /// One `EXPEDIALAS` block, carrying an unqualified `KEZELESI_UTASITASOK`
-    /// when the flag is set (M8), or no `EXPEDIALASOK` element at all.
-    dispatch: Option<bool>,
+    /// One `EXPEDIALAS` block, or no `EXPEDIALASOK` element at all.
+    ///
+    /// The first flag carries an unqualified `KEZELESI_UTASITASOK` (M8); the
+    /// second emits the `MELLEKLETEK` container. Both forms are generated
+    /// because M7 makes them different documents: the container is a separate
+    /// element from the count, so a dispatch listing nothing may carry an
+    /// empty one or none at all, and the writer must reproduce whichever it
+    /// was given.
+    dispatch: Option<(bool, bool)>,
 }
 
 /// Every field of a document, drawn independently.
@@ -337,7 +347,7 @@ fn metadata_draft() -> impl Strategy<Value = MetadataDraft> {
             prop::option::of(text()),
         ),
         (any::<bool>(), any::<bool>(), any::<bool>()),
-        prop::option::of(any::<bool>()),
+        prop::option::of((any::<bool>(), any::<bool>())),
     )
         .prop_map(
             |(
@@ -391,8 +401,11 @@ impl MetadataDraft {
         if self.openings {
             out.push_str("<ns2:BONTASOK></ns2:BONTASOK>");
         }
-        if let Some(handling) = self.dispatch {
-            out.push_str("<ns2:EXPEDIALASOK><ns2:EXPEDIALAS><ns2:MELLEKLETEK></ns2:MELLEKLETEK>");
+        if let Some((handling, container)) = self.dispatch {
+            out.push_str("<ns2:EXPEDIALASOK><ns2:EXPEDIALAS>");
+            if container {
+                out.push_str("<ns2:MELLEKLETEK></ns2:MELLEKLETEK>");
+            }
             if handling {
                 // M8: the schema declares this one element unqualified.
                 out.push_str("<KEZELESI_UTASITASOK></KEZELESI_UTASITASOK>");

@@ -624,6 +624,20 @@ and such a change is recorded here explicitly.
 
 ### Fixed
 
+- **A dispatch that carried no `MELLEKLETEK` container no longer gains an
+  empty one.** `Dispatch` now retains `attachments_present`, set by the reader
+  when the container element was seen, and the writer emits the element only
+  when the document carried it or there is a reference to list inside it. M7
+  makes the container and `MELLEKLETEK_SZAMA` separate elements, so an empty
+  container and no container at all are different documents; until now the
+  reader used the fact only to refuse a repeated list and the writer always
+  emitted the element, which turned the second form into the first. `repack`
+  therefore preserves either shape, and the residual gap recorded against it
+  in `docs/architecture.md` and `SECURITY.md` is closed. A caller outside the
+  crate sets the flag with `Dispatch::with_attachment_container`;
+  `draft::dispatch` carries the container whenever a count is declared, so
+  what `create` writes for a manifest is unchanged.
+
 - **Metadata and profile precision.** A repeated `MELLEKLETEK` under one
   `EXPEDIALAS` is now refused as `metadata.malformed.duplicate_element`, like
   every sibling field, instead of being merged into the first list and

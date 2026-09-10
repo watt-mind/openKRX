@@ -184,8 +184,32 @@ pub struct Dispatch {
     pub declared_attachment_count: Option<i64>,
     /// The `MELLEKLET` references actually listed under `MELLEKLETEK`.
     pub attachments: Vec<AttachmentReference>,
+    /// Whether the `MELLEKLETEK` container element itself was present (M7).
+    ///
+    /// The references live inside it, so a dispatch that lists one always
+    /// carries it. The flag is what the list alone cannot express: an empty
+    /// container and no container at all are different documents, and a writer
+    /// that always emitted the element would give the second the shape of the
+    /// first — a change nobody asked for. The fact is therefore retained here
+    /// rather than derived from [`attachments`](Dispatch::attachments) being
+    /// empty.
+    pub attachments_present: bool,
     /// Whether a namespace-unqualified `KEZELESI_UTASITASOK` was present (M8).
     pub handling_instructions_unqualified: bool,
+}
+
+impl Dispatch {
+    /// The same block, declaring whether it carries a `MELLEKLETEK` container.
+    ///
+    /// The builder form of
+    /// [`attachments_present`](Dispatch::attachments_present), for callers
+    /// outside this crate: the type is `#[non_exhaustive]`, so nothing there
+    /// can set the field on the value [`crate::draft::dispatch`] returned.
+    #[must_use]
+    pub fn with_attachment_container(mut self, present: bool) -> Self {
+        self.attachments_present = present;
+        self
+    }
 }
 
 /// A parsed `KER_META_V0_9`-shaped document.

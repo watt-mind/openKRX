@@ -62,6 +62,21 @@ fn write(spec: &PackageSpec) -> Vec<u8> {
     create::package(spec, &Limits::DEFAULT).expect("the package is written")
 }
 
+/// The bytes of the metadata document an image carries.
+#[track_caller]
+fn document_bytes(image: &[u8]) -> Vec<u8> {
+    archive::inventory(image, &Limits::DEFAULT)
+        .expect("the image is an archive")
+        .entry_bytes(1)
+        .expect("the document decodes")
+}
+
+/// The same, as text.
+#[track_caller]
+fn document_text(image: &[u8]) -> String {
+    String::from_utf8(document_bytes(image)).expect("the document is UTF-8")
+}
+
 /// The names of the entries an image holds, in central-directory order.
 fn names(image: &[u8]) -> Vec<String> {
     let inventory = archive::inventory(image, &Limits::DEFAULT).expect("the image is an archive");
@@ -180,6 +195,72 @@ fn the_derived_references_describe_where_each_attachment_went() {
         Some(2),
         "MELLEKLETEK_SZAMA is derived from the attachments"
     );
+}
+
+#[test]
+fn the_attachment_container_is_written_exactly_as_the_document_carried_it() {
+    // M7: an empty `MELLEKLETEK` and no `MELLEKLETEK` at all are different
+    // documents, so the writer reproduces the one it was given rather than
+    // normalising both into the first. With a reference to place there is no
+    // choice: the reference lives inside the container.
+    let carried = spec_with(0);
+    assert!(carried.metadata.dispatches[0].attachments_present);
+    assert!(document_text(&write(&carried)).contains("<ns2:MELLEKLETEK>"));
+
+    let mut without = spec_with(0);
+    // The builder is the surface a caller outside the crate has: `Dispatch` is
+    // `#[non_exhaustive]`, so nothing there can construct one with the flag.
+    let dispatch = without
+        .metadata
+        .dispatches
+        .remove(0)
+        .with_attachment_container(false);
+    without.metadata.dispatches.push(dispatch);
+    let text = document_text(&write(&without));
+    assert!(!text.contains("<ns2:MELLEKLETEK>"), "{text}");
+    assert!(
+        text.contains("<ns2:MELLEKLETEK_SZAMA>0</ns2:MELLEKLETEK_SZAMA>"),
+        "the derived count is written either way (M7)"
+    );
+
+    // The same document, once it has an attachment to list.
+    let listed = PackageSpec {
+        metadata: without.metadata.clone(),
+        ..spec_with(1)
+    };
+    assert!(document_text(&write(&listed)).contains("<ns2:MELLEKLETEK>"));
+}
+
+#[test]
+fn a_drafted_dispatch_carries_the_container_exactly_when_it_declares_a_count() {
+    // M7 pairs `MELLEKLETEK_SZAMA` with the list, so a caller declaring a
+    // count is describing a block that has one. A caller declaring nothing is
+    // not, and says otherwise with the builder.
+    assert!(openkrx_core::draft::dispatch(Some(0)).attachments_present);
+    assert!(!openkrx_core::draft::dispatch(None).attachments_present);
+    assert!(
+        openkrx_core::draft::dispatch(None)
+            .with_attachment_container(true)
+            .attachments_present
+    );
+}
+
+#[test]
+fn a_written_document_reads_back_carrying_the_container_it_was_written_with() {
+    for present in [true, false] {
+        let mut spec = spec_with(0);
+        spec.metadata.dispatches[0].attachments_present = present;
+        let image = write(&spec);
+        let read_back = parse(&document_bytes(&image));
+        assert_eq!(read_back.dispatches[0].attachments_present, present);
+        // Handing the document straight back writes the same bytes, so the
+        // shape is a fixed point rather than something that drifts on a pass.
+        let again = PackageSpec {
+            metadata: read_back,
+            ..spec
+        };
+        assert_eq!(write(&again), image, "present: {present}");
+    }
 }
 
 // ----------------------------------------------------------- the round trip

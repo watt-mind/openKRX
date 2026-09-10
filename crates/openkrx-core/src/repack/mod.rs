@@ -35,15 +35,10 @@
 //! writer derives the count and always emits it, so a dispatch that declared
 //! none would gain one.
 //!
-//! **One residual gap is known and not detectable here.** The reader records
-//! that a dispatch has attachment references, but not whether the
-//! `MELLEKLETEK` container element itself was present, and the writer always
-//! emits it. A dispatch that carried no `MELLEKLETEK` element at all —
-//! possible only with no references, since the references live inside it —
-//! therefore gains an empty one, and nothing in this module can tell that it
-//! happened. It needs the reader to retain the fact, which is tracked
-//! separately; until then it is the one case where "the package it was given"
-//! is not exact, and it is stated here rather than left for someone to find.
+//! The `MELLEKLETEK` container is not refused, because it does not have to be:
+//! the reader retains whether the dispatch carried the element and the writer
+//! emits exactly what it was told, so a dispatch that carried no container
+//! keeps none instead of gaining an empty one.
 //!
 //! The rule behind every other row is one sentence: **repacking with no edit
 //! must produce the package it was given.** A package this module accepts is one

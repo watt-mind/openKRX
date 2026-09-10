@@ -314,6 +314,44 @@ fn a_header_only_document_lists_no_dispatch_and_no_attachment() {
 }
 
 #[test]
+fn an_empty_attachment_container_is_distinguished_from_no_container_at_all() {
+    // M7: the list and the count are separate elements, so a dispatch can
+    // carry an empty `MELLEKLETEK` or none at all. The two are different
+    // documents and the reader retains which one it read, so that a writer
+    // handed the value back cannot turn the second into the first.
+    let document = Document {
+        declared_count: Some("0".to_owned()),
+        attachments: Vec::new(),
+        handling_instructions: false,
+        ..Document::default()
+    };
+    let empty = read(&document);
+    assert!(empty.dispatches[0].attachments_present);
+    assert!(empty.dispatches[0].attachments.is_empty());
+
+    let xml = document
+        .xml()
+        .replace("<ns2:MELLEKLETEK></ns2:MELLEKLETEK>", "");
+    assert!(!xml.contains("<ns2:MELLEKLETEK>"), "the container is gone");
+    let absent = metadata::parse(xml.as_bytes(), &MetadataLimits::DEFAULT).expect("accepted");
+    assert!(!absent.dispatches[0].attachments_present);
+    assert_eq!(
+        absent.dispatches[0].declared_attachment_count,
+        empty.dispatches[0].declared_attachment_count,
+        "only the container differs between the two documents"
+    );
+}
+
+#[test]
+fn a_dispatch_listing_a_reference_carries_the_container_it_sits_in() {
+    // The references live inside `MELLEKLETEK`, so a listed one is proof the
+    // element was there; the flag is never `false` beside a non-empty list.
+    let parsed = read(&Document::default());
+    assert!(parsed.dispatches[0].attachments_present);
+    assert_eq!(parsed.dispatches[0].attachments.len(), 1);
+}
+
+#[test]
 fn header_elements_may_appear_in_any_order() {
     // Only M2 states an order, and it states it for the KULDEMENY children.
     let xml = Document::default().xml().replace(

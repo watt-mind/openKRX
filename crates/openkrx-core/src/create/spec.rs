@@ -307,6 +307,11 @@ fn place(dispatch: &mut Dispatch, derived: Vec<AttachmentReference>) -> Result<(
         return Err(mismatch(None));
     }
     dispatch.declared_attachment_count = Some(count);
+    // A reference has to be listed inside a `MELLEKLETEK` container, so
+    // placing one puts the container there. With nothing to place, the request
+    // decides: the block is written exactly as shaped, so a document that
+    // carried no container is not given an empty one.
+    dispatch.attachments_present |= !derived.is_empty();
     dispatch.attachments = derived;
     Ok(())
 }
