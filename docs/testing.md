@@ -516,7 +516,8 @@ from any source, and none may be added.
 
 ## Fuzzing
 
-Both readers have a `cargo-fuzz` target. The package lives in
+Both readers, the structural checks, the extraction planner and the writer
+have a `cargo-fuzz` target. The package lives in
 [fuzz/](../fuzz/README.md) and is **not** a member of the root workspace: it
 needs a nightly toolchain and libFuzzer, and keeping it separate means
 `cargo deny`, `cargo llvm-cov --workspace` and the MSRV check never see its
@@ -527,10 +528,37 @@ dependencies. `cargo machete` does scan the directory, and needs no exclusion:
 | --- | --- |
 | `inventory` | `archive::inventory(data, &Limits::DEFAULT)`, then `entry_bytes` for every accepted entry, which is the only path that inflates data |
 | `xml_metadata` | `metadata::parse(data, &MetadataLimits::DEFAULT)` |
+| `structure` | `archive::inventory`, then `profile::check(&inventory, &MetadataLimits::DEFAULT)` over what it accepted |
+| `extract_plan` | `archive::inventory`, then `extract::plan(&inventory, &ExtractLimits::DEFAULT)` |
+| `create_round_trip` | `create::package(&spec, &Limits::DEFAULT)` on a `PackageSpec` built from the fuzzer's bytes with `arbitrary`, then `create::verify_round_trip` |
 
-Neither asserts anything about the result. The property under test is that the
-call **returns** — accept or refuse — on any byte string, which is the same
-property the sweeps hold one byte at a time.
+The first three assert nothing about the result. The property under test is
+that the call **returns** — accept or refuse — on any byte string, which is the
+same property the sweeps hold one byte at a time.
+
+The last two additionally assert one invariant each. They are invariants of
+this crate, not conformance claims about the KRX format, and each is worded so
+that only a defect can break it:
+
+- **`extract_plan`: a produced plan is joinable.** Every component of every
+  planned item is non-empty, is neither `.` nor `..`, and holds no `/` or
+  backslash, and the first component is non-empty so the destination is never
+  absolute. That is the planner's documented promise; a caller joins the
+  components against its own destination and nothing else stands between the
+  archive's names and the filesystem.
+- **`create_round_trip`: what the writer wrote, the reader accepts.** When
+  `create::package` returns bytes, `create::verify_round_trip` must produce a
+  report with no `CheckOutcome::Fail`, and each attachment must read back
+  byte-identically through `entry_bytes`. When it refuses, the code must start
+  with `create.` and must be one `docs/codes.md` catalogues — the target reads
+  the catalogue with `include_str!` and scans it, so a new code that is never
+  documented fails the lane rather than reaching a caller undocumented.
+
+The request the round-trip target builds is bounded on purpose: header strings
+are printable, whitespace-trimmed and at most 32 characters, there are 0 to 4
+attachments of at most 4 KiB each, and the timestamp is taken as the two MS-DOS
+fields, which are in range by construction. File names are *not* trimmed or
+otherwise cleaned, so the `create.unsafe_name.*` classes stay reachable.
 
 ### Prerequisites
 
@@ -548,6 +576,9 @@ Linux or macOS. There is no Windows lane.
 cargo +nightly fuzz build --fuzz-dir fuzz
 cargo +nightly fuzz run --fuzz-dir fuzz inventory -- -max_total_time=30
 cargo +nightly fuzz run --fuzz-dir fuzz xml_metadata -- -max_total_time=30
+cargo +nightly fuzz run --fuzz-dir fuzz structure -- -max_total_time=30
+cargo +nightly fuzz run --fuzz-dir fuzz extract_plan -- -max_total_time=30
+cargo +nightly fuzz run --fuzz-dir fuzz create_round_trip -- -max_total_time=30
 ```
 
 Without `-max_total_time` a run continues until it is interrupted. The corpus
@@ -579,16 +610,20 @@ Add `fuzz/fuzz_targets/<name>.rs` holding one `fuzz_target!` call and nothing
 else, add the matching `[[bin]]` block to `fuzz/Cargo.toml` with
 `test = false`, `doc = false` and `bench = false`, create
 `fuzz/regressions/<name>/.gitkeep`, extend the table above and add the target
-to the CI lane. Keep the harness body to the single call: a harness that
-asserts a result turns a behaviour change into a fuzzing failure, which is not
-what this lane is for.
+to the CI lane, whose per-target budget the section below states. Keep the
+harness body to the single call unless there is an invariant to hold: a harness
+that asserts a *result* turns a behaviour change into a fuzzing failure, which
+is not what this lane is for, while an invariant — something only a defect can
+break, such as the two above — belongs in the harness and is documented with
+it.
 
 ### The CI lane
 
 The `Fuzz (build only)` job in `.github/workflows/ci.yml` runs on
 `ubuntu-latest` for every push and pull request. It installs the nightly
-toolchain and a pinned `cargo-fuzz`, builds both targets, then runs each for
-**30 seconds** with `-rss_limit_mb=2048`, a 60-second total fuzzing budget.
+toolchain and a pinned `cargo-fuzz`, builds the five targets, then runs each
+for **30 seconds** with `-rss_limit_mb=2048`, a 150-second total fuzzing
+budget.
 Crash artifacts are uploaded when the job fails. The job names
 `--target x86_64-unknown-linux-gnu` explicitly, through the
 `FUZZ_TARGET_TRIPLE` env variable: cargo-fuzz otherwise defaults to the triple

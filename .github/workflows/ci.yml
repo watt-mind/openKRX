@@ -158,15 +158,17 @@ jobs:
   fuzz:
     name: Fuzz (build only)
     # The fuzz package is its own workspace on a nightly toolchain, so nothing
-    # here is covered by the stable jobs above. Each target then runs for a
-    # bounded 30 seconds — long enough to prove the harness executes and to
-    # catch a shallow regression, short enough to keep the pull-request lane
-    # cheap. Deep campaigns are a local or scheduled activity, not this job.
+    # here is covered by the stable jobs above. Each of the five targets then
+    # runs for a bounded 30 seconds — a 150-second total fuzzing budget, long
+    # enough to prove every harness executes and to catch a shallow regression,
+    # short enough to keep the pull-request lane cheap. Deep campaigns are a
+    # local or scheduled activity, not this job.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       # The Rust target triple the fuzz binaries are built for, not the name of
-      # a fuzz target: those are `inventory` and `xml_metadata`, named below.
+      # a fuzz target: those are `inventory`, `xml_metadata`, `structure`,
+      # `extract_plan` and `create_round_trip`, named below.
       FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -197,6 +199,12 @@ jobs:
             inventory -- -max_total_time=30 -rss_limit_mb=2048
           cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
             xml_metadata -- -max_total_time=30 -rss_limit_mb=2048
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
+            structure -- -max_total_time=30 -rss_limit_mb=2048
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
+            extract_plan -- -max_total_time=30 -rss_limit_mb=2048
+          cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
+            create_round_trip -- -max_total_time=30 -rss_limit_mb=2048
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1,7 +1,7 @@
 # Fuzz regressions
 
 Minimised crash artifacts kept as permanent regression inputs, one directory
-per target. Both directories are empty today apart from their `.gitkeep`: no
+per target. Every directory is empty today apart from its `.gitkeep`: no
 crash has been found, and no corpus is committed.
 
 ## What may be added here

@@ -131,12 +131,16 @@ Attachment bytes are never decoded by this layer. Only the marker entry and
 the metadata document are read back through `ArchiveInventory::entry_bytes`;
 attachments stay opaque and are checked by name alone.
 
-Both layers are fuzzed. `inventory` drives `archive::inventory` and
-`entry_bytes`, `xml_metadata` drives `metadata::parse`, and each runs for a
-bounded 30 seconds per pull request; the exhaustive truncation and single-byte
-mutation sweeps remain the load-bearing compensating checks, because a short
-run is not a campaign. Both are described in
-[testing.md](docs/testing.md#fuzzing), with what the lane still does not do.
+Both layers are fuzzed, and so are the structural checks over them.
+`inventory` drives `archive::inventory` and `entry_bytes`, `xml_metadata`
+drives `metadata::parse`, and `structure` drives `profile::check` over an
+inventory the reader accepted — the path that re-reads the marker entry and the
+metadata document out of an archive, and the one this table's no-panic rows
+cover on random input. Each runs for a bounded 30 seconds per pull request; the
+exhaustive truncation and single-byte mutation sweeps remain the load-bearing
+compensating checks, because a short run is not a campaign. All are described
+in [testing.md](docs/testing.md#fuzzing), with what the lane still does not
+do.
 
 ## Threat-model mapping: extraction planning layer
 
@@ -166,7 +170,7 @@ rules in
 | Specified Unicode and case collisions, refused rather than resolved | Planning; the output layer holds the rest | `extract.ambiguous.collision`, `.file_directory_conflict` | `two_names_equal_after_normalisation_are_a_collision_not_a_choice`, `a_case_difference_that_only_appears_after_normalisation_is_a_collision`, `a_file_that_is_also_a_directory_prefix_is_refused`, `a_directory_prefix_that_arrives_before_its_file_is_refused_the_same_way`, `a_shared_file_name_in_different_directories_is_not_a_collision` |
 | Documented output limits — file count, total bytes, path, component and depth — with checked arithmetic | Planning; the output layer holds the rest | `extract.over_limit.files`, `.total_bytes`, `.path_bytes`, `.component_bytes`, `.depth` | `the_file_count_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary`, `the_path_length_limit_holds_at_its_boundary`, `the_component_length_limit_holds_at_its_boundary`, `the_depth_limit_holds_at_its_boundary` |
 | A failure prevents the operation reporting success: a rejection rejects the whole plan, never a reduced one | Planning; the output layer holds the rest | every `extract.*` code | every rejection test above; each asserts that no plan was produced |
-| No panic on any input | Planning; the output layer holds the rest | any code; never a panic | `planning_every_fixture_inventory_never_panics`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path` |
+| No panic on any input | Planning; the output layer holds the rest | any code; never a panic | `planning_every_fixture_inventory_never_panics`, `a_name_mutation_sweep_never_panics_and_never_plans_an_unsafe_path`, and the `extract_plan` fuzz target on random input |
 | Diagnostics free of personal content and private paths | Planning; the output layer holds the rest | every code; `Display` prints code, entry index and limit numbers only | `error_display_carries_codes_and_numbers_but_no_entry_name` |
 | Confinement to a caller-selected destination, no-clobber creation, commit and cleanup after an interrupted write | Implemented, in the output layer | `output.*` | [the output table](#threat-model-mapping-extraction-output-layer) |
 
@@ -200,6 +204,14 @@ rules in
   refused rather than extracted on an assumption. If a real producer is ever
   observed doing this, it is a documented decision to revisit with evidence,
   not a bug to fix by guessing.
+- **The lane is short, not a campaign.** The `extract_plan` fuzz target runs
+  `archive::inventory` and then `extract::plan` on random bytes, and asserts
+  the planner's own invariant over every produced plan: no component is empty,
+  `.` or `..`, none holds `/` or a backslash, and the first is non-empty, so a
+  caller can join the components against its destination blindly. It runs for a
+  bounded 30 seconds per pull request
+  ([testing.md](docs/testing.md#fuzzing)); the named tests above, not the lane,
+  are what hold each individual rule.
 - **Planning proves nothing about writing.** A produced plan says a
   destination is describable, not that it can be created: permissions, an
   existing file, a case-insensitive filesystem and a concurrent writer are
@@ -326,6 +338,16 @@ in [codes.md](docs/codes.md#creation-codes).
   than choosing one, so such a package is detected on the way back in rather
   than read two ways; a caller that must be certain reads its own output
   back, which `create::verify_round_trip` does in one call.
+- **The writer/reader invariant is fuzzed, briefly.** The `create_round_trip`
+  fuzz target builds a bounded `PackageSpec` out of random bytes — header
+  strings, 0 to 4 attachments, a timestamp — and calls `create::package`. When
+  bytes come back it asserts the layer's central promise: `verify_round_trip`
+  reports no failing check and every attachment reads back byte-identically.
+  When the request is refused it asserts that the code is one
+  [docs/codes.md](docs/codes.md) catalogues, which it reads from that document,
+  so no `create.*` code can reach a caller undocumented. It runs for a bounded
+  30 seconds per pull request ([testing.md](docs/testing.md#fuzzing)); the
+  named tests in the table above are what hold each individual rule.
 
 ## Threat-model mapping: command-line input layer
 
