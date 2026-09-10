@@ -91,6 +91,14 @@ nothing external.
   place for, metadata openKRX reads but cannot write back — rather than
   relaying it out or dropping what it cannot re-emit.
 
+The crate-level documentation of `openkrx-core` carries one worked example per
+layer — writing a package, reading it back, running the structural checks,
+planning an extraction, and repacking it. Each is compiled and run by
+`cargo test --doc -p openkrx-core`, and each builds its own package through the
+public API, so none of them depends on a fixture. Read them with
+`cargo doc --open -p openkrx-core`, or at the top of
+[`crates/openkrx-core/src/lib.rs`](crates/openkrx-core/src/lib.rs).
+
 `openkrx-cli` adds the only filesystem writing in the project, in `extract`,
 `create` and `repack`, and it is deliberately narrow: an extraction
 destination must already exist and be a real directory, a `create` or

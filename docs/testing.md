@@ -10,7 +10,19 @@ rules for fixtures and for any private corpus.
 Almost every test is an integration test, because the contract worth testing
 is the public one: a byte slice goes in, a typed value or a stable code comes
 out. The exceptions are the doctests in the public API documentation and five
-`#[cfg(test)]` modules. The one in
+`#[cfg(test)]` modules.
+
+The doctests are compiled and run by `cargo test --doc`, which
+`cargo test --workspace` includes. `crates/openkrx-core/src/lib.rs` carries one
+worked example per layer — writing a package, reading it back, running the
+structural checks, planning an extraction, and repacking it — so a reader of
+the crate documentation can copy an example that is known to build. Each one
+builds its own package through the public `draft` and `create` surface, so
+none needs a committed fixture or the test-only `synthetic-writer` feature,
+and each runs entirely in memory, because no layer of the core crate touches a
+filesystem.
+
+Of the `#[cfg(test)]` modules, the one in
 `crates/openkrx-core/src/archive/inflate.rs` pins the CRC-32 implementation
 against its published check value, the empty input, and chunk ordering — an
 internal helper with no public surface to exercise it through. The ones in
