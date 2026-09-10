@@ -445,7 +445,7 @@ mod links {
 /// `FILE_ATTRIBUTE_REPARSE_POINT` — the only defence this platform has against
 /// output escaping the destination the caller named.
 ///
-/// Each test returns early, with a `SKIPPED:` line already on stderr, if
+/// Each test returns early, with a `SKIPPED <test>:` line already printed, if
 /// `mklink` is not there at all: a rule that could not be exercised must say
 /// so rather than fail.
 #[cfg(windows)]

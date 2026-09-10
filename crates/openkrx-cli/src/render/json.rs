@@ -37,7 +37,8 @@ struct Success<'a, T> {
     /// diagnostic; it says nothing about the package the report describes.
     ok: bool,
     /// The command that produced the report, as its stable name: `inspect`,
-    /// `list`, `validate-structure`, `extract`, `create` or `repack`.
+    /// `list`, `validate-structure`, `extract`, `create`, `repack` or
+    /// `capabilities`.
     command: &'a str,
     /// The command's own report. Its shape belongs to that command and is
     /// what a raised `schema_version` would be about.

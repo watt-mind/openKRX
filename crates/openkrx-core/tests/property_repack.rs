@@ -337,9 +337,18 @@ proptest! {
         removed.sort_unstable();
         let mut changed = replaced.clone();
         changed.sort_unstable();
+        // The numbers, not merely how many: a plan that preserved the wrong
+        // attachment would keep the count and still be wrong. `preserved`
+        // names numbers in the package being edited, ascending, which is the
+        // order `kept` is already in.
+        let preserved: Vec<u32> = kept
+            .iter()
+            .copied()
+            .filter(|number| !replaced.contains(number))
+            .collect();
         prop_assert_eq!(plan.removed(), removed.as_slice());
         prop_assert_eq!(plan.changed(), changed.as_slice());
-        prop_assert_eq!(plan.preserved().len(), kept.len() - changed.len());
+        prop_assert_eq!(plan.preserved(), preserved.as_slice());
         prop_assert_eq!(plan.added().len(), edits.add.len());
         let fields = edits.header.fields();
         prop_assert_eq!(plan.header_fields(), fields.as_slice());

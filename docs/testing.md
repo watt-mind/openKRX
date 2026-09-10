@@ -61,7 +61,7 @@ the contract covers every code the crates define.
 | `crates/openkrx-cli/tests/render_text.rs` | The human renderer's own lines, asserted whole rather than by substring: each attachment block with the entry it resolves to and its observed decoded size, a reference that resolves to nothing, one matched only after a root-prefix adjustment, the metadata entry with its index, the format-marker outcome, the failed and undecided check counts in the summary sentence, a check that does not apply reported as such rather than as undecided, the 200-character cut boundary at the limit and one past it, and the declared attachment count taken from the document rather than from the number of references. |
 | `crates/openkrx-cli/tests/diagnostics.rs` | The rest of the diagnostic contract: the one content-free sentence each `output.*` code is given instead of its category's, for a destination that is not a directory, an occupied ancestor, an ancestor symbolic link and a failed write; the cleanup line a refusal reached before any write produces; and that a limit failure keeps its limit and observed numbers whichever command reported it. |
 | `crates/openkrx-cli/tests/privacy.rs` | The content-free-diagnostic rule, by canary: a canary path segment, a canary entry name and a canary metadata value are searched for on stderr in every case and on stdout in every failing case, a declared value is shown to reach stdout for `inspect` alone, and `extract` is held to the same rule with its one documented exception — a successful report names the files it created, and still never the destination or a declared value. |
-| `crates/openkrx-cli/tests/support/mod.rs` | Subprocess helpers and the synthetic packages the command tests read, not tests: a scratch directory that removes itself, a standard-input runner, a `cfg(windows)` directory-junction helper that shells out to `mklink /J` and reports `SKIPPED:` if it is unavailable, and one builder per package shape. |
+| `crates/openkrx-cli/tests/support/mod.rs` | Subprocess helpers and the synthetic packages the command tests read, not tests: a scratch directory that removes itself, a standard-input runner, a `cfg(windows)` directory-junction helper that shells out to `mklink /J` and prints a `SKIPPED <test>:` line if it is unavailable, and one builder per package shape. |
 
 Each rejection test asserts a **stable code**, not merely that an error
 occurred, so one rejection category cannot silently become another.
@@ -87,14 +87,19 @@ creates with no privilege at all, so the Windows half of the rule —
 exercised by the Windows CI lane rather than held by construction. The
 junction helper shells out to `cmd /c mklink /J`, so no `unsafe` call and no
 new dependency is needed under `unsafe_code = "forbid"`; if the builtin is
-missing it prints `SKIPPED: mklink /J unavailable` and the test returns
-visibly rather than passing quietly.
+missing it prints `SKIPPED <test>: mklink /J unavailable` and the test returns.
+libtest captures that line and shows it on failure or under `--show-output`,
+so it is not loud on a green run; what it buys is a greppable record naming
+the case, rather than a rule that went unexercised and read as a pass. That
+`SKIPPED <test>:` shape is the junction helper's and `diagnostics.rs`'s; it is
+the shape a new self-skipping test should follow.
 
 The injected write failure stays behind `cfg(unix)`: Windows ACL inheritance
 does not make a directory unwritable through one `set_permissions` call, and
-the test skips itself, loudly, on Unix too when the process can write into a
-read-only directory anyway. Everything else in `extract.rs` runs on all three
-operating systems.
+the test in `extract.rs` skips itself on Unix too when the process can write
+into a read-only directory anyway — with a lowercase `skipped:` line on
+standard error rather than that shape. Everything else in `extract.rs` runs on
+all three operating systems.
 
 What the suite does **not** provide evidence about: that a package openKRX
 writes is accepted by any real producer or service — the writer's round-trip

@@ -670,6 +670,12 @@ pub fn edits_for(attachments: usize) -> BoxedStrategy<Edits> {
 /// `CSATOLMANY_SZAMA` counts from 1 — and one number named twice. A package
 /// with no attachment has no valid number to duplicate, so only the first arm
 /// is drawn for it.
+///
+/// The duplicate arm draws all three pairings — remove and remove, remove and
+/// replace, replace and replace — because `check_targets` walks `remove`
+/// before `replace` and a generator that always put the first of the pair in
+/// `remove` would never exercise the second list finding a number already in
+/// itself.
 pub fn invalid_edits_for(attachments: usize) -> BoxedStrategy<(Edits, &'static str)> {
     let count = u32::try_from(attachments).expect("a small number");
     let out_of_range = (
@@ -691,15 +697,16 @@ pub fn invalid_edits_for(attachments: usize) -> BoxedStrategy<(Edits, &'static s
     if count == 0 {
         return out_of_range.boxed();
     }
-    let duplicate = (1_u32..=count, any::<bool>()).prop_map(|(number, as_replacement)| {
+    // How many of the pair go into `replace`: none, one, or both.
+    let duplicate = (1_u32..=count, 0_u8..=2).prop_map(|(number, replacements)| {
         let mut edits = Edits::default();
-        edits.remove.push(number);
-        if as_replacement {
+        for _ in 0..replacements {
             edits.replace.push(AttachmentReplacement {
                 number,
                 bytes: Vec::new(),
             });
-        } else {
+        }
+        for _ in replacements..2 {
             edits.remove.push(number);
         }
         (edits, "repack.invalid.duplicate_target")
