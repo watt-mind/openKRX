@@ -100,6 +100,23 @@ and such a change is recorded here explicitly.
   is not a campaign, and the lane passing is not evidence that any layer is
   fuzz-clean; see [docs/testing.md](docs/testing.md#fuzzing).
 
+- **A fuzzing seed corpus built at run time, and a weekly campaign lane.**
+  `fuzz/seed.py` — Python 3 and the standard library only — builds
+  `fuzz/corpus/<target>/` from the committed golden fixtures: each `.krx` for
+  the three targets that take a whole package, the extracted metadata document
+  for `xml_metadata`, and that document concatenated with the payload members
+  for `create_round_trip`. Nothing is committed; the seeds are derived before
+  a run and `fuzz/corpus/` stays ignored. `--verify` asserts the corpus exists
+  and prints the counts. The pull-request lane now seeds before its 30-second
+  runs, on an unchanged budget: an unseeded `inventory` run reached 144 edges
+  after 20.5 million executions, while the seeded one *starts* at 514 and ends
+  at 798 after 2.4 million deeper ones. A new
+  `.github/workflows/fuzz.yml` runs every target for 20 minutes weekly, or for
+  a dispatched `minutes_per_target`, measures coverage for `inventory`, and
+  uploads the corpus, the coverage report and any crash artifact for 14 days.
+  Like the mutation lane it is deliberately **not** a required check; see
+  [docs/testing.md](docs/testing.md#fuzzing).
+
 - **`openkrx create`: writing one package from a manifest file (KRX-06,
   command half).** `openkrx create --manifest <FILE> --out <FILE.krx>
   [--json]` reads one JSON manifest, reads the local files it names as

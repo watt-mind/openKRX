@@ -1,0 +1,184 @@
+name: Fuzz campaign
+
+# Deliberately NOT a required check. `.github/workflows/ci.yml` keeps the
+# pull-request lane: five targets, 30 seconds each, enough to prove every
+# harness still links and executes. This workflow is the other half — a long
+# run from a seeded corpus, off the pull-request path — and a crash it finds
+# is a defect to triage under
+# [fuzz/regressions/README.md](../../fuzz/regressions/README.md), not a merge
+# block. It must not be added to the repository's required status checks.
+#
+# See docs/testing.md, "Fuzzing", for the seed corpus, the local campaign and
+# how a crash is handled.
+
+on:
+  schedule:
+    # 05:00 UTC every Monday: an hour after the mutation lane (mutants.yml),
+    # so the two weekly campaigns do not queue against each other.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      minutes_per_target:
+        description: >-
+          Wall-clock budget for each of the five targets, in minutes.
+        type: number
+        default: 20
+  # GitHub registers a `workflow_dispatch` workflow only from the default
+  # branch, so a brand-new workflow cannot be dispatched from the branch that
+  # adds it — release.yml carries the same note. This trigger is how the lane
+  # is rehearsed before it lands: a pull request touching the workflow or the
+  # seeding script runs the identical job at a 2-minute budget. The filter is
+  # deliberately just these two files; every ordinary pull request is served
+  # by ci.yml's 30-second lane.
+  pull_request:
+    paths:
+      - ".github/workflows/fuzz.yml"
+      - "fuzz/seed.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  campaign:
+    name: Fuzz campaign (five targets)
+    runs-on: ubuntu-latest
+    # The scheduled budget is 5 x 20 minutes of fuzzing plus the build, the
+    # seeding and the coverage pass. The bound is generous rather than tight:
+    # it exists to stop a runaway job, and a `workflow_dispatch` asking for a
+    # budget this cannot fit is the caller's own arithmetic to do.
+    timeout-minutes: 360
+    env:
+      # The Rust target triple the fuzz binaries are built for, not the name
+      # of a fuzz target: those are `inventory`, `xml_metadata`, `structure`,
+      # `extract_plan` and `create_round_trip`, named below. cargo-fuzz
+      # otherwise defaults to the triple of its own binary, and the pre-built
+      # one is a musl build, which AddressSanitizer cannot link against.
+      FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable @ 2026-09-03
+        with:
+          toolchain: nightly
+          # `cargo fuzz coverage` needs llvm-profdata to merge the raw
+          # profiles, and llvm-cov to render them. Both ship in this
+          # component, and it installs cleanly on the nightly toolchain — the
+          # coverage step below is therefore an ordinary step whose failure
+          # fails the job, not a best-effort one.
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+        with:
+          tool: cargo-fuzz@0.13.2
+      # The same gate ci.yml runs: `cargo fuzz` accepts none of cargo's
+      # manifest flags, so `--locked` reaches neither `fuzz build` nor
+      # `fuzz run`. Resolving the graph with `cargo metadata --locked` first
+      # fails on an absent or stale `fuzz/Cargo.lock`, and the build that
+      # follows reuses that lockfile unchanged.
+      - name: Enforce the fuzz lockfile
+        run: cargo +nightly metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
+      - name: Resolve the per-target budget
+        id: budget
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MINUTES_INPUT: ${{ inputs.minutes_per_target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # A rehearsal of the workflow itself, not a campaign.
+            minutes=2
+          else
+            minutes="${MINUTES_INPUT:-20}"
+          fi
+          case "$minutes" in
+            ''|*[!0-9]*)
+              echo "::error::minutes_per_target must be a whole number of minutes, got '${minutes}'"
+              exit 1
+              ;;
+          esac
+          if [ "$minutes" -lt 1 ]; then
+            echo "::error::minutes_per_target must be at least 1"
+            exit 1
+          fi
+          echo "seconds=$((minutes * 60))" >> "$GITHUB_OUTPUT"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+          echo "Budget: ${minutes} minute(s) per target, five targets."
+      # libFuzzer starts from whatever `fuzz/corpus/<target>/` already holds.
+      # Seeding it from the committed golden fixtures is what makes a long run
+      # start deep: the first execution already carries a well-formed package
+      # and a real metadata document rather than a handful of random bytes.
+      - name: Build the seed corpus
+        run: |
+          python3 fuzz/seed.py
+          python3 fuzz/seed.py --verify
+      - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE"
+      - name: Run every target for the budget
+        env:
+          SECONDS_PER_TARGET: ${{ steps.budget.outputs.seconds }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in inventory xml_metadata structure extract_plan create_round_trip; do
+            echo "::group::${target}"
+            cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
+              "$target" -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048
+            echo "::endgroup::"
+          done
+      # One target only, and only off the pull-request path: replaying an
+      # accumulated corpus through an instrumented build costs another build
+      # and another pass over every input, which a rehearsal does not need.
+      # `inventory` is the entry point every other package target goes
+      # through, so its report is the one that says what the campaign reached.
+      - name: Measure coverage for the inventory target
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly fuzz coverage --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" inventory
+          # cargo-fuzz builds the instrumented binary under a `coverage`
+          # directory of its own and merges the raw profiles itself; it
+          # renders no report, so llvm-cov from the toolchain's own
+          # llvm-tools does that here. The binary is located rather than
+          # hard-coded: the path carries the triple twice and is cargo-fuzz's
+          # to change.
+          binary=$(find target -type f -path "*/coverage/*/release/inventory" | head -1)
+          if [ -z "$binary" ]; then
+            echo "::error::no instrumented inventory binary was produced under target/"
+            exit 1
+          fi
+          llvm_bin="$(rustc +nightly --print sysroot)/lib/rustlib/${FUZZ_TARGET_TRIPLE}/bin"
+          "$llvm_bin/llvm-cov" report "$binary" \
+            -instr-profile=fuzz/coverage/inventory/coverage.profdata \
+            -ignore-filename-regex='/rustc/|/\.cargo/registry' \
+            | tee fuzz/coverage/inventory/report.txt
+          {
+            echo "### Coverage reached by the \`inventory\` corpus"
+            echo
+            echo '```'
+            cat fuzz/coverage/inventory/report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Always, including on a crash: the artifacts directory holds the
+      # crashing input, and the corpus is what a maintainer replays it
+      # against. Neither is committed — `fuzz/.gitignore` ignores both — so a
+      # workflow artifact is the only copy that survives the run.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: fuzz-campaign
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            fuzz/artifacts
+            fuzz/corpus
+            fuzz/coverage
