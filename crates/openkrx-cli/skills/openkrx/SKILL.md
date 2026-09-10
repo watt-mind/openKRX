@@ -413,14 +413,16 @@ assume it. The destination you named is never echoed back — you already know
 it.
 
 `path_resolution_fallback` says whether the run resolved its paths more
-weakly than it asked to. On Linux, openkrx has the kernel resolve every
-destination path beneath one directory descriptor with `openat2`, so a path
-component replaced while the command runs is refused rather than followed;
-a kernel too old for that call sends the run down the portable
-check-then-create path and reports `true`. It is `false` both when that
-resolution was used and on a platform where there is no stronger mode to ask
-for, so do not read `false` as "this platform is race-resistant" — read
-`true` as "this run gave something up, and the destination should be a
+weakly than it asked to. On Unix, openkrx resolves every destination path —
+and every path it removes again after a failure — beneath one directory
+descriptor it opened before writing, so a path component replaced while the
+command runs is refused rather than followed: by the kernel on Linux with
+`openat2`, and by a component-by-component `O_NOFOLLOW` walk on macOS and
+other Unix targets. A Linux kernel too old for that call sends the run down
+the portable check-then-create path and reports `true`. It is `false`
+wherever the descriptor was used and on a platform where there is no stronger
+mode to ask for, so do not read `false` as "this platform is race-resistant"
+— read `true` as "this run gave something up, and the destination should be a
 directory only the caller can write to".
 
 **The marker.** While a run is in progress the destination holds

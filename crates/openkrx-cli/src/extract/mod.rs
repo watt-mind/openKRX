@@ -23,7 +23,10 @@
 //!
 //! **Failure policy.** Any failure after the first write undoes this run's
 //! work — files, directories and the marker, in reverse order — and never
-//! touches anything that was already there. The command then exits with the
+//! touches anything that was already there. The undo takes the same arm the
+//! creation took: on Unix each removal is an `unlinkat` beneath the
+//! destination descriptor, so it reaches the directory this run wrote into
+//! rather than whatever now answers to the destination's name. The command then exits with the
 //! failure's own category, and reports how many paths were removed and how
 //! many could not be. Success is never reported over partial output.
 //!
@@ -36,31 +39,34 @@
 //! **Race assumptions.** How much of the check-to-create window is closed
 //! depends on the platform, and each run says which it got.
 //!
-//! On Linux with `openat2(2)` — kernel 5.6 and later — the destination is
-//! opened once, after preflight, and every path is then resolved by the
-//! kernel relative to that descriptor under `RESOLVE_BENEATH`,
-//! `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS`. A component swapped for
-//! a symbolic link between preflight and the write is refused by the kernel
-//! rather than followed. See [`linux_fd`].
+//! On **Unix** the destination is opened once, after preflight, and no
+//! absolute path is resolved again: every creation and every removal is made
+//! relative to that descriptor. On Linux with `openat2(2)` — kernel 5.6 and
+//! later — the kernel resolves each path under `RESOLVE_BENEATH`,
+//! `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS`; on every other Unix
+//! target the components are walked one at a time with
+//! `O_DIRECTORY | O_NOFOLLOW`. Either way a component swapped for a symbolic
+//! link between preflight and the write is refused rather than followed. See
+//! [`unix_fd`].
 //!
-//! Everywhere else — and on a Linux kernel without `openat2`, which reports
+//! On **Windows** — and on a Linux kernel without `openat2`, which reports
 //! `path_resolution_fallback: true` — the destination is trusted not to be
 //! modified by another principal while the command runs. Exclusive creation
 //! and the post-creation `symlink_metadata` checks defend against what is
 //! *already* at the destination — an existing file, a symbolic link, a
-//! Windows reparse point — and not against an attacker with concurrent write
-//! access to it, who can win the window between a check and the operation
-//! that follows. The per-platform position is in `docs/architecture.md`, and
-//! the residual risk in `SECURITY.md`.
+//! reparse point — and not against an attacker with concurrent write access
+//! to it, who can win the window between a check and the operation that
+//! follows. The per-platform position is in `docs/architecture.md`, and the
+//! residual risk in `SECURITY.md`.
 
 pub mod cleanup;
-#[cfg(target_os = "linux")]
-pub mod linux_fd;
 pub mod preflight;
 pub mod resolver;
+#[cfg(unix)]
+pub mod unix_fd;
 pub mod writer;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, unix))]
 mod tests;
 
 use std::path::Path;
@@ -154,7 +160,7 @@ fn run_between(
         Ok(data) => Ok(data),
         Err(failure) => Err(Refusal {
             failure,
-            cleanup: ledger.undo(),
+            cleanup: ledger.undo(&resolver, destination),
         }),
     }
 }
@@ -168,9 +174,9 @@ fn commit(
     ledger: &mut Ledger,
     between: &mut dyn FnMut(),
 ) -> Result<ExtractData, Failure> {
-    writer::marker(resolver, destination, ledger)?;
+    let marker = writer::marker(resolver, destination, ledger)?;
     let mut data = writer::write(inventory, destination, plan, resolver, ledger, between)?;
-    writer::remove_marker(resolver, destination, ledger)?;
+    writer::remove_marker(resolver, destination, ledger, marker)?;
     data.marker_removed = true;
     Ok(data)
 }

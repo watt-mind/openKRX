@@ -93,7 +93,7 @@ pub fn run(manifest_path: &Path, destination: Destination<'_>) -> Result<Written
         }),
         Err(failure) => Err(Refusal {
             failure,
-            cleanup: ledger.undo(),
+            cleanup: ledger.undo_by_path(),
         }),
     }
 }

@@ -23,12 +23,15 @@ clap_mangen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# Linux only: `openat2` with `RESOLVE_BENEATH` is what makes an extraction's
-# path resolution race-resistant, and no portable standard-library call
-# offers it. `default-features = false` keeps the `linux_raw` backend, so no
-# C library is linked, and the two features are the filesystem calls and the
-# `std` types they are handed. See `docs/research.md`.
-[target.'cfg(target_os = "linux")'.dependencies]
+# Unix only: an extraction resolves every destination path from one directory
+# descriptor rather than by name, and no portable standard-library call opens
+# a path relative to a descriptor at all. `openat2` with `RESOLVE_BENEATH` on
+# Linux and the `*at` calls the component walk is made of elsewhere both come
+# from here. `default-features = false` keeps the `linux_raw` backend on
+# Linux, so no C library is linked there, and the two features are the
+# filesystem calls and the `std` types they are handed. See
+# `docs/research.md`.
+[target.'cfg(unix)'.dependencies]
 rustix.workspace = true
 
 [dev-dependencies]

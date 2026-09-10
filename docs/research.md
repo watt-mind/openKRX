@@ -152,33 +152,45 @@ a package depends on either. The cost of that choice is that the bytes follow
 the dependency version, which is why neither command has a golden case; see
 [the golden output contract](testing.md#golden-output-contract).
 
-### `rustix` on Linux, for `openat2` and nothing else
+### `rustix` on Unix, for descriptor-relative paths and nothing else
 
 `extract` writes into a directory the caller names, and until this change it
 checked each path and then created it. A principal with write access to that
 destination can replace a component between the two steps, and the creation
 follows the replacement out of the destination. No portable standard-library
 call closes that window: `symlink_metadata` answers a question about the
-past, and `O_NOFOLLOW` covers only the last component. `openat2(2)`, which
-Linux 5.6 added, does close it — `RESOLVE_BENEATH` with `RESOLVE_NO_SYMLINKS`
-makes the kernel decide at the moment of the operation.
+past, and `O_NOFOLLOW` covers only the last component. What does close it is
+never naming the path again: hold the destination open and resolve everything
+from that descriptor. `openat2(2)`, which Linux 5.6 added, does it in one
+call — `RESOLVE_BENEATH` with `RESOLVE_NO_SYMLINKS` makes the kernel decide at
+the moment of the operation — and every other Unix reaches the same place by
+opening one component at a time with `O_DIRECTORY | O_NOFOLLOW`. Both need
+`openat`, `mkdirat` and `unlinkat`, none of which the standard library
+exposes.
 
-Reaching that syscall means either raw bindings, which the workspace's
+Reaching those syscalls means either raw bindings, which the workspace's
 `unsafe_code = "forbid"` rules out, or a crate that has already written them.
 `rustix` is that crate: `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT`,
 which `deny.toml` accepts on the MIT arm; `default-features = false` keeps the
-`linux_raw` backend, so no C library is linked and the only crates it brings
-are `bitflags` and `linux-raw-sys`; and the two features it is given, `fs` and
-`std`, are the filesystem calls and the standard types they are handed. It is
-declared under `[target.'cfg(target_os = "linux")'.dependencies]`, so no other
-platform's build or lockfile resolution sees it, and it is used from exactly
-one module, `extract/linux_fd.rs`, which does nothing but make the calls.
+`linux_raw` backend on Linux, so no C library is linked there and the only
+crates it brings are `bitflags` and `linux-raw-sys`, while other Unix targets
+use its `libc` backend and add `libc` and `errno` for themselves; and the two
+features it is given, `fs` and `std`, are the filesystem calls and the
+standard types they are handed. It is declared under
+`[target.'cfg(unix)'.dependencies]`, so no Windows build or lockfile
+resolution sees it, and it is used from exactly one module,
+`extract/unix_fd.rs`, which does nothing but make the calls.
 
 The alternative considered and rejected was doing without: keeping the
 check-then-create path everywhere and continuing to state the race as a
 residual risk. It was rejected because the risk is one a caller cannot
-mitigate except by controlling the destination directory, and the platform
-most openKRX runs on can simply not have it.
+mitigate except by controlling the destination directory, and every platform
+openKRX runs on but one can simply not have it.
+
+The narrower alternative — `openat2` on Linux and nothing elsewhere — was
+what the first step shipped, and is superseded here: the walk needs no kernel
+feature, no probe and no fallback, so widening the dependency to `cfg(unix)`
+buys the same confinement on macOS for one extra module arm.
 
 ### No vendored XSD
 

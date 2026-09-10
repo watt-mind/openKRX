@@ -42,10 +42,14 @@ reads every code out of `docs/codes.md` to assert that each classifies, with
 no head list of its own: a subprocess can
 reach only the codes an archive can be built to produce, and
 the contract covers every code the crates define. The one in
-`crates/openkrx-cli/src/extract/tests.rs`, behind `cfg(target_os = "linux")`,
-holds the check-to-create race: what it tests happens *inside* one run,
-between the moment preflight accepted a destination and the moment the first
-file is written, and no subprocess can be interrupted there.
+`crates/openkrx-cli/src/extract/tests.rs`, behind `cfg(unix)`,
+holds the check-to-create race and the undo pass that follows a lost one:
+what they test happens *inside* one run, between the moment preflight
+accepted a destination and the moment the first file is written, and no
+subprocess can be interrupted there. They run on the Linux and the macOS
+lane, which is how the component walk is exercised; the two that drive the
+`openat2` probe stay behind `cfg(target_os = "linux")`, because no other
+target has a stronger resolution to fall back from.
 
 | File | Covers |
 | --- | --- |
