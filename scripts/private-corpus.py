@@ -101,6 +101,22 @@ CANARIES = (
     MARKER_NAME,
 )
 
+# Every message the command can print is a fixed sentence. None of them
+# quotes an argument, a path or an exception: a diagnostic that echoes what
+# it failed on is exactly how a path escapes a script like this one.
+NOT_A_DIRECTORY = "the --dir path is not a directory"
+IN_REPOSITORY = (
+    "refusing to read a directory inside the repository tree: a real corpus "
+    "belongs outside it, where no commit can reach it. The conventional place "
+    "is the gitignored /samples/ directory; pass --allow-in-repo to read that "
+    "one deliberately."
+)
+UNUSABLE_ARGUMENTS = (
+    "the arguments were not understood; run with --help. No argument is "
+    "echoed here, because one of them is usually a path."
+)
+UNREADABLE = "the corpus directory could not be read; nothing was reported"
+
 HEADER = (
     "openKRX private-corpus report",
     "",
@@ -319,8 +335,15 @@ def packages(directory, recursive):
     """
     walk = directory.rglob("*") if recursive else directory.iterdir()
     found = []
-    for path in walk:
+    while True:
+        # The walk itself is guarded, not only the test on each entry: an
+        # unreadable directory raises out of the iterator, and the exception
+        # carries the path. `main` turns that into a fixed message; here it
+        # simply ends the listing rather than reaching a traceback.
         try:
+            path = next(walk, None)
+            if path is None:
+                break
             if path.suffix.lower() == ".krx" and path.is_file():
                 found.append(path)
         except OSError:
@@ -395,13 +418,39 @@ def report_directory(binary, directory, recursive, timeout):
     return render(scan(binary, directory, recursive, timeout))
 
 
+def self_run(binary, arguments, timeout):
+    """Run this script as a subprocess and return both its streams, joined.
+
+    The self-test reads what a real run actually writes rather than what the
+    renderer returns, so the canary scan covers a traceback, an argparse
+    message and anything else that could reach a stream — not only the report.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--bin",
+            str(binary),
+            "--timeout",
+            str(timeout),
+            *arguments,
+        ],
+        capture_output=True,
+        env=environment(),
+        check=False,
+    )
+    return (completed.stdout + completed.stderr).decode("utf-8", "replace")
+
+
 def self_test(binary, timeout):
-    """Prove the report's buckets and that no canary reaches its output.
+    """Prove the report's buckets and that no canary reaches either stream.
 
     The five committed golden fixtures are copies, so the temporary directory
     holds only synthetic data; the loud file names and the synthetic
     identifiers inside them stand in for the private strings a real corpus
     would carry. A canary in the output is a privacy bug and fails the run.
+    The refusal case runs the same way, because a directory that cannot be
+    read is exactly where a path is most likely to escape.
     """
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
@@ -411,16 +460,30 @@ def self_test(binary, timeout):
             return 1
         for number, source in enumerate(sources, start=1):
             shutil.copyfile(source, directory / f"{CANARY_STEM}-{number}.krx")
-        lines = report_directory(binary, directory, False, timeout)
-        output = "\n".join(lines)
+        output = self_run(binary, ["--dir", str(directory)], timeout)
         failures = check_buckets(output)
         failures += check_canaries(output, directory)
+        absent = directory / f"{CANARY_STEM}-ABSENT"
+        failures += check_refusal(self_run(binary, ["--dir", str(absent)], timeout), absent)
     print(output)
     if failures:
         print(f"\nself-test: {failures} failure(s).")
         return 1
-    print("\nself-test: buckets as expected, no canary in the output.")
+    print("\nself-test: buckets as expected, no canary on either stream.")
     return 0
+
+
+def check_refusal(output, absent):
+    """Assert a directory that is not there produces the fixed message alone."""
+    failures = 0
+    if output.strip() != NOT_A_DIRECTORY:
+        print(
+            "self-test: a --dir that does not exist must print the fixed "
+            "refusal and nothing else, so that no path and no traceback can "
+            "reach a stream."
+        )
+        failures += 1
+    return failures + check_canaries(output, absent)
 
 
 def expected_rows():
@@ -487,9 +550,22 @@ def check_canaries(output, directory):
     return failures
 
 
+class FixedMessageParser(argparse.ArgumentParser):
+    """An argument parser whose failures echo no argument text.
+
+    argparse quotes the argument it could not accept, and on this command line
+    the argument is usually a path. Every parse failure prints one fixed
+    sentence instead; `--help` is unaffected and still prints in full.
+    """
+
+    def error(self, message):
+        del message
+        self.exit(2, UNUSABLE_ARGUMENTS + "\n")
+
+
 def parse_arguments(argv):
     """The command line."""
-    parser = argparse.ArgumentParser(
+    parser = FixedMessageParser(
         description=(
             "Aggregate-only report over a local directory of .krx packages. "
             "Opt-in, never run by check.sh or CI, and it prints counts alone."
@@ -518,11 +594,14 @@ def parse_arguments(argv):
         action="store_true",
         help="run the canary and bucket self-test over the golden fixtures",
     )
-    return parser.parse_args(argv)
+    arguments, leftover = parser.parse_known_args(argv)
+    if leftover:
+        parser.exit(2, UNUSABLE_ARGUMENTS + "\n")
+    return arguments
 
 
-def main(argv=None):
-    arguments = parse_arguments(argv)
+def report(arguments):
+    """Everything the command does, once the arguments have been parsed."""
     binary = Path(arguments.bin).resolve()
     if not binary.is_file():
         print("the --bin path is not a file; build the executable first")
@@ -534,19 +613,32 @@ def main(argv=None):
         return 2
     directory = Path(arguments.dir).resolve()
     if not directory.is_dir():
-        print("the --dir path is not a directory")
+        print(NOT_A_DIRECTORY)
         return 2
     if inside_repository(directory) and not arguments.allow_in_repo:
-        print(
-            "refusing to read a directory inside the repository tree: a real "
-            "corpus belongs outside it, where no commit can reach it. The "
-            "conventional place is the gitignored /samples/ directory; pass "
-            "--allow-in-repo to read that one deliberately."
-        )
+        print(IN_REPOSITORY)
         return 2
     for line in report_directory(binary, directory, arguments.recursive, arguments.timeout):
         print(line)
     return 0
+
+
+def main(argv=None):
+    """Parse, then run under a guard that no exception can print a path past.
+
+    An unreadable directory, an unreadable file, a resolve that fails on a
+    broken link: each raises an exception whose text carries the path it
+    failed on, and an uncaught one would put that path in a traceback. The
+    guard is deliberately broad and deliberately mute — one fixed sentence,
+    never the exception — because a diagnostic is worth less than the promise
+    this script makes.
+    """
+    arguments = parse_arguments(argv)
+    try:
+        return report(arguments)
+    except Exception:  # noqa: BLE001 - the exception text may carry a path
+        print(UNREADABLE)
+        return 2
 
 
 if __name__ == "__main__":

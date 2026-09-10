@@ -596,8 +596,11 @@ string written in the script — a class name, a check name, an outcome, a rule
 identifier or a stable dotted code the CLI already documents. A value read
 out of a package is classified and then dropped; even an error is counted
 rather than rendered, because an exception's text can carry the path it
-failed on. The report's own header says as much, and it is for local reading:
-it does not belong in an issue, a pull request, a commit or a comment.
+failed on. Every refusal — an argument it cannot use, a directory that is not
+there, a directory it cannot read — is one fixed sentence that quotes
+nothing, and the run sits under a guard so that no traceback reaches a stream
+either. The report's own header says as much, and it is for local reading: it
+does not belong in an issue, a pull request, a commit or a comment.
 
 The self-test is what keeps that promise honest:
 
@@ -606,14 +609,18 @@ python3 scripts/private-corpus.py --self-test --bin target/release/openkrx
 ```
 
 It copies the five committed golden fixtures into a temporary directory under
-deliberately loud file names, runs the same report over them, asserts the
-bucket counts those fixtures must produce — five packages, the exit statuses
+deliberately loud file names, runs the script as a subprocess over them —
+a real run's own streams, not the renderer's return value — and asserts the
+bucket counts those fixtures must produce: five packages, the exit statuses
 0, 3, 4, 6 and 8 where each fixture earns them, two `KRX/OCD/` prefixes
-against one package with none, `root_prefix unresolved A19` once — and then
-asserts that none of a canary set appears anywhere in the output: the planted
-file names, the temporary directory, the synthetic consignment identifier,
-the synthetic attachment names and the metadata entry name. A canary in the
-output is a privacy bug, and the run exits non-zero.
+against one package with none, `root_prefix unresolved A19` once. It then
+asserts that none of a canary set appears anywhere on stdout or stderr: the
+planted file names, the temporary directory, the synthetic consignment
+identifier, the synthetic attachment names and the metadata entry name. A
+second run points `--dir` at a directory that does not exist and asserts that
+the output is the fixed refusal and nothing else, canaries included, because
+a refusal is where a path most easily escapes. A canary on either stream is a
+privacy bug, and the run exits non-zero.
 
 A finding is turned into a rule, never into a document. Cite the *class
 count* in [profile.md](profile.md) — "N of M local packages carry the `KRX/`
