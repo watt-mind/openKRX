@@ -20,7 +20,7 @@ on:
     inputs:
       minutes_per_target:
         description: >-
-          Wall-clock budget for each of the five targets, in minutes.
+          Wall-clock budget for each of the five targets, in minutes (1-240).
         type: number
         default: 20
   # GitHub registers a `workflow_dispatch` workflow only from the default
@@ -110,6 +110,19 @@ jobs:
             echo "::error::minutes_per_target must be at least 1"
             exit 1
           fi
+          # An upper bound on a typo — 2000 dispatched for 20 — which the job
+          # timeout would otherwise catch hours later by cancelling the job,
+          # taking the corpus and the coverage report with it. 240 is four
+          # hours, more than the whole scheduled campaign spends fuzzing, and
+          # well past any budget the 360-minute timeout can fit five of; a
+          # larger request is refused here rather than clamped, so a caller who
+          # asked for more knows they did not get it. The timeout remains the
+          # real bound: fitting five targets inside it is still the caller's
+          # own arithmetic to do.
+          if [ "$minutes" -gt 240 ]; then
+            echo "::error::minutes_per_target is capped at 240; got '${minutes}'"
+            exit 1
+          fi
           echo "seconds=$((minutes * 60))" >> "$GITHUB_OUTPUT"
           echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
           echo "Budget: ${minutes} minute(s) per target, five targets."
@@ -150,8 +163,11 @@ jobs:
           # renders no report, so llvm-cov from the toolchain's own
           # llvm-tools does that here. The binary is located rather than
           # hard-coded: the path carries the triple twice and is cargo-fuzz's
-          # to change.
-          binary=$(find target -type f -path "*/coverage/*/release/inventory" | head -1)
+          # to change. `-print -quit` rather than `| head -1`: under
+          # `pipefail` a second match would make find write to a closed pipe
+          # and fail the step with SIGPIPE before the explicit guard below
+          # could report anything useful.
+          binary=$(find target -type f -path "*/coverage/*/release/inventory" -print -quit)
           if [ -z "$binary" ]; then
             echo "::error::no instrumented inventory binary was produced under target/"
             exit 1

@@ -34,9 +34,11 @@ unicode-normalization.workspace = true
 # test-only writer, which no default build compiles.
 openkrx-core = { path = ".", features = ["synthetic-writer"] }
 # The property-based round-trip tests, and this crate alone: no binary and no
-# other crate carries it. Default features are off because `fork`, `timeout`
-# and `regex-syntax` pull in `rusty-fork`, `tempfile`, `wait-timeout` and a
-# regex parser that nothing here uses; `std` is all the properties need.
+# other crate carries it. Default features are off because `fork` and `timeout`
+# pull in `rusty-fork`, `tempfile` and `wait-timeout` for a process-per-case
+# harness nothing here uses; `std` is all the properties need. It does not drop
+# `regex-syntax`: proptest's `std` feature enables that one, so the regex
+# strategies come along whatever this line says.
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 # The benchmarks under `benches/`, and nothing else: no binary, no test and no
 # other crate carries it. Default features are off because `rayon` and
