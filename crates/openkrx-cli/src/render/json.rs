@@ -31,19 +31,34 @@ const SCHEMA_VERSION: u32 = 1;
 /// A successful response: the envelope around one command's data.
 #[derive(Serialize)]
 struct Success<'a, T> {
+    /// [`SCHEMA_VERSION`], so a consumer can tell whether it knows this shape.
     schema_version: u32,
+    /// Always `true` here. It says the payload is a report rather than a
+    /// diagnostic; it says nothing about the package the report describes.
     ok: bool,
+    /// The command that produced the report, as its stable name: `inspect`,
+    /// `list`, `validate-structure`, `extract`, `create` or `repack`.
     command: &'a str,
+    /// The command's own report. Its shape belongs to that command and is
+    /// what a raised `schema_version` would be about.
     data: &'a T,
+    /// Always `false`. openKRX performs no cryptography, so no run of it can
+    /// report that anything was verified.
     verified: bool,
 }
 
 /// A failed response: the envelope around one content-free diagnostic.
 #[derive(Serialize)]
 struct Failed<'a> {
+    /// [`SCHEMA_VERSION`], the same field a successful response carries.
     schema_version: u32,
+    /// Always `false` here: stdout carries a diagnostic, not a report. A
+    /// structural check that failed does not reach this shape; it is part of
+    /// a successful command's report.
     ok: bool,
+    /// The command that refused, as its stable name.
     command: &'a str,
+    /// The single content-free diagnostic that says why the command refused.
     error: Diagnostic<'a>,
     /// What the undo pass removed, present for the three commands that write.
     /// `removed` is `0` when nothing had been written, which is every refusal
@@ -51,6 +66,7 @@ struct Failed<'a> {
     /// half-written package was removed again. Counts, never a path.
     #[serde(skip_serializing_if = "Option::is_none")]
     cleanup: Option<Cleanup>,
+    /// Always `false`, for the same reason as on a successful response.
     verified: bool,
 }
 
@@ -66,18 +82,40 @@ struct Failed<'a> {
 /// as every other diagnostic.
 #[derive(Serialize)]
 struct Diagnostic<'a> {
+    /// The stable dotted code, catalogued section by section in
+    /// `docs/codes.md` under "Reading a diagnostic". This is the field a
+    /// consumer branches on, and an unrecognised code is a failure, never a
+    /// success.
     code: &'a str,
+    /// The coarse family the code belongs to, from
+    /// [`crate::exit::Category::as_str`]: `usage`, `structure_inconsistent`,
+    /// `structure_unresolved`, `input`, `package`, `unsupported`, `limit` or
+    /// `output`. It is the same category that decided the process exit
+    /// status, so a consumer that groups rather than branches can read either.
     category: &'a str,
+    /// The archive entry the refusal is about, counted in central-directory
+    /// order. Absent when the refusal is about no single entry.
     #[serde(skip_serializing_if = "Option::is_none")]
     entry_index: Option<u32>,
+    /// A JSON Pointer into the manifest, or into the edits document, such as
+    /// `/metadata/source_system`. It names a location in a document the
+    /// caller wrote, never a value from it. `create` and `repack` only.
     #[serde(skip_serializing_if = "Option::is_none")]
     field: Option<&'a str>,
+    /// The position in the manifest's or the edits document's attachment
+    /// array, counted from 0. `create` and `repack` only.
     #[serde(skip_serializing_if = "Option::is_none")]
     attachment_index: Option<u32>,
+    /// An attachment's number inside the package being edited, counted from
+    /// 1, which is a different thing from a position in an array. `repack`
+    /// alone sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     attachment_number: Option<u32>,
+    /// The ceiling that was exceeded, for a limit refusal.
     #[serde(skip_serializing_if = "Option::is_none")]
     limit: Option<u64>,
+    /// What was actually produced against that ceiling — a measured count of
+    /// bytes or entries, never a size a header declared.
     #[serde(skip_serializing_if = "Option::is_none")]
     observed: Option<u64>,
 }
