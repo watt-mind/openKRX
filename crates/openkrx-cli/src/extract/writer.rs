@@ -2,8 +2,8 @@
 //!
 //! Every creation here is exclusive, and every one of them goes through the
 //! [`Resolver`], which owns how a path is resolved: beneath a directory
-//! descriptor with `openat2` on Linux, and by path everywhere else. Nothing in
-//! this module opens a path itself, so neither arm can drift from the other.
+//! descriptor on Unix, and by path on Windows. Nothing in this module opens a
+//! path itself, so neither arm can drift from the other.
 //!
 //! Directories are created one level at a time, never `create_dir_all`, so no
 //! parent is invented behind the caller's back. Files are created with
@@ -21,15 +21,16 @@
 //! limits and checks its CRC-32 (corruption, not authenticity).
 //!
 //! Each successful creation is recorded in the [`Ledger`] before the next step
-//! begins, so a failure at any point can undo exactly this run's work.
+//! begins, so a failure at any point can undo exactly this run's work. What is
+//! recorded is the path's components relative to the destination, never a
+//! joined path: the undo pass resolves them through the same [`Resolver`].
 
 use std::io::Write;
 use std::path::Path;
 
 use openkrx_core::{ExtractionPlan, archive::ArchiveInventory};
 
-use super::cleanup::Ledger;
-use super::preflight::join;
+use super::cleanup::{Ledger, Recorded};
 use super::resolver::{Directory, Resolver};
 use crate::commands::extract::{ExtractData, WrittenView};
 use crate::exit::{Failure, OUTPUT_IO};
@@ -40,10 +41,13 @@ use crate::exit::{Failure, OUTPUT_IO};
 ///
 /// `output.partial_marker_present` when another run got there first, and
 /// `output.io` when the destination refuses the file.
-pub fn marker(resolver: &Resolver, destination: &Path, ledger: &mut Ledger) -> Result<(), Failure> {
+pub fn marker(
+    resolver: &Resolver,
+    destination: &Path,
+    ledger: &mut Ledger,
+) -> Result<Recorded, Failure> {
     resolver.marker(destination)?;
-    ledger.file(destination.join(super::MARKER_NAME));
-    Ok(())
+    Ok(ledger.file(vec![super::MARKER_NAME.to_owned()]))
 }
 
 /// Remove the marker, which is the last step of a successful run.
@@ -57,9 +61,10 @@ pub fn remove_marker(
     resolver: &Resolver,
     destination: &Path,
     ledger: &mut Ledger,
+    recorded: Recorded,
 ) -> Result<(), Failure> {
     resolver.remove_marker(destination)?;
-    ledger.forget(&destination.join(super::MARKER_NAME));
+    ledger.forget(recorded);
     Ok(())
 }
 
@@ -97,7 +102,7 @@ pub fn write(
         let entry = item.entry_index();
         let bytes = inventory.entry_bytes(entry)?;
         let mut file = resolver.file(destination, item.components(), entry)?;
-        ledger.file(join(destination, item.components()));
+        ledger.file(item.components().to_vec());
         file.write_all(&bytes)
             .map_err(|_| Failure::output_at(OUTPUT_IO, entry))?;
         data.files_written = data.files_written.saturating_add(1);
@@ -133,13 +138,13 @@ fn directories(
     for components in plan.directories() {
         match resolver.directory(destination, components) {
             Ok(Directory::Created) => {
-                ledger.directory(join(destination, components));
+                ledger.directory(components.clone());
                 created = created.saturating_add(1);
             }
             Ok(Directory::AlreadyThere) => {}
             Err(error) => {
                 if error.created {
-                    ledger.directory(join(destination, components));
+                    ledger.directory(components.clone());
                 }
                 return Err(error.failure);
             }

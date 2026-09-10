@@ -1,4 +1,4 @@
-//! Linux: the check-to-create window, exercised rather than described.
+//! Unix: the check-to-create window, exercised rather than described.
 //!
 //! Every other test of the output layer is a subprocess test in
 //! `tests/extract.rs`, because the contract worth testing is the observable
@@ -12,9 +12,12 @@
 //! and the real chooser, so what these tests drive is the shipped code with no
 //! `cfg(test)` branch and no feature in it.
 //!
-//! Both cases are `cfg(target_os = "linux")`. The `openat2` arm exists nowhere
-//! else, and the portable arm's own rules are held by the subprocess tests on
-//! all three platforms.
+//! They are `cfg(unix)`, because the arm under test is: the destination is
+//! held open and every path resolved from it on every Unix target, by the
+//! kernel where `openat2` is available and by the component walk elsewhere.
+//! The two that drive the `openat2` probe are Linux-only, because no other
+//! target has a stronger mode to fall back from. The portable arm's own rules
+//! are held by the subprocess tests on all three platforms.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -67,14 +70,32 @@ fn package() -> Vec<u8> {
     .build()
 }
 
+/// One package holding one file directly in the destination.
+///
+/// The plan it produces has no directory in it at all, so a run that fails at
+/// the file has created exactly one thing — the marker — and the undo pass's
+/// counts are unambiguous.
+fn flat_package() -> Vec<u8> {
+    Archive::of(vec![Entry::stored(b"inner.bin", b"synthetic bytes")]).build()
+}
+
 /// Extract `package()` into `destination`, running `between` in the window.
 fn extract(
     destination: &Path,
     between: &mut dyn FnMut(),
     resolver: impl Fn(&Path) -> Result<Resolver, crate::exit::Failure>,
 ) -> Result<crate::commands::extract::ExtractData, super::Refusal> {
-    let bytes = package();
-    let inventory = archive::inventory(&bytes, &Limits::DEFAULT).expect("a readable archive");
+    extract_package(&package(), destination, between, resolver)
+}
+
+/// The same, for a package the caller built itself.
+fn extract_package(
+    bytes: &[u8],
+    destination: &Path,
+    between: &mut dyn FnMut(),
+    resolver: impl Fn(&Path) -> Result<Resolver, crate::exit::Failure>,
+) -> Result<crate::commands::extract::ExtractData, super::Refusal> {
+    let inventory = archive::inventory(bytes, &Limits::DEFAULT).expect("a readable archive");
     super::run_between(&inventory, destination, between, resolver)
 }
 
@@ -187,6 +208,62 @@ a fallback; got {}",
     );
 }
 
+#[test]
+fn the_undo_pass_removes_through_the_descriptor_and_not_through_the_name() {
+    let scratch = Scratch::new("undo");
+    let destination = scratch.dir("destination");
+    let decoy = scratch.dir("decoy");
+    let moved = scratch.0.join("moved");
+
+    // The decoy is dressed as a destination a run is busy with: a marker and
+    // a directory, neither of them this run's. If the undo pass resolved its
+    // own paths by name it would arrive here — after the swap below — and
+    // remove exactly these two.
+    std::fs::write(decoy.join(super::MARKER_NAME), b"not this run's")
+        .expect("dress the decoy with a marker");
+    std::fs::create_dir(decoy.join("payload")).expect("dress the decoy with a directory");
+
+    // The window: the run holds the destination open and has created its
+    // marker inside it. A principal with write access takes the leaf, so the
+    // write is about to fail and the undo pass is about to run — and in the
+    // same moment moves the real destination aside and leaves a symbolic link
+    // to the decoy standing at its name.
+    let swapped = destination.clone();
+    let aside = moved.clone();
+    let target = decoy.clone();
+    let mut between = move || {
+        std::fs::create_dir(swapped.join("inner.bin")).expect("take the leaf");
+        std::fs::rename(&swapped, &aside).expect("move the real destination aside");
+        std::os::unix::fs::symlink(&target, &swapped).expect("plant a link at its name");
+    };
+
+    let refusal = extract_package(&flat_package(), &destination, &mut between, Resolver::open)
+        .expect_err("a taken leaf is refused");
+    assert_eq!(
+        refusal.cleanup.removed, 1,
+        "the marker this run created was removed"
+    );
+    assert_eq!(
+        refusal.cleanup.left_in_place, 0,
+        "and nothing was left over"
+    );
+    assert!(
+        !moved.join(super::MARKER_NAME).exists(),
+        "removed from the directory this run actually wrote into, which the \
+descriptor still names after the rename"
+    );
+    assert!(
+        decoy.join(super::MARKER_NAME).exists() && decoy.join("payload").is_dir(),
+        "and not from whatever now answers to the destination's name, where a \
+removal by path would have gone"
+    );
+    assert!(
+        moved.join("inner.bin").is_dir(),
+        "what this run did not create is still there: the undo pass removes \
+its own records and nothing else"
+    );
+}
+
 /// Whether `directory` holds no entry, which is how each race test says
 /// "nothing was written here" without naming what it expected.
 fn tree_is_empty(directory: &Path) -> bool {
@@ -196,6 +273,7 @@ fn tree_is_empty(directory: &Path) -> bool {
         .is_none()
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn a_kernel_without_openat2_falls_back_once_and_reports_it() {
     let scratch = Scratch::new("fallback");
@@ -224,6 +302,7 @@ fn a_kernel_without_openat2_falls_back_once_and_reports_it() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn a_kernel_with_openat2_reports_no_fallback() {
     let scratch = Scratch::new("beneath");
@@ -236,6 +315,26 @@ fn a_kernel_with_openat2_reports_no_fallback() {
 given up; if this fails, the runner's kernel has no openat2"
     );
     assert_eq!(data.files_written, 1);
+}
+
+/// The same statement for a Unix that has no `openat2` to fall back from:
+/// the walk is not a fallback, and a run that took it says nothing was given
+/// up. Linux has its own pair of probe tests for the other half of this.
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn the_component_walk_is_not_reported_as_a_fallback() {
+    let scratch = Scratch::new("walk");
+    let destination = scratch.dir("destination");
+
+    let data = extract(&destination, &mut || (), Resolver::open).expect("an ordinary extraction");
+    assert!(
+        !data.path_resolution_fallback,
+        "the walk resolves beneath the destination descriptor, so the run \
+gave nothing up and reports nothing given up"
+    );
+    assert_eq!(data.files_written, 1);
+    assert_eq!(data.directories_created, 1);
+    assert!(data.marker_removed);
 }
 
 #[test]

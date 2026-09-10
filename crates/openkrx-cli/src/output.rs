@@ -64,7 +64,7 @@ pub fn create_file(package: &[u8], path: &Path, ledger: &mut Ledger) -> Result<(
                 Failure::output(OUTPUT_IO)
             }
         })?;
-    ledger.file(path.to_path_buf());
+    ledger.named_file(path.to_path_buf());
     file.write_all(package)
         .map_err(|_| Failure::output(OUTPUT_IO))?;
     file.flush().map_err(|_| Failure::output(OUTPUT_IO))?;

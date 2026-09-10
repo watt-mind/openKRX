@@ -621,6 +621,64 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **Extraction resolves and undoes through the destination descriptor on every
+  Unix target, not Linux alone (KRX-15).** The descriptor-relative arm was
+  Linux-only, because `openat2(2)` is; it now covers `cfg(unix)`, with
+  `crates/openkrx-cli/src/extract/linux_fd.rs` renamed to `unix_fd.rs` and one
+  `cfg` inside it. Where `openat2` is available the kernel still resolves each
+  path under `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS` and
+  `RESOLVE_NO_MAGICLINKS`. On every other Unix target — macOS among them —
+  the module walks the components itself: one
+  `openat(parent, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)`
+  per component, each relative to the descriptor the step before it returned,
+  so a component that is a symbolic link when it is met is refused and one
+  swapped after it has been opened can no longer redirect the rest. A
+  component the kernel reports as `ENOTDIR` is asked about once, on the error
+  path, with an `fstatat` that does not follow links, so a planted link is
+  `output.symlink_in_path` on every platform rather than whichever code that
+  kernel happened to choose. The walk cannot refuse a mount planted at a
+  component, which `RESOLVE_BENEATH` does; that difference is stated in
+  `docs/architecture.md` and `SECURITY.md`. This closes the check-to-create
+  race on Linux and on Unix targets with `O_NOFOLLOW` directory walks;
+  Windows remains on the portable arm, unchanged.
+- **The undo pass after a failed write removes through that descriptor too.**
+  The ledger in `crates/openkrx-cli/src/extract/cleanup.rs` used to hold
+  joined absolute paths and remove them by name. It now records a path's
+  components relative to the destination and hands them back to the same
+  resolver the creation went through: `unlinkat` for a file and the marker,
+  `unlinkat(AT_REMOVEDIR)` for a directory this run created, both beneath the
+  destination descriptor on Unix, and `remove_file`/`remove_dir` by name on
+  Windows. The removal therefore reaches the directory this run actually
+  wrote into rather than whatever now answers to the destination's name: a
+  new unit test renames the destination away mid-run, leaves a symbolic link
+  to a decoy in its place, and asserts that this run's marker is removed from
+  the real directory while the decoy's identically named marker and directory
+  are untouched. Nothing is recursive, nothing pre-existing is recorded or
+  removed, and a directory that is no longer a directory is still counted
+  `left_in_place`. `create` and `repack`, which write one file at a path the
+  caller names and hold no destination descriptor, keep removing by name
+  through the same ledger.
+- **`path_resolution_fallback` keeps its meaning and its values.** It stays
+  `true` only where this run asked a Linux kernel for `openat2` resolution and
+  could not have it, and `false` wherever the descriptor arm ran — the
+  kernel's resolution or the walk — and on a platform with no stronger mode to
+  ask for. The golden output contract is unchanged and stays deterministic on
+  all three runners.
+- **`rustix` moves from a Linux-only to a Unix-only dependency of the CLI
+  crate.** Declared under `[target.'cfg(unix)'.dependencies]`, still with
+  `default-features = false` and the `fs` and `std` features. On Linux nothing
+  changes: the `linux_raw` backend links no C library and brings `bitflags`
+  and `linux-raw-sys`. Other Unix targets use its `libc` backend, which adds
+  `libc` and `errno` for those targets alone; no Windows build sees it. The
+  workspace still forbids `unsafe`, and no `libc` call is made by openKRX
+  itself.
+- **The race unit tests run on the macOS lane.**
+  `crates/openkrx-cli/src/extract/tests.rs` moves from
+  `cfg(all(test, target_os = "linux"))` to `cfg(all(test, unix))`, so the
+  ancestor swap, the taken leaf, the replaced destination and the
+  non-directory component are exercised against the walk as well as against
+  `openat2`. The two tests that drive the `openat2` probe stay Linux-only, and
+  a new one asserts that a target resolving by walking reports no fallback.
 - **Every workflow artifact now sets an explicit retention, and the required
   check list is reconciled with branch protection (PC-04).** The one-day
   baseline applies to the run-scoped intermediates: the `fuzz-artifacts` crash

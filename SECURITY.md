@@ -245,11 +245,12 @@ this run had created. A partial result is never reported as a success.
 | Confinement to a caller-selected destination: it must already exist, be a real directory, and not be a symbolic link or reparse point; `extract` never creates it, and `create` never creates the parent directory of `--out` | `output.destination_missing`, `.destination_not_a_directory`, `.destination_symlink` | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `a_destination_that_is_a_file_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused`, `a_destination_that_is_itself_a_junction_is_refused` and `a_destination_that_is_itself_a_symbolic_link_is_refused` (Windows), `an_output_directory_that_is_missing_or_not_a_directory_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_symbolic_link_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_junction_is_refused` and `an_output_directory_that_is_a_symbolic_link_is_refused` (Windows, `tests/create.rs` and `tests/repack.rs`) |
 | No overwrite: a planned path, or a `create --out` file, that exists in any form — file, directory, symbolic link, or a link with a missing target — refuses the whole run before anything is written, as does an entry named like the marker an extraction creates | `output.exists` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`), `an_output_that_is_a_dangling_symbolic_link_counts_as_occupied` (`tests/create.rs`), `a_leaf_target_that_is_a_dangling_symbolic_link_is_refused` and `a_leaf_target_that_is_a_live_symbolic_link_is_refused` (Windows) |
 | No symlink or reparse-point escape through the path: every existing ancestor inside the destination must be a real directory, checked in preflight and again after each directory this run creates | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_symlink_inside_the_destination_is_refused`, `an_ancestor_junction_inside_the_destination_is_refused` and `an_ancestor_symbolic_link_inside_the_destination_is_refused` (Windows), `a_destination_or_write_problem_is_nine` (`src/exit.rs`) |
-| On Linux with `openat2`, an ancestor replaced *after* preflight and before the write is refused by the kernel rather than followed: the destination is opened once and every path is resolved beneath that descriptor with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS` | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_replaced_after_preflight_is_refused_rather_than_followed`, `a_directory_component_that_is_a_file_is_still_not_a_directory`, `a_leaf_replaced_by_a_directory_after_preflight_is_refused`, `a_destination_replaced_before_the_resolver_opens_it_is_refused_not_fallen_back` (`src/extract/tests.rs`) |
-| A kernel without `openat2` falls back once and says so, rather than reporting the stronger guarantee it did not get | not applicable: a reporting rule, not a refusal | `a_kernel_without_openat2_falls_back_once_and_reports_it`, `a_kernel_with_openat2_reports_no_fallback` (`src/extract/tests.rs`), `the_report_says_the_run_resolved_paths_the_way_it_asked_to` (`tests/extract.rs`) |
+| On Unix, an ancestor replaced *after* preflight and before the write is refused rather than followed: the destination is opened once and every path is resolved beneath that descriptor — by the kernel under `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS` where `openat2` is available, and by a component-wise walk with `O_DIRECTORY` and `O_NOFOLLOW` on every other Unix target | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_replaced_after_preflight_is_refused_rather_than_followed`, `a_directory_component_that_is_a_file_is_still_not_a_directory`, `a_leaf_replaced_by_a_directory_after_preflight_is_refused`, `a_destination_replaced_before_the_resolver_opens_it_is_refused_not_fallen_back` (`src/extract/tests.rs`, run on the Linux and macOS lanes) |
+| On Unix, the undo pass removes through that same descriptor, so it reaches the directory this run wrote into rather than whatever now answers to the destination's name | `output.io`, and the `cleanup` counts | `the_undo_pass_removes_through_the_descriptor_and_not_through_the_name` (`src/extract/tests.rs`) |
+| A Linux kernel without `openat2` falls back once and says so, rather than reporting the stronger guarantee it did not get; a Unix target that resolves by walking gave nothing up and reports nothing given up | not applicable: a reporting rule, not a refusal | `a_kernel_without_openat2_falls_back_once_and_reports_it`, `a_kernel_with_openat2_reports_no_fallback`, `the_component_walk_is_not_reported_as_a_fallback` (`src/extract/tests.rs`), `the_report_says_the_run_resolved_paths_the_way_it_asked_to` (`tests/extract.rs`) |
 | Exclusive creation: files with `create_new` (`O_EXCL` / `CREATE_NEW`), directories with `create_dir` and never `create_dir_all`; `create` opens its output the same way | `output.exists`, `output.io` | `a_package_is_extracted_with_byte_identical_payloads`, `a_target_file_that_already_exists_refuses_the_whole_extraction`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`) |
 | Interrupted-write detection: a `.openkrx-extract.partial` marker exists for the length of the run, and its presence refuses the next one | `output.partial_marker_present` | `a_marker_left_by_an_interrupted_run_refuses_the_next_one`, `the_json_report_names_every_file_and_the_marker_it_removed` |
-| Cleanup that never deletes pre-existing data: only paths this run created are removed, newest first, with `remove_dir` rather than `remove_dir_all` | `output.io`, and the `cleanup` counts | `a_failed_write_removes_this_runs_files_and_leaves_everything_else` |
+| Cleanup that never deletes pre-existing data: only paths this run created are removed, newest first, with `rmdir` rather than `remove_dir_all` | `output.io`, and the `cleanup` counts | `a_failed_write_removes_this_runs_files_and_leaves_everything_else`, `the_undo_pass_removes_through_the_descriptor_and_not_through_the_name` (`src/extract/tests.rs`) |
 | A failure never reports success, and never leaves partial output as a completed run; a `create` that fails after opening its output removes the file again, and one whose self-check finds a failing structural check removes it too | every `output.*` code and `create.internal.self_check_failed`, exit statuses 9 and 6 | every refusal test above; each reads the destination back, and each `create` refusal test asserts the output file does not exist |
 | Payload bytes preserved exactly, with no mode bits, timestamps, links, special files or nested unpacking | not applicable: a preservation rule, not a refusal | `a_package_is_extracted_with_byte_identical_payloads`, `a_planner_refusal_keeps_its_own_category_and_names_no_path` |
 | Diagnostics free of the destination path, an entry name and payload bytes; the written paths appear only in a successful report, and no `create` output carries a manifest value, an attachment path or the spelling of a key the schema does not define | every code; the diagnostic carries the code, its category, an entry index, and for `create` a fixed schema path and an attachment position | `extract_never_carries_a_canary_in_a_diagnostic` (`tests/privacy.rs`), `a_planner_refusal_keeps_its_own_category_and_names_no_path`, `no_manifest_value_reaches_a_diagnostic` (`tests/create.rs`), `a_successful_report_carries_no_value_from_the_manifest_either` (`tests/create.rs`) |
@@ -257,26 +258,27 @@ this run had created. A partial result is never reported as a success.
 
 ### Residual risks of the output layer
 
-- **A concurrent writer at the destination is out of scope on macOS and
-  Windows.** On Linux with `openat2` — kernel 5.6 or newer — `extract` opens
-  the destination once after preflight and has the kernel resolve every path
-  it creates relative to that descriptor, under `RESOLVE_BENEATH`,
-  `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS`, so a component replaced
-  between a check and the creation that follows is refused rather than
-  followed. Opening that descriptor is itself the last check of the
-  destination, and a destination that is no longer the real directory
-  preflight accepted refuses the run rather than falling back to resolving
-  the same path by name. Elsewhere — and on a Linux kernel that has no
-  `openat2`, which every successful report says with
-  `path_resolution_fallback: true` — the
+- **A concurrent writer at the destination is out of scope on Windows.** On
+  Unix, `extract` opens the destination once after preflight and resolves
+  every path it creates — and every path the undo pass removes — relative to
+  that descriptor, so a component replaced between a check and the operation
+  that follows is refused rather than followed. On Linux with `openat2` —
+  kernel 5.6 or newer — the kernel makes that resolution under
+  `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS`; on
+  every other Unix target the components are walked one at a time with
+  `O_DIRECTORY | O_NOFOLLOW`, which refuses a link at each component as it is
+  met but, unlike `RESOLVE_BENEATH`, cannot refuse a **mount** planted at
+  one. Opening that descriptor is itself the last check of the destination,
+  and a destination that is no longer the real directory preflight accepted
+  refuses the run rather than falling back to resolving the same path by
+  name. On Windows — and on a Linux kernel that has no `openat2`, which every
+  successful report says with `path_resolution_fallback: true` — the
   destination is still trusted not to be modified by another principal while
   the command runs: `create_new` and the post-creation `symlink_metadata`
   checks defend against what is already there, and not against an attacker
-  who can act inside that window. The equivalent per-platform primitive for
-  macOS and Windows is deliberately deferred. The undo pass after a failed
-  write removes this run's paths by path on every platform, Linux included,
-  so it is outside what the descriptor covers. Extract into a directory only
-  you can write to.
+  who can act inside that window. The equivalent primitive for Windows is
+  deliberately deferred, and there the undo pass, too, removes this run's
+  paths by name. Extract into a directory only you can write to.
 - **A crash leaves partial output.** A signal, a power loss or a killed
   process cannot run the undo pass, so partial files and the marker stay
   behind. The marker is the compensating control: a destination containing it

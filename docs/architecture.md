@@ -52,12 +52,13 @@ below is still absent.
   destination, not staged elsewhere and renamed into place, so an interrupted
   run is detected rather than prevented; see
   [Extraction output](#extraction-output).
-- Race-resistant path resolution on macOS and Windows. `extract` resolves
-  every destination path beneath one directory descriptor on Linux kernels
-  with `openat2`; elsewhere confinement rests on `symlink_metadata` and
-  exclusive creation, which defend against what is already at the destination
-  and not against a concurrent writer with access to it. What each platform
-  does and does not cover is under
+- Race-resistant path resolution on Windows. `extract` resolves every
+  destination path beneath one directory descriptor on Unix — by the kernel
+  on Linux with `openat2`, by a component-wise `O_NOFOLLOW` walk on every
+  other Unix target — but on Windows confinement rests on `symlink_metadata`
+  and exclusive creation, which defend against what is already at the
+  destination and not against a concurrent writer with access to it. What
+  each platform does and does not cover is under
   [Race assumptions](#race-assumptions-and-what-they-do-not-cover).
 - Signature handling of any kind, including `signatures.xml` (rule A7).
   `signatures.xml` is an ordinary entry to the inventory and nothing else.
@@ -100,12 +101,14 @@ in the same repository and released against the same MSRV). Those two are
 what let `completions` and `man` be generated from the parser the binary
 already carries, rather than hand-written and left to drift; both are used at
 run time by exactly one command each, are pulled in with default features
-off, and add one transitive dependency between them, `roff`. On Linux, and
+off, and add one transitive dependency between them, `roff`. On Unix, and
 only there, it also depends on `rustix` (Apache-2.0 WITH LLVM-exception OR
 Apache-2.0 OR MIT), with default features off and the `fs` and `std` features
 on: it is the `openat2` and `*at` call surface the extraction writer resolves
-paths through, its `linux_raw` backend links no C library, and `bitflags` and
-`linux-raw-sys` are the two crates it brings with it. The reason it is there
+paths through, and the one the undo pass removes through. On Linux its
+`linux_raw` backend links no C library and it brings `bitflags` and
+`linux-raw-sys`; on every other Unix target it uses its `libc` backend, which
+adds `libc` and `errno` for those targets alone. The reason it is there
 rather than hand-written bindings is that the workspace forbids `unsafe`; see
 [docs/research.md](research.md).
 
@@ -199,9 +202,9 @@ of which is private, so `missing_docs` alone could never fire there — denies
 | `src/extract/mod.rs` | The four phases of a protected extraction — plan, preflight, write, commit — the marker name, and the failure policy that undoes this run's work. |
 | `src/extract/preflight.rs` | What is decided before a byte is written: the destination, the marker, and every planned path against what is already there. Holds the link and reparse-point test. |
 | `src/extract/writer.rs` | Exclusive creation of the marker, the directories and the files, each recorded as this run created it. |
-| `src/extract/resolver.rs` | The one place that decides how a destination path is resolved: beneath a directory descriptor on Linux, and by path everywhere else, both answering with the same `output.*` codes. |
-| `src/extract/linux_fd.rs` | Linux only: the `openat2`, `mkdirat`, `openat` and `unlinkat` calls, and the three resolve flags every resolution asks for. |
-| `src/extract/cleanup.rs` | The ledger of what this run created and the reverse-order undo, which never removes anything pre-existing. |
+| `src/extract/resolver.rs` | The one place that decides how a destination path is resolved and removed again: beneath a directory descriptor on Unix, and by path on Windows, both answering with the same `output.*` codes. |
+| `src/extract/unix_fd.rs` | Unix only: the `openat2`, `mkdirat`, `openat`, `unlinkat` and `fstatat` calls, the three resolve flags the Linux arm asks for, and the component-wise `O_NOFOLLOW` walk every other Unix target resolves with. |
+| `src/extract/cleanup.rs` | The ledger of what this run created — components under the destination, never a joined path — and the reverse-order undo, which never removes anything pre-existing. |
 | `src/render/json.rs` | The one-object JSON envelope, in both its successful and its failed shape. |
 | `src/render/human.rs` | Terminal-safe text: control, invisible and undecodable bytes are escaped and a long name is cut. |
 
@@ -622,12 +625,16 @@ it as incomplete.
 ### Cleanup after a failed write
 
 Every path this run creates — files, directories and the marker — is recorded
-in creation order. Any failure after the first write walks that record
-backwards and removes exactly those paths: `remove_file` for a file,
-`remove_dir` for a directory, never `remove_dir_all`, so a directory that has
-since acquired something this run did not create survives instead of being
-deleted with its contents. **Nothing pre-existing can be removed**, because
-nothing pre-existing was ever recorded.
+in creation order, as its components relative to the destination rather than
+as a joined path. Any failure after the first write walks that record
+backwards and removes exactly those paths, through the same resolver that
+created them: `unlinkat` for a file and `unlinkat(AT_REMOVEDIR)` for a
+directory beneath the destination descriptor on Unix, `remove_file` and
+`remove_dir` by name on Windows. It is never `remove_dir_all` and never
+recursive, so a directory that has since acquired something this run did not
+create survives instead of being deleted with its contents, and it is refused
+for anything that is no longer a directory. **Nothing pre-existing can be
+removed**, because nothing pre-existing was ever recorded.
 
 The command then exits with the failure's own category, and the report says
 what the pass did: `removed` is how many of this run's paths are gone,
@@ -682,19 +689,41 @@ down the portable path exactly once. The report then carries
 `path_resolution_fallback: true`, and the human report gains a line saying
 so, so that the weaker guarantee is stated rather than assumed.
 
-**macOS and Windows.** The destination is trusted not to be modified by
-another principal while the command runs. Exclusive creation and the
-post-creation `symlink_metadata` checks defend against what is **already** at
-the destination — an existing file, a symbolic link, a Windows reparse point
-— and not against an attacker holding concurrent write access to it, who can
-win that window. Closing it needs the equivalent per-platform primitive and
-is deliberately deferred; it is recorded as a residual risk in
+**Every other Unix target, macOS among them.** There is no `openat2`, so the
+descriptor is walked rather than handed a path: the destination is opened the
+same way, and each component of each planned path is opened in turn with
+`openat(parent, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)`,
+relative to the descriptor the step before it returned. A component that is a
+symbolic link when it is met is refused by `O_NOFOLLOW`; a component swapped
+*after* it has been opened cannot redirect the rest, because from then on
+what the walk holds is the directory itself and not its name. No absolute
+path is resolved again here either, and the same two codes are answered — a
+component reported as `ENOTDIR` is asked about once with an `fstatat` that
+does not follow links, so a link is `output.symlink_in_path` on every
+platform even where the kernel called it something else. Two things
+`RESOLVE_BENEATH` gives on Linux the walk does not: it cannot refuse a
+**mount** planted at a component, and it has no magic-link rule, which costs
+nothing outside `/proc`. This is not a fallback and is not reported as one:
+`path_resolution_fallback` stays `false`, because nothing stronger was asked
+for and given up.
+
+**Windows.** The destination is trusted not to be modified by another
+principal while the command runs. Exclusive creation and the post-creation
+`symlink_metadata` checks defend against what is **already** at the
+destination — an existing file, a symbolic link, a reparse point — and not
+against an attacker holding concurrent write access to it, who can win that
+window. Closing it needs the equivalent per-platform primitive and is
+deliberately deferred; it is recorded as a residual risk in
 [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer).
 
-**The undo pass is portable everywhere.** Cleanup after a failed write
-removes this run's own paths by path, on every platform, so a principal who
-can swap an ancestor while that pass runs is outside what the descriptor
-covers. It removes only paths this run recorded, never recursively, and a
+**The undo pass takes the same arm the creation took.** On Unix each removal
+is an `unlinkat` beneath the destination descriptor, so it reaches the
+directory this run actually wrote into rather than whatever now answers to
+the destination's name — a destination renamed away and replaced with a
+symbolic link mid-run is removed from correctly, where a removal by name
+would have been misdirected. On Windows the pass removes by name, and a
+principal who can swap an ancestor while it runs is outside what it covers.
+On both, it removes only paths this run recorded, never recursively, and a
 removal that fails is counted rather than retried.
 
 Per platform: Windows reparse points are detected through
@@ -1358,10 +1387,11 @@ created, not ones that were already there, and `marker_removed` says the run
 reached its last step. `path_resolution_fallback` says whether this run
 resolved its paths more weakly than it asked to: it is `true` only on a Linux
 kernel where `extract` asked for `openat2` resolution and could not have it,
-and `false` both where that resolution was used and on a platform where there
-is no stronger mode to ask for. It answers "did this run give something up?",
-never "which platform is this?" — which is why it is the same value in the
-golden output contract on all three runners.
+and `false` wherever the destination descriptor was used — the kernel's
+resolution on Linux, the component walk on every other Unix target — as well
+as on a platform where there is no stronger mode to ask for. It answers "did
+this run give something up?", never "which platform is this?" — which is why
+it is the same value in the golden output contract on all three runners.
 
 ```json
 {
