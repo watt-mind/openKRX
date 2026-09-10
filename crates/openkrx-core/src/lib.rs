@@ -38,6 +38,230 @@
 //! description of the layers above. Public documentation is a build gate here:
 //! this crate denies `missing_docs`, so a public item without a doc comment
 //! does not compile.
+//!
+//! # Examples
+//!
+//! One example per layer follows, each compiled and run by
+//! `cargo test --doc -p openkrx-core`. They pass `Vec<u8>` around and open no
+//! path, because no layer of this crate touches a filesystem: a package is
+//! bytes here, and where those bytes come from or go is the caller's decision.
+//! The package every example works on is built by the public [`draft`] and
+//! [`create`] surface — the same one the `create` command uses — so nothing
+//! below needs a committed fixture or the test-only `synthetic-writer`
+//! feature.
+//!
+//! The values are synthetic. Package content must never be logged, persisted
+//! or sent through telemetry.
+//!
+//! ## Write a package
+//!
+//! ```
+//! use openkrx_core::create::{self, AttachmentInput, PackageSpec};
+//! use openkrx_core::draft::{self, HeaderDraft};
+//! use openkrx_core::metadata::{ConsignmentKind, SourceSystem};
+//! use openkrx_core::Limits;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let header = HeaderDraft {
+//!     version: "0.9".to_owned(),
+//!     source_system: SourceSystem::Ker,
+//!     consignment_id: "SYNTHETIC-0001".to_owned(),
+//!     created_at_text: "2026-01-02T03:04:05".to_owned(),
+//!     consignment_kind: ConsignmentKind::Kuldemeny,
+//!     test: true,
+//!     barcode: None,
+//!     reference_id: None,
+//!     error_code: None,
+//!     note: None,
+//! }
+//! .build();
+//! // One `EXPEDIALAS` block declaring the single attachment below. The
+//! // writer derives the reference and the count from the attachments; the
+//! // declared count is checked against them, never written in their place.
+//! let metadata = draft::metadata(header, vec![draft::dispatch(Some(1))]);
+//! let spec = PackageSpec::with_attachments(
+//!     metadata,
+//!     vec![AttachmentInput::described(
+//!         "notice.txt",
+//!         b"synthetic attachment".to_vec(),
+//!         "A synthetic notice",
+//!     )],
+//! );
+//!
+//! let image = create::package(&spec, &Limits::DEFAULT)?;
+//! // Deterministic: no clock, no randomness, no environment.
+//! assert_eq!(image, create::package(&spec, &Limits::DEFAULT)?);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Read one back
+//!
+//! ```
+//! use openkrx_core::{Limits, MetadataLimits, archive, create, metadata};
+//!
+//! # use openkrx_core::create::{AttachmentInput, PackageSpec};
+//! # use openkrx_core::draft::{self, HeaderDraft};
+//! # use openkrx_core::metadata::{ConsignmentKind, SourceSystem};
+//! # // The package the first example writes, rebuilt so that this one stands
+//! # // on its own.
+//! # fn example_package() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//! #     let header = HeaderDraft {
+//! #         version: "0.9".to_owned(), source_system: SourceSystem::Ker,
+//! #         consignment_id: "SYNTHETIC-0001".to_owned(),
+//! #         created_at_text: "2026-01-02T03:04:05".to_owned(),
+//! #         consignment_kind: ConsignmentKind::Kuldemeny, test: true,
+//! #         barcode: None, reference_id: None, error_code: None, note: None,
+//! #     }.build();
+//! #     let attachment = AttachmentInput::described(
+//! #         "notice.txt", b"synthetic attachment".to_vec(), "A synthetic notice");
+//! #     let spec = PackageSpec::with_attachments(
+//! #         draft::metadata(header, vec![draft::dispatch(Some(1))]), vec![attachment]);
+//! #     Ok(openkrx_core::create::package(&spec, &openkrx_core::Limits::DEFAULT)?)
+//! # }
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let image = example_package()?;
+//! let inventory = archive::inventory(&image, &Limits::DEFAULT)?;
+//! assert!(inventory.is_first_entry_named(create::MARKER_NAME.as_bytes()));
+//!
+//! let position = inventory
+//!     .entries()
+//!     .iter()
+//!     .position(|entry| entry.name_bytes() == create::METADATA_NAME.as_bytes())
+//!     .ok_or("no metadata document")?;
+//! let document = inventory.entry_bytes(position as u32)?;
+//! let parsed = metadata::parse(&document, &MetadataLimits::DEFAULT)?;
+//! assert_eq!(parsed.header.consignment_id, "SYNTHETIC-0001");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Run the structural checks
+//!
+//! ```
+//! use openkrx_core::profile::{CheckOutcome, StructureSummary};
+//! use openkrx_core::{Limits, MetadataLimits, archive, profile};
+//!
+//! # use openkrx_core::create::{AttachmentInput, PackageSpec};
+//! # use openkrx_core::draft::{self, HeaderDraft};
+//! # use openkrx_core::metadata::{ConsignmentKind, SourceSystem};
+//! # // The package the first example writes, rebuilt so that this one stands
+//! # // on its own.
+//! # fn example_package() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//! #     let header = HeaderDraft {
+//! #         version: "0.9".to_owned(), source_system: SourceSystem::Ker,
+//! #         consignment_id: "SYNTHETIC-0001".to_owned(),
+//! #         created_at_text: "2026-01-02T03:04:05".to_owned(),
+//! #         consignment_kind: ConsignmentKind::Kuldemeny, test: true,
+//! #         barcode: None, reference_id: None, error_code: None, note: None,
+//! #     }.build();
+//! #     let attachment = AttachmentInput::described(
+//! #         "notice.txt", b"synthetic attachment".to_vec(), "A synthetic notice");
+//! #     let spec = PackageSpec::with_attachments(
+//! #         draft::metadata(header, vec![draft::dispatch(Some(1))]), vec![attachment]);
+//! #     Ok(openkrx_core::create::package(&spec, &openkrx_core::Limits::DEFAULT)?)
+//! # }
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let image = example_package()?;
+//! let inventory = archive::inventory(&image, &Limits::DEFAULT)?;
+//! let report = profile::check(&inventory, &MetadataLimits::DEFAULT)?;
+//! assert!(!report
+//!     .checks()
+//!     .iter()
+//!     .any(|check| matches!(check.outcome, CheckOutcome::Fail(_))));
+//! // Not `Consistent`: the root prefix (A19) and the declared size (M13) are
+//! // unresolved rules, so they are reported as unresolved rather than passed.
+//! // A summary is never a conformance verdict.
+//! assert_eq!(report.summary(), StructureSummary::Unresolved);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Plan an extraction
+//!
+//! ```
+//! use openkrx_core::extract::{self, ExtractLimits};
+//! use openkrx_core::{Limits, archive};
+//!
+//! # use openkrx_core::create::{AttachmentInput, PackageSpec};
+//! # use openkrx_core::draft::{self, HeaderDraft};
+//! # use openkrx_core::metadata::{ConsignmentKind, SourceSystem};
+//! # // The package the first example writes, rebuilt so that this one stands
+//! # // on its own.
+//! # fn example_package() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//! #     let header = HeaderDraft {
+//! #         version: "0.9".to_owned(), source_system: SourceSystem::Ker,
+//! #         consignment_id: "SYNTHETIC-0001".to_owned(),
+//! #         created_at_text: "2026-01-02T03:04:05".to_owned(),
+//! #         consignment_kind: ConsignmentKind::Kuldemeny, test: true,
+//! #         barcode: None, reference_id: None, error_code: None, note: None,
+//! #     }.build();
+//! #     let attachment = AttachmentInput::described(
+//! #         "notice.txt", b"synthetic attachment".to_vec(), "A synthetic notice");
+//! #     let spec = PackageSpec::with_attachments(
+//! #         draft::metadata(header, vec![draft::dispatch(Some(1))]), vec![attachment]);
+//! #     Ok(openkrx_core::create::package(&spec, &openkrx_core::Limits::DEFAULT)?)
+//! # }
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let image = example_package()?;
+//! let inventory = archive::inventory(&image, &Limits::DEFAULT)?;
+//! let plan = extract::plan(&inventory, &ExtractLimits::DEFAULT)?;
+//! // Destination components as text: no `PathBuf`, no absolute path and no
+//! // platform separator. The caller decides what a path is, and nothing has
+//! // been written.
+//! assert!(plan.items().iter().all(|item| item
+//!     .components()
+//!     .iter()
+//!     .all(|component| !component.is_empty())));
+//! assert!(plan
+//!     .items()
+//!     .iter()
+//!     .any(|item| item.components().last().map(String::as_str) == Some("notice.txt")));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Repack it
+//!
+//! ```
+//! use openkrx_core::create::FixedTimestamp;
+//! use openkrx_core::repack::{self, AttachmentAddition, Edits};
+//! use openkrx_core::{Limits, MetadataLimits, archive};
+//!
+//! # use openkrx_core::create::{AttachmentInput, PackageSpec};
+//! # use openkrx_core::draft::{self, HeaderDraft};
+//! # use openkrx_core::metadata::{ConsignmentKind, SourceSystem};
+//! # // The package the first example writes, rebuilt so that this one stands
+//! # // on its own.
+//! # fn example_package() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//! #     let header = HeaderDraft {
+//! #         version: "0.9".to_owned(), source_system: SourceSystem::Ker,
+//! #         consignment_id: "SYNTHETIC-0001".to_owned(),
+//! #         created_at_text: "2026-01-02T03:04:05".to_owned(),
+//! #         consignment_kind: ConsignmentKind::Kuldemeny, test: true,
+//! #         barcode: None, reference_id: None, error_code: None, note: None,
+//! #     }.build();
+//! #     let attachment = AttachmentInput::described(
+//! #         "notice.txt", b"synthetic attachment".to_vec(), "A synthetic notice");
+//! #     let spec = PackageSpec::with_attachments(
+//! #         draft::metadata(header, vec![draft::dispatch(Some(1))]), vec![attachment]);
+//! #     Ok(openkrx_core::create::package(&spec, &openkrx_core::Limits::DEFAULT)?)
+//! # }
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let image = example_package()?;
+//! let inventory = archive::inventory(&image, &Limits::DEFAULT)?;
+//! let mut edits = Edits::default();
+//! edits.header.consignment_id = Some("SYNTHETIC-0002".to_owned());
+//! edits.add.push(AttachmentAddition::new("second.txt", b"another".to_vec()));
+//!
+//! let plan = repack::plan(&inventory, &Limits::DEFAULT, &MetadataLimits::DEFAULT, &edits)?;
+//! assert_eq!(plan.preserved(), &[1]);
+//! assert_eq!(plan.added(), &[2]);
+//! let edited = repack::apply(&inventory, &plan, FixedTimestamp::EPOCH, &Limits::DEFAULT)?;
+//! assert_ne!(edited, image);
+//! # Ok(())
+//! # }
+//! ```
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]

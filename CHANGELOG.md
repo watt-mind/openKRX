@@ -581,6 +581,25 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **The core crate's documentation carries a compiled example per layer
+  (KRX-13).** `crates/openkrx-core/src/lib.rs` gains an `# Examples` section
+  with five doctests: writing a package through the public `draft` and
+  `create` surface, reading it back through `archive::inventory` and
+  `metadata::parse`, running `profile::check` over it, planning an extraction,
+  and repacking it. Each is self-contained and each runs entirely in memory —
+  no committed fixture, no temporary directory and not the test-only
+  `synthetic-writer` feature — because no layer of the crate touches a
+  filesystem. `cargo test --doc -p openkrx-core` compiles and runs them, so a
+  reader who copies one gets code that is known to build. No behaviour
+  changed, no public item was added or removed, and no golden case moved.
+  The documentation follow-ups it settles: `docs/research.md` now records why
+  `clap_complete` and `clap_mangen` were chosen over committed documents, and
+  `docs/architecture.md` states the stance every command shares on a failed
+  write to standard output or standard error — the result is dropped, so a
+  closed pipe is not a diagnostic, and a successful exit status therefore
+  means the operation succeeded rather than that every byte reached the
+  consumer, which matters for `create --stdout` and `repack --stdout`.
+
 - **First-release readiness is assessed against the six gates (KRX-07,
   openKRX side).** `docs/releasing.md` gains a dated "Readiness status"
   section: one row per gate with a status, public evidence links and what

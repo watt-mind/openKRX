@@ -1052,6 +1052,28 @@ Their bytes depend on the `clap_complete` and `clap_mangen` versions the
 binary was built against, so neither has a golden case; see
 [the golden output contract](testing.md#golden-output-contract).
 
+**A failed write to stdout or stderr is not reported, by any command.** Every
+byte openkrx puts on either stream goes through one of two helpers in
+`crates/openkrx-cli/src/input.rs` — `line`, which terminates a report, and
+`payload`, which writes a document or a package exactly as it is — and both
+drop the `io::Result`. `completions` needs a third shape for the same
+decision, because `clap_complete::generate` panics on a write error rather
+than returning one, so `crates/openkrx-cli/src/generate.rs` hands it a writer
+that reports every write as complete. The reason is the same in all three
+places: `openkrx list … | head -3`, `openkrx skill | head -5` and
+`openkrx man | col -b | less` close the pipe on purpose, and a diagnostic
+about that would be noise — and a diagnostic about a broken stderr could not
+be delivered at all.
+
+The consequence is a boundary a caller has to know: **a successful exit status
+means the package operation succeeded, not that every byte reached the
+consumer.** It matters most for `create --stdout` and `repack --stdout`, where
+stdout carries the package itself: a pipeline that truncates those bytes gets
+exit 0 and a report on stderr saying the package was written. A caller that
+needs the package on disk uses `--out`, which writes the file itself and fails
+loudly if it cannot; a caller that pipes it is responsible for the far end of
+its own pipe.
+
 The three reader commands write nothing anywhere. `extract` writes exactly
 the files the package declares, into the directory `--into` names, under the
 rules in [Extraction output](#extraction-output). `create` and `repack` each
