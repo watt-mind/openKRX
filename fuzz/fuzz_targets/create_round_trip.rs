@@ -18,7 +18,7 @@ use openkrx_core::{Limits, MetadataLimits, archive, draft, profile};
 /// admits nothing else — `create.over_limit.*` carries a `*`, and a path such
 /// as `create.rs` has two segments.
 static DOCUMENTED_CODES: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
-    include_str!("../../docs/codes.md")
+    let codes: BTreeSet<&'static str> = include_str!("../../docs/codes.md")
         .split('`')
         .skip(1)
         .step_by(2)
@@ -33,7 +33,16 @@ static DOCUMENTED_CODES: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
             };
             head && segments.clone().count() == 2 && segments.all(shape)
         })
-        .collect()
+        .collect();
+    // Checked once, on the first refusal this target sees. A scan that matched
+    // nothing — a rewritten table, a document moved, a change to the code
+    // spelling — would make the error arm's membership assertion vacuous and
+    // quietly turn this target into a crash-only one. Better to fail loudly.
+    assert!(
+        !codes.is_empty(),
+        "the scan of docs/codes.md found no `create.*` code, so the documented set is vacuous"
+    );
+    codes
 });
 
 /// The longest text this target puts into any single field.
@@ -127,8 +136,16 @@ fn spec(bytes: &mut Unstructured<'_>) -> arbitrary::Result<PackageSpec> {
     let attachment_count = bytes.int_in_range(0..=4_u8)?;
     let attachments = (0..attachment_count)
         .map(|_| {
-            let mut data = Vec::<u8>::arbitrary(bytes)?;
-            data.truncate(MAX_ATTACHMENT_BYTES);
+            // Sized first, then taken: `Vec::<u8>::arbitrary` consumes the rest
+            // of the input and the truncation that used to follow it threw all
+            // but the first `MAX_ATTACHMENT_BYTES` away, leaving every field
+            // after this one — the names, the descriptions, the timestamp —
+            // with nothing to draw from. `arbitrary_len` takes the length from
+            // the tail of the input, which is where libFuzzer's own provider
+            // puts lengths, and the cap keeps the request bounded; what is left
+            // stays available to the fields below.
+            let length = bytes.arbitrary_len::<u8>()?.min(MAX_ATTACHMENT_BYTES);
+            let data = bytes.bytes(length)?.to_vec();
             Ok(AttachmentInput {
                 file_name: file_name(bytes)?,
                 bytes: data,
@@ -155,6 +172,11 @@ fn spec(bytes: &mut Unstructured<'_>) -> arbitrary::Result<PackageSpec> {
 // refusal the diagnostic must be one `docs/codes.md` catalogues, so a caller
 // never meets a `create.*` code that is not documented.
 fuzz_target!(|data: &[u8]| {
+    // Forced rather than left to the error arm: an input that never reaches a
+    // refusal would otherwise leave the scan unevaluated, and a scan that had
+    // silently matched nothing would go unnoticed for a whole campaign. After
+    // the first execution this is an acquire load.
+    LazyLock::force(&DOCUMENTED_CODES);
     let mut bytes = Unstructured::new(data);
     let Ok(spec) = spec(&mut bytes) else {
         return;

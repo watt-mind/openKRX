@@ -741,7 +741,9 @@ is the lane below.
 
 `.github/workflows/fuzz.yml` is the long run, on the model of
 [mutants.yml](#mutation-testing): **weekly on a schedule**, plus
-`workflow_dispatch` with a `minutes_per_target` input that defaults to **20**.
+`workflow_dispatch` with a `minutes_per_target` input that defaults to **20**
+and is refused outside 1–240, so a mistyped budget fails in the first step
+rather than by hitting the job's 360-minute timeout hours later.
 It is deliberately **not** a required check and is not listed in
 `.factory.yaml`. A crash it finds is a defect to triage under
 [fuzz/regressions/README.md](../fuzz/regressions/README.md), not a merge
@@ -798,9 +800,15 @@ shape" into a failing test.
 
 ```sh
 cargo bench -p openkrx-core          # the whole set
-cargo bench -p openkrx-core --no-run # compile only; part of the PR gate
+cargo bench -p openkrx-core --no-run # compile only, locally
 cargo bench -p openkrx-core -- inventory   # one group
 ```
+
+No workflow runs `cargo bench`: a timing number from a shared runner is not
+something to gate a merge on. What CI does hold is that the targets still
+compile — the clippy gate lints `--all-targets` and the MSRV job runs `cargo
+check --all-targets`, and both of those include `benches/`. A benchmark that
+stops building therefore fails the pull request; one that gets slower does not.
 
 The harness is [`criterion`](https://crates.io/crates/criterion), a
 dev-dependency of `openkrx-core` alone, with `default-features = false` and
@@ -854,9 +862,12 @@ runner, a debug build and a cold cache all move the constant and none of them
 moves the exponent. A guard that flakes gets disabled, and a disabled guard
 catches nothing. Two further things keep it honest: every size is measured
 twice and the **minimum** is taken, because noise only ever adds time; and the
-counted operations are repeated twenty times inside one measurement, at both
-sizes, so the repetition cancels out of the ratio and only buys a measurement
-long enough for the clock to resolve.
+two count guards — `extract::plan` and `profile::check`, whose single call is
+too short to time reliably — repeat the counted operation twenty times inside
+one measurement, at both sizes, so the repetition cancels out of the ratio and
+only buys a measurement long enough for the clock to resolve. The inventory
+guard needs none of that: one pass over 4 MiB already outlasts the clock's
+resolution, so it is timed once per measurement.
 
 The test is sized to run in a **debug** build inside CI's budget — about 3.5
 seconds on the host below, against a ceiling of 30. Run it alone, with the

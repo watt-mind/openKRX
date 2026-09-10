@@ -69,6 +69,11 @@ const MIB: usize = 1024 * 1024;
 const IMAGE_ENTRIES: usize = 8;
 /// Decoded bytes each counted entry carries.
 const PAYLOAD_BYTES: usize = 512;
+/// Bytes reserved per entry for its local header, name and directory record.
+///
+/// Subtracted from each entry's share of a requested image size, so the image
+/// built for that size lands under it rather than over it.
+const ENTRY_OVERHEAD: usize = 256;
 
 // ------------------------------------------------------------- measuring
 
@@ -157,7 +162,15 @@ fn stored(name: &str, data: Vec<u8>) -> Entry {
 /// generating 64 MiB of anything more interesting would cost more than the
 /// measurement.
 fn stored_image(bytes: usize) -> Vec<u8> {
-    let per_entry = bytes / IMAGE_ENTRIES - 256;
+    // `saturating_sub` rather than `-`: the sizes below are megabytes, but a
+    // smaller one passed in some later revision would underflow here and panic
+    // in a debug build with nothing but an arithmetic message. The assertion is
+    // what rejects such a size, and it says which size it was.
+    let per_entry = (bytes / IMAGE_ENTRIES).saturating_sub(ENTRY_OVERHEAD);
+    assert!(
+        per_entry > 0,
+        "a guard image of {bytes} bytes leaves no payload across {IMAGE_ENTRIES} entries"
+    );
     let entries = (0..IMAGE_ENTRIES)
         .map(|index| {
             let data = vec![index as u8; per_entry];
