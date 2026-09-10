@@ -510,9 +510,12 @@ and such a change is recorded here explicitly.
 
 - **`manifest.invalid.unknown_field` now lists the keys the schema defines.**
   The key a caller wrote is still never echoed — it is text they wrote — but
-  the sentence names the key set of the object it was in, and says that `/`
-  is the document itself, so a misspelling can be found without reading the
-  schema. A unit test holds each sentence against the key list it describes.
+  the sentence names the key set of **the object the diagnostic points at**,
+  so a misspelling can be found without reading the schema: a typo inside
+  `metadata` is answered with `metadata`'s own fields, not with the
+  document's top-level keys. A unit test holds each sentence against the key
+  array that defines that object, so the two cannot drift. This applies to
+  `create`'s manifest as well as to `repack`'s edits document.
 
 - **`input.unreadable` from `repack` names the file that failed.** `repack`
   opens a package, an edits document and one file per edit, so the failure

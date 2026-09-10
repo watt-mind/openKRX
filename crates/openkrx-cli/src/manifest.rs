@@ -54,9 +54,9 @@ pub(crate) const METADATA_KEYS: [&str; 11] = [
     "dispatches",
 ];
 /// The keys of one `metadata.dispatches` element.
-const DISPATCH_KEYS: [&str; 1] = ["declared_attachment_count"];
+pub(crate) const DISPATCH_KEYS: [&str; 1] = ["declared_attachment_count"];
 /// The keys of one `attachments` element.
-const ATTACHMENT_KEYS: [&str; 3] = ["path", "file_name", "description"];
+pub(crate) const ATTACHMENT_KEYS: [&str; 3] = ["path", "file_name", "description"];
 
 /// The schema path of every field a diagnostic may name.
 ///

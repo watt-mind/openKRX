@@ -41,10 +41,11 @@ const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this
 /// covered both would tell a caller who ran one command to do something with
 /// the other's flag. Each therefore names the argument the caller actually
 /// typed, and nothing else.
-fn advice(code: &str, command: &str) -> Option<&'static str> {
+fn advice(code: &str, command: &str, field: Option<&str>) -> Option<&'static str> {
     output_advice(code, command)
         .or_else(|| input_advice(code, command))
-        .or_else(|| document_advice(code, command))
+        .or_else(|| unknown_key_advice(code, command, field))
+        .or_else(|| document_advice(code))
         .or_else(|| repack_advice(code))
 }
 
@@ -117,6 +118,74 @@ writable and has free space"
     })
 }
 
+/// The sentence `manifest.invalid.unknown_field` deserves, keyed on the object
+/// the refusal actually names.
+///
+/// The key a caller wrote is content and is never echoed. What can be named is
+/// the schema's own key list — and it has to be the list of **the object the
+/// diagnostic points at**: telling someone whose typo is inside `metadata` to
+/// compare it against the document's top-level keys sends them looking in the
+/// wrong place, which is worse than saying nothing at all. Each arm below is
+/// held against the key array it describes by
+/// `the_unknown_key_sentence_lists_the_keys_of_the_object_it_names`.
+fn unknown_key_advice(code: &str, command: &str, field: Option<&str>) -> Option<&'static str> {
+    if code != "manifest.invalid.unknown_field" {
+        return None;
+    }
+    let repacking = command == "repack";
+    Some(match (field?, repacking) {
+        ("/", false) => {
+            "the manifest carries a key the schema does not define. The key \
+itself is not echoed, because you wrote it; the diagnostic names the object \
+it was in as a JSON Pointer, and / is the manifest itself, whose keys are \
+schema_version, timestamp, metadata and attachments"
+        }
+        ("/", true) => {
+            "the edits document carries a key the schema does not define. The \
+key itself is not echoed, because you wrote it; the diagnostic names the \
+object it was in as a JSON Pointer, and / is the document itself, whose keys \
+are schema_version, timestamp, metadata, add, replace and remove"
+        }
+        ("/metadata", false) => {
+            "the manifest's metadata object carries a key the schema does not \
+define. The key itself is not echoed, because you wrote it; that object's \
+keys are version, source_system, consignment_id, created_at, \
+consignment_kind, test, barcode, reference_id, error_code, note and dispatches"
+        }
+        ("/metadata", true) => {
+            "the edits document's metadata object carries a key the schema \
+does not define. The key itself is not echoed, because you wrote it; that \
+object's keys are version, source_system, consignment_id, created_at, \
+consignment_kind, test, barcode, reference_id, error_code and note. \
+dispatches is not one of them: the attachment references and the count are \
+derived from the attachments the result carries"
+        }
+        ("/metadata/dispatches", _) => {
+            "a dispatch block carries a key the schema does not define. The \
+key itself is not echoed, because you wrote it; that object's only key is \
+declared_attachment_count"
+        }
+        ("/attachments", _) => {
+            "an attachments element carries a key the schema does not define. \
+The key itself is not echoed, because you wrote it; that object's keys are \
+path, file_name and description"
+        }
+        ("/add", _) => {
+            "an add element carries a key the schema does not define. The key \
+itself is not echoed, because you wrote it; that object's keys are path, \
+file_name and description"
+        }
+        ("/replace", _) => {
+            "a replace element carries a key the schema does not define. The \
+key itself is not echoed, because you wrote it; that object's keys are number \
+and path"
+        }
+        // A field this build does not list falls through to the general
+        // sentence rather than naming some other object's keys.
+        _ => return None,
+    })
+}
+
 /// The sentence `input.unreadable` deserves from a command taking two paths.
 ///
 /// `repack` opens a package, an edits document and each local file an edit
@@ -142,51 +211,30 @@ package given as the argument",
 ///
 /// Both documents openKRX reads report through these codes, and the sentence
 /// is where a caller learns what the schema allows: the diagnostic names the
-/// field, never its value.
-fn document_advice(code: &str, command: &str) -> Option<&'static str> {
+/// field, never its value. `unknown_field` is handled before this, because its
+/// sentence depends on which object the field names.
+fn document_advice(code: &str) -> Option<&'static str> {
     Some(match code.as_bytes() {
-        // The key a caller wrote is content and is never echoed. What can be
-        // named is the schema's own key list, which is what a caller actually
-        // needs to spot a typo, and the object the key was in — `/` being the
-        // document itself. `unknown_key_advice_lists_the_schemas_own_keys`
-        // holds each sentence against the key set it describes.
-        b"manifest.invalid.unknown_field" if command == "repack" => {
-            "the edits document carries a key the schema does not define. The \
-key itself is not echoed, because you wrote it; the diagnostic names the \
-object it was in as a JSON Pointer, / being the document itself, whose own \
-keys are schema_version, timestamp, metadata, add, replace and remove. \
-Compare that object against the schema in docs/architecture.md"
-        }
-        b"manifest.invalid.unknown_field" if command == "create" => {
-            "the manifest carries a key the schema does not define. The key \
-itself is not echoed, because you wrote it; the diagnostic names the object \
-it was in as a JSON Pointer, / being the manifest itself, whose own keys are \
-schema_version, timestamp, metadata and attachments. Compare that object \
-against the schema in docs/architecture.md"
+        b"manifest.invalid.unknown_field" => {
+            "the document carries a key the schema does not define; the \
+diagnostic names the object it was in and never the key itself, which is text \
+you wrote, so compare that object against the schema in docs/architecture.md"
         }
         b"manifest.invalid.syntax" => {
-            "the manifest is not one JSON object: it must be UTF-8, must parse \
+            "the document is not one JSON object: it must be UTF-8, must parse \
 as a single object, and must carry nothing after it"
         }
         b"manifest.invalid.schema_version" => {
-            "the manifest declares a schema_version this build does not \
-implement; 1 is the only one it writes from"
+            "the document declares a schema_version this build does not \
+implement; 1 is the only one this build reads"
         }
-        b"manifest.invalid.unknown_field" => {
-            "the manifest carries a key the schema does not define; the \
-diagnostic names the object it was in and never the key itself, so compare \
-that object against the schema in docs/architecture.md"
-        }
-        b"manifest.invalid.missing_field" => {
-            "a required manifest field is absent; the diagnostic names it"
-        }
+        b"manifest.invalid.missing_field" => "a required field is absent; the diagnostic names it",
         b"manifest.invalid.type" => {
-            "a manifest field carries the wrong kind of JSON value; the \
-diagnostic names the field, and the schema in docs/architecture.md gives its \
-type"
+            "a field carries the wrong kind of JSON value; the diagnostic \
+names the field, and the schema in docs/architecture.md gives its type"
         }
         b"manifest.invalid.enumeration" => {
-            "a manifest field carries a token outside its fixed set: \
+            "a field carries a token outside its fixed set: \
 source_system is NOVA, KIR3, KER, POSTA or IMAP, and consignment_kind is \
 KULDEMENY, NYUGTA, EXPEDIALAS, TERTIVEVENY or HIBAJELZES"
         }
@@ -448,7 +496,7 @@ impl Failure {
     #[must_use]
     pub fn line(&self, command: &str) -> String {
         let explanation = if self.classified {
-            advice(self.code, command).unwrap_or_else(|| self.category.explanation())
+            advice(self.code, command, self.field).unwrap_or_else(|| self.category.explanation())
         } else {
             UNCLASSIFIED_EXPLANATION
         };

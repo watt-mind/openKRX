@@ -1,2 +1,2 @@
-openkrx: manifest.invalid.unknown_field at field /attachments (attachment 0) — the manifest carries a key the schema does not define. The key itself is not echoed, because you wrote it; the diagnostic names the object it was in as a JSON Pointer, / being the manifest itself, whose own keys are schema_version, timestamp, metadata and attachments. Compare that object against the schema in docs/architecture.md (exit 6)
+openkrx: manifest.invalid.unknown_field at field /attachments (attachment 0) — an attachments element carries a key the schema does not define. The key itself is not echoed, because you wrote it; that object's keys are path, file_name and description (exit 6)
 openkrx: nothing had been written, so the destination is as it was found

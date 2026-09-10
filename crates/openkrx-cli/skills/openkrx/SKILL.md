@@ -525,7 +525,8 @@ the same package and the same edits always produce byte-identical output:
   (with `attachment_index`), and no `field` at all means the package. A key
   the schema does not define is refused with `manifest.invalid.unknown_field`
   (exit `6`); the key you wrote is never echoed back, and the human sentence
-  lists the keys that object *does* define, which is what you compare against.
+  lists the keys the object named by `error.field` *does* define — so a typo
+  inside `metadata` is answered with `metadata`'s own fields.
 - `--out` must not exist in any form, so **the package you are editing is
   never overwritten and nothing is edited in place**. Repacking onto the
   input path is refused with `output.exists` (exit `9`). `--stdout` writes

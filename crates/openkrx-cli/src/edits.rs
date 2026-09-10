@@ -47,9 +47,9 @@ pub(crate) const EDITS_KEYS: [&str; 6] = [
     "remove",
 ];
 /// The keys of one `add` element.
-const ADD_KEYS: [&str; 3] = ["path", "file_name", "description"];
+pub(crate) const ADD_KEYS: [&str; 3] = ["path", "file_name", "description"];
 /// The keys of one `replace` element.
-const REPLACE_KEYS: [&str; 2] = ["number", "path"];
+pub(crate) const REPLACE_KEYS: [&str; 2] = ["number", "path"];
 /// The one `metadata` key of the create manifest an edits document refuses:
 /// the references and the count are derived, never set.
 const DERIVED_KEY: &str = "dispatches";

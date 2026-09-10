@@ -314,33 +314,69 @@ fn a_repacking_refusal_points_at_the_attachment_number_it_concerns() {
 }
 
 #[test]
-fn the_unknown_key_sentence_lists_the_schemas_own_keys() {
-    // The key a caller wrote is never echoed, so the sentence has to
-    // carry what a caller can act on instead: the key set the schema
-    // defines. Reading the two arrays here is what keeps the sentence
-    // from drifting away from the schema it describes.
-    let creating = Failure::manifest(super::MANIFEST_UNKNOWN_FIELD, "/").line("create");
-    for key in crate::manifest::MANIFEST_KEYS {
-        assert!(creating.contains(key), "the create sentence omits {key}");
+fn the_unknown_key_sentence_lists_the_keys_of_the_object_it_names() {
+    // The key a caller wrote is never echoed, so the sentence has to carry
+    // what they can act on instead: the key set of the object the diagnostic
+    // points at. Naming some *other* object's keys would send them looking in
+    // the wrong place, which is worse than saying nothing, so each object is
+    // held against the array that defines it.
+    let line = |field: &'static str, command: &str| {
+        Failure::manifest(super::MANIFEST_UNKNOWN_FIELD, field).line(command)
+    };
+    let metadata_keys = crate::manifest::METADATA_KEYS;
+    let cases: [(&str, &str, Vec<&str>); 8] = [
+        ("/", "create", crate::manifest::MANIFEST_KEYS.to_vec()),
+        ("/", "repack", crate::edits::EDITS_KEYS.to_vec()),
+        ("/metadata", "create", metadata_keys.to_vec()),
+        (
+            "/metadata",
+            "repack",
+            metadata_keys
+                .into_iter()
+                .filter(|key| *key != "dispatches")
+                .collect(),
+        ),
+        (
+            "/metadata/dispatches",
+            "create",
+            crate::manifest::DISPATCH_KEYS.to_vec(),
+        ),
+        (
+            "/attachments",
+            "create",
+            crate::manifest::ATTACHMENT_KEYS.to_vec(),
+        ),
+        ("/add", "repack", crate::edits::ADD_KEYS.to_vec()),
+        ("/replace", "repack", crate::edits::REPLACE_KEYS.to_vec()),
+    ];
+    for (field, command, keys) in cases {
+        let sentence = line(field, command);
+        for key in keys {
+            assert!(
+                sentence.contains(key),
+                "the {command} sentence for {field} omits {key}: {sentence}"
+            );
+        }
+        // And never a promise to name the key itself, which openKRX will not
+        // do: it is text the caller wrote.
+        assert!(sentence.contains("not echoed"), "{field}: {sentence}");
+        assert!(sentence.ends_with("(exit 6)"), "{field}: {sentence}");
     }
+    // `dispatches` belongs to the manifest's metadata and not to the edits
+    // document's, and each sentence says so.
+    assert!(line("/metadata", "create").contains("dispatches"));
     assert!(
-        creating.contains("/ being the manifest itself"),
-        "{creating}"
+        line("/metadata", "repack").contains("dispatches is not one of them"),
+        "the edits sentence must say why dispatches is absent"
     );
-
-    let repacking = Failure::manifest(super::MANIFEST_UNKNOWN_FIELD, "/").line("repack");
-    for key in crate::edits::EDITS_KEYS {
-        assert!(repacking.contains(key), "the repack sentence omits {key}");
-    }
+    // A field this build does not list falls back to the general sentence
+    // rather than to some other object's keys.
+    let unknown = line("/somewhere/else", "repack");
     assert!(
-        repacking.contains("/ being the document itself"),
-        "{repacking}"
+        unknown.contains("compare that object against the schema"),
+        "{unknown}"
     );
-    // And neither sentence promises to name the key, which openKRX will
-    // not do: it is text the caller wrote.
-    for line in [&creating, &repacking] {
-        assert!(line.contains("not echoed"), "{line}");
-    }
+    assert!(!unknown.contains("whose keys are"), "{unknown}");
 }
 
 #[test]

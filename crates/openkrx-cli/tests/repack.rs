@@ -546,6 +546,42 @@ fn an_unknown_key_is_refused_with_the_keys_the_schema_defines() {
 }
 
 #[test]
+fn an_unknown_key_inside_metadata_lists_that_objects_keys() {
+    // The sentence has to describe the object the diagnostic points at. A
+    // caller whose typo is inside `metadata`, told to compare it against the
+    // document's top-level keys, would look in the wrong place.
+    let scratch = Scratch::new("repack-nested-key");
+    let package = source(&scratch);
+    let edits = edits_file(&scratch, "\"metadata\":{\"consignment_idd\":\"X\"}");
+    let out = scratch.path().join("out.krx");
+    let output = repack(&package, &edits, &out);
+    assert_eq!(status(&output), 6);
+    let line = stderr(&output);
+    assert!(line.contains("at field /metadata"), "{line}");
+    for key in [
+        "version",
+        "source_system",
+        "consignment_id",
+        "created_at",
+        "note",
+    ] {
+        assert!(line.contains(key), "the sentence omits {key}: {line}");
+    }
+    assert!(
+        line.contains("dispatches is not one of them"),
+        "an edits document derives the references, and says so: {line}"
+    );
+    assert!(
+        !line.contains("consignment_idd"),
+        "the key is never echoed: {line}"
+    );
+    assert!(
+        !line.contains("schema_version, timestamp, metadata, add"),
+        "the root document's key list belongs to a refusal at /: {line}"
+    );
+}
+
+#[test]
 fn an_output_that_already_exists_is_refused_and_left_alone() {
     let scratch = Scratch::new("repack-clobber");
     let package = source(&scratch);
