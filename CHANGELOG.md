@@ -33,6 +33,49 @@ and such a change is recorded here explicitly.
   names, asserts the buckets they must produce, and asserts that no canary —
   file name, temporary directory, synthetic identifier, attachment name or
   metadata entry name — reaches the output.
+
+- **A held release workflow: multi-platform builds, checksums and build
+  provenance.** `.github/workflows/release.yml` is hand-maintained rather than
+  generated, so the file a reviewer reads is what runs. On a `v*` tag it builds
+  `openkrx-cli` for six targets — `x86_64` and `aarch64` Linux (gnu, plus musl
+  on `x86_64`), both macOS architectures and `x86_64` Windows — each on a runner
+  of its own architecture, so no cross toolchain, emulator or container is in
+  the trust path and every archive is executed before it ships. Each archive
+  carries the binary, `LICENSE`, `README.md`, `CHANGELOG.md` and a `SKILL.md`
+  written out by the packaged binary itself, beside one `SHA256SUMS` over all
+  six. A per-target smoke job verifies the checksum, unpacks the archive and
+  runs the packaged binary: `--version` against the workspace version,
+  `capabilities --json` against `schema_version` 1 and the exact operation list,
+  `skill` against its front matter, and `validate-structure` over
+  `tests/fixtures/golden/consistent.krx` asserting **exit status 4** and the
+  `unresolved` summary, so a binary that started emitting a conformance verdict
+  never reaches a release. `actions/attest-build-provenance` then attests the
+  archives — SLSA build provenance signed by GitHub's Actions identity, **not**
+  a signature by a maintainer and not a code-signing certificate. **Nothing is
+  published.** The workflow creates a *draft* release and stops; a human
+  publishes it. It creates no tag, touches no registry, and neither removes nor
+  weakens `publish = false`, and `workflow_dispatch` with `dry_run` (default
+  `true`) rehearses the entire build and smoke path from any branch, uploading
+  workflow artifacts and creating nothing — `dry_run: false` is refused
+  outright, because a release is cut by pushing a tag. A pull request changing
+  `release.yml` or `release-notes.py` rehearses the same way, behind a path
+  filter narrow enough to keep six native builds off every other pull request,
+  and that trigger is also the only way to exercise a release workflow that has
+  not reached the default branch yet. The attestation and draft-release jobs
+  are guarded twice: by the computed `dry_run` value, and by a direct
+  `refs/tags/v` test on the trigger that no later change to that logic can
+  talk its way past. `plan` compares the tag against `cargo metadata`'s
+  workspace version and fails the run if they disagree; permissions are per-job,
+  with `contents: write` only in the draft-release job and
+  `id-token`/`attestations: write` only in the attestation job; every `uses:` is
+  pinned to a full commit SHA with its version in a comment, reusing `ci.yml`'s
+  SHAs where the action is shared. The new stdlib script
+  `scripts/release-notes.py` slices the release notes out of this file — a
+  version section on a tag, `[Unreleased]` on a dry run — and exits 1 when the
+  section is missing or empty, with a `--check` mode for CI.
+  [docs/releasing.md](docs/releasing.md) is now the runbook, with the evidence
+  gate still standing first: the automation is ready, the release is not.
+
 - **An embedded agent skill, and the `skill` command.**
   `crates/openkrx-cli/skills/openkrx/SKILL.md` states the rules an AI agent
   follows when driving openkrx: bounded local reading, no conformance,
