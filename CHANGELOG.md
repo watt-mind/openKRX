@@ -16,6 +16,21 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **Three more fuzz targets: structural checks, extraction planning and the
+  writer round trip.** `structure` runs `profile::check` over an inventory the
+  reader accepted, `extract_plan` runs `extract::plan`, and `create_round_trip`
+  builds a bounded `PackageSpec` from the fuzzer's bytes with `arbitrary` and
+  calls `create::package`. The last two hold an invariant each: every component
+  of a produced plan is non-empty, is neither `.` nor `..` and carries no path
+  separator, so a caller can join it blindly; and a package the writer produced
+  reads back with no failing structural check and with every attachment
+  byte-identical, while a refusal reports a `create.*` code
+  [docs/codes.md](docs/codes.md) catalogues — the target reads the catalogue
+  itself, so an undocumented code fails the lane. The CI job now runs five
+  targets for 30 seconds each, a 150-second total budget. A short bounded run
+  is not a campaign, and the lane passing is not evidence that any layer is
+  fuzz-clean; see [docs/testing.md](docs/testing.md#fuzzing).
+
 - **`openkrx create`: writing one package from a manifest file (KRX-06,
   command half).** `openkrx create --manifest <FILE> --out <FILE.krx>
   [--json]` reads one JSON manifest, reads the local files it names as

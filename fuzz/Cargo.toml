@@ -15,6 +15,12 @@ description = "cargo-fuzz targets for the openKRX bounded readers"
 cargo-fuzz = true
 
 [dependencies]
+# MIT OR Apache-2.0. `create_round_trip` builds a typed request out of the
+# fuzzer's bytes; the other targets take the bytes as they come. The `derive`
+# feature is deliberately off: every field is bounded by hand, which a derived
+# `Arbitrary` cannot express, so `derive_arbitrary` and `syn` stay out of the
+# lockfile.
+arbitrary = "1"
 libfuzzer-sys = "0.4"
 openkrx-core = { path = "../crates/openkrx-core" }
 
@@ -28,6 +34,27 @@ bench = false
 [[bin]]
 name = "xml_metadata"
 path = "fuzz_targets/xml_metadata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "structure"
+path = "fuzz_targets/structure.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "extract_plan"
+path = "fuzz_targets/extract_plan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "create_round_trip"
+path = "fuzz_targets/create_round_trip.rs"
 test = false
 doc = false
 bench = false
