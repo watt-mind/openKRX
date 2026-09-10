@@ -92,6 +92,17 @@ jobs:
       - run: cargo build --release --locked -p openkrx-cli
       - name: Check the golden output contract
         run: python3 scripts/golden.py check --bin target/release/openkrx
+      # The goldens pin the bytes; the published schema pins the shape a
+      # consumer is entitled to rely on. It runs here so that it reuses the
+      # executable the golden step already built, and so that a recorded
+      # envelope and the schema can never disagree unnoticed. The validator is
+      # pinned and installed into the user site, so the step needs no
+      # privileges; it is a repository tool, and no Rust dependency was added
+      # for this check.
+      - name: Install the schema validator
+        run: python3 -m pip install --user jsonschema==4.23.0
+      - name: Check the envelopes against the published schema
+        run: python3 scripts/check-schema.py --bin target/release/openkrx
       # The committed fixtures must stay the generator's own output, so a
       # hand-edited package cannot quietly become the contract.
       - name: Verify the committed fixtures
