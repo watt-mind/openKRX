@@ -508,7 +508,7 @@ reuses that lockfile unchanged, which is what `--locked` would have bought.
 
 The budget is deliberate. Thirty seconds per target proves the harness still
 links and executes and catches a shallow regression — the class of bug a
-refactor introduces — without adding minutes to every pull request. It is not
+refactor introduces — without adding minutes to every CI run. It is not
 a campaign, and it finds nothing deep: the job passing is not evidence that a
 reader is fuzz-clean, only that it survived a short bounded run from an empty
 corpus. Deep fuzzing stays a local activity for now.
