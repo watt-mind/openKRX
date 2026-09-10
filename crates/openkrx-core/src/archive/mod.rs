@@ -28,13 +28,15 @@ mod eocd;
 mod inflate;
 mod kind;
 mod local;
-mod names;
+pub(crate) mod names;
 mod raw;
 
 use crate::error::{ArchiveError, LimitKind, MalformedKind, Structure};
 use crate::limits::Limits;
 
 pub use kind::EntryKind;
+
+pub(crate) use inflate::Crc32;
 
 use central::CentralRecord;
 use inflate::{Decode, Sink};

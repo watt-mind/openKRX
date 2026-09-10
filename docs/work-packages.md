@@ -172,27 +172,45 @@ defended and is stated as a residual risk rather than tested.
 
 ## KRX-06: Deterministic profile writer
 
-Status: blocked on evidence, not on engineering. Nine of the thirty-seven
-profile rules are unresolved, and A19 to A22 decide the layout a writer would
-have to emit, so building one now would mean inventing a specification. The
-two requests that would settle them are recorded in
-[research.md](research.md#open-evidence-gaps) and are for a person to make.
+Split into a core half, which is done, and a command half, which is not.
+
+Status of the core half: **done**. `openkrx_core::create::package` writes the
+canonical documented layout deterministically; see
+[architecture.md](architecture.md#deterministic-creation). The nine
+unresolved rules did not move — the 2026-09-09 search resolved none of them —
+so the writer exists on an operator decision recorded in
+[roadmap.md](roadmap.md#milestones), and its output is "structurally
+consistent with the documented layout", never conforming, with
+interoperability against real producers unverified.
+
+Status of the command half: **next**. `create` on the command line, writing
+the bytes to a file the caller names under a no-clobber policy, with its own
+`output.*` codes, its own JSON report, `capabilities().operations` gaining
+`create`, and the skill document and README updated with it.
 
 Dependencies: KRX-01, KRX-03, and KRX-05's safe output layer. Owner: writer
 contributor; core authoring modules, CLI create, writer tests and contract.
 
-Acceptance: `create` accepts an explicit supported profile and metadata,
-uses caller-supplied time, preserves attachment bytes, validates references
-and limits, and produces byte-identical output for identical inputs. Refuse
-existing outputs. No signing, encryption, or submission functionality.
+Acceptance, core half, met: an explicit layout and typed metadata in,
+deterministic bytes out; caller-supplied time and no clock access;
+attachment bytes preserved exactly; references and `MELLEKLETEK_SZAMA`
+derived and a disagreeing caller-supplied value refused; the reader's limits
+and the archive and extraction name rules enforced on the output; stable
+`create.*` codes; no signing, encryption or submission functionality.
 
-Verification: determinism across repeated runs, reader round-trips,
-independent profile checks, invalid metadata, size overflow, payload byte
-identity, and output failure/no-clobber cases on all supported OSes.
+Acceptance, command half: writes to a caller-named path, refuses an existing
+output, reports what it wrote, and claims nothing about conformance.
+
+Verification, core half, done: determinism across repeated runs and across
+independently built requests, reader round-trips with no failing check and
+exactly the expected unresolved rules, payload byte identity, every code at
+its boundary, and coverage above the workspace floor. Verification of the
+command half — no-clobber and output failure cases on all supported operating
+systems — belongs to that ticket.
 
 ## KRX-07: Consumer contract and first release review
 
-Status: planned, after KRX-06.
+Status: planned, after KRX-06's command half.
 
 Dependencies: KRX-04, KRX-05, and KRX-06. Owner: integration contributor;
 consumer examples, public contract documentation, and release checklist.
@@ -207,9 +225,10 @@ build; all [release gates](releasing.md) have recorded outcomes.
 
 ## Dispatch policy
 
-KRX-01 to KRX-05 are implemented; KRX-06 is blocked on the evidence gap
-above and KRX-07 follows it. Independent work on the remaining packages is
-split only with explicit module ownership and agreed interfaces. Keep one
+KRX-01 to KRX-05 are implemented, and so is KRX-06's core half; the `create`
+command is the next scoped change, and KRX-07 follows it. Independent work
+on the remaining packages is split only with explicit module ownership and
+agreed interfaces. Keep one
 issue/branch per bounded change. File newfound
 profile gaps and safety follow-ups separately; do not relax a check to
 increase compatibility. Security findings use the private reporting flow.

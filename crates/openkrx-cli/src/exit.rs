@@ -153,7 +153,10 @@ have to overwrite, and must be writable"
     /// package that exceeded a parsing limit: nothing was parsed at all.
     /// `extract.*` follows the same segment rule as `archive.*`: a refused
     /// entry kind is an unsupported feature, an ambiguous or unsafe
-    /// destination is a package problem, and a ceiling is a limit. Every
+    /// destination is a package problem, and a ceiling is a limit. `create.*`
+    /// follows it too: a ceiling the output would exceed is a limit, and a
+    /// request describing a package that contradicts itself, or a name the
+    /// writer refuses, is a package problem. Every
     /// `output.*` code is [`Category::Output`], because each one is a fact
     /// about the destination rather than about the package.
     /// Returns `None` for a code shape this build does not know, which the
@@ -165,12 +168,13 @@ have to overwrite, and must be writable"
         let kind = segments.next()?;
         Some(match (head, kind) {
             ("input", "unreadable" | "over_limit") => Self::Input,
-            ("archive" | "extract" | "metadata", "over_limit") => Self::Limit,
+            ("archive" | "create" | "extract" | "metadata", "over_limit") => Self::Limit,
             ("archive" | "extract" | "metadata", "unsupported") => Self::Unsupported,
             ("archive" | "extract" | "metadata", "truncated" | "malformed" | "ambiguous") => {
                 Self::Package
             }
             ("archive", "unsafe_name" | "no_such_entry") => Self::Package,
+            ("create", "invalid" | "unsafe_name") => Self::Package,
             ("extract", "unsafe_path") => Self::Package,
             ("metadata", "missing" | "reference" | "count_mismatch") => Self::Inconsistent,
             (

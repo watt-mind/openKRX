@@ -35,7 +35,7 @@
 
 mod collisions;
 mod error;
-mod paths;
+pub(crate) mod paths;
 
 use crate::archive::{ArchiveInventory, EntryKind};
 
