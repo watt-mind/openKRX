@@ -720,6 +720,13 @@ grammar does not define are counted by the reader (A9) but cannot be
 reproduced by the writer, so a document carrying them is refused with
 `create.invalid.unknown_elements` instead of being written without them.
 
+The `MELLEKLETEK` container is the one part of the dispatch block the writer
+does not decide on its own. It is written when the document handed in carried
+one, and added as soon as there is a reference to list inside it. M7 makes the
+container and the count separate elements, so an empty container and no
+container at all are different documents, and the writer reproduces whichever
+it was given — which is what lets `repack` hand a document back unchanged.
+
 ### What is checked on the way out
 
 The reader's ceilings apply to the output, so a package this crate writes is
@@ -932,15 +939,13 @@ repacking with no edit must produce the package it was given.
 | A dispatch that declares no `MELLEKLETEK_SZAMA` | `repack.unsupported.attachment_reference` | The writer derives the count and always emits it, so the document would *gain* the element (M7) |
 | Payload entries the references do not describe | `repack.unsupported.attachment_entry` | Repacking would have to decide which of the two is right |
 
-**One residual gap is known, and is not detectable here.** The reader records
-that a dispatch carries attachment references, but not whether the
-`MELLEKLETEK` container element itself was present, and the writer always
-emits it. A dispatch carrying no `MELLEKLETEK` element at all — possible only
-with no references, since the references live inside it — therefore gains an
-empty one, and nothing in the repacking layer can tell that it happened.
-Closing it needs the reader to retain the fact, which is tracked separately;
-until then it is the one case where "the package it was given" is not exact,
-and it is stated here rather than left for someone to find.
+The `MELLEKLETEK` container is not in that table, because it does not need to
+be. The reader retains whether the dispatch carried the element and the writer
+emits exactly the shape it was handed, so a dispatch carrying no container —
+possible only with no references, since the references live inside it — keeps
+none instead of gaining an empty one. An empty container and no container at
+all are different documents under M7, and repacking preserves whichever it was
+given.
 
 **A package refused this way is not damaged.** `inspect`, `list`,
 `validate-structure` and `extract` all still read it; the refusal says what

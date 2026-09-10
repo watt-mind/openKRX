@@ -114,11 +114,18 @@ impl Writer {
             if let Some(count) = dispatch.declared_attachment_count {
                 self.raw_leaf(MetadataField::MellekletekSzama, &count.to_string());
             }
-            self.open(MetadataField::Mellekletek);
-            for (index, attachment) in dispatch.attachments.iter().enumerate() {
-                self.attachment(attachment, u32::try_from(index).ok())?;
+            // The container is written when the value says the dispatch
+            // carries one, and whenever there is a reference to put in it. A
+            // dispatch that carried none is written without one: an empty
+            // `MELLEKLETEK` is a different document, and the writer emits the
+            // value it was given rather than a normalised shape.
+            if dispatch.attachments_present || !dispatch.attachments.is_empty() {
+                self.open(MetadataField::Mellekletek);
+                for (index, attachment) in dispatch.attachments.iter().enumerate() {
+                    self.attachment(attachment, u32::try_from(index).ok())?;
+                }
+                self.close(MetadataField::Mellekletek);
             }
-            self.close(MetadataField::Mellekletek);
             if dispatch.handling_instructions_unqualified {
                 // M8: this one element is declared unqualified, so it is
                 // written with no prefix and inherits no default namespace.

@@ -166,11 +166,19 @@ pub mod draft {
     /// is therefore an assertion about them, checked and refused with
     /// `create.invalid.reference_mismatch` when it disagrees — never written in
     /// place of the derived count.
+    ///
+    /// The block carries a `MELLEKLETEK` container whenever a count is
+    /// declared, which is the pairing rule M7 describes, and none when the
+    /// caller declares nothing and supplies no attachment. Either way
+    /// [`crate::create::package`] adds the container as soon as it has a
+    /// reference to place in it; a caller that wants the other shape says so
+    /// with [`Dispatch::with_attachment_container`].
     #[must_use]
     pub fn dispatch(declared_attachment_count: Option<i64>) -> Dispatch {
         Dispatch {
             declared_attachment_count,
             attachments: Vec::new(),
+            attachments_present: declared_attachment_count.is_some(),
             handling_instructions_unqualified: false,
         }
     }

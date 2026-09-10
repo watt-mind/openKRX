@@ -409,6 +409,12 @@ fn build(
 /// The references and the count are cleared rather than edited: the writer
 /// derives both from the attachments it is actually given, so a stale list
 /// carried over from the package being edited would describe the wrong one.
+///
+/// `attachments_present` is the one thing not cleared: whether the block
+/// carried a `MELLEKLETEK` container is a fact about the document being
+/// edited, not something derived from the attachments, so a block that carried
+/// none keeps none and the empty edit stays the identity over it. The writer
+/// adds the container as soon as there is a reference to place in it.
 fn place_dispatch(plan: &mut RepackPlan) {
     if plan.attachments.is_empty() {
         for dispatch in &mut plan.metadata.dispatches {
@@ -421,6 +427,7 @@ fn place_dispatch(plan: &mut RepackPlan) {
         plan.metadata.dispatches.push(Dispatch {
             declared_attachment_count: None,
             attachments: Vec::new(),
+            attachments_present: false,
             handling_instructions_unqualified: false,
         });
     }

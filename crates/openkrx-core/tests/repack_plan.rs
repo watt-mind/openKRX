@@ -12,6 +12,7 @@ use openkrx_core::metadata::{ConsignmentKind, Metadata, SourceSystem};
 use openkrx_core::profile::CheckOutcome;
 use openkrx_core::repack::{self, AttachmentAddition, AttachmentReplacement, Edits, HeaderField};
 use openkrx_core::{Limits, MetadataLimits, archive, metadata};
+use support::{Archive, Entry};
 
 /// The timestamp every package in this file carries.
 const STAMP: FixedTimestamp = FixedTimestamp::EPOCH;
@@ -132,6 +133,57 @@ fn repacking_with_no_edit_writes_the_package_it_was_given() {
         assert!(plan.removed().is_empty());
         assert!(plan.header_fields().is_empty());
     }
+}
+
+#[test]
+fn a_dispatch_carrying_no_attachment_container_keeps_none() {
+    // The identity has to hold for a document this crate did not write, and
+    // the one shape its own writer never produced is a dispatch with no
+    // `MELLEKLETEK` element at all — legal under M7, since the count is a
+    // separate element, and possible only with nothing to list. The document
+    // below is hand-authored for exactly that: everything the writer would
+    // emit, minus the container.
+    let authored = support::meta::Document {
+        declared_count: Some("0".to_owned()),
+        attachments: Vec::new(),
+        handling_instructions: false,
+        ..support::meta::Document::default()
+    }
+    .xml()
+    .replace("<ns2:MELLEKLETEK></ns2:MELLEKLETEK>", "");
+    assert!(
+        !authored.contains("<ns2:MELLEKLETEK>"),
+        "the document under test carries no container"
+    );
+
+    let image = Archive::of(vec![
+        Entry::stored(create::MARKER_NAME.as_bytes(), create::MARKER_CONTENT),
+        Entry::deflated(create::METADATA_NAME.as_bytes(), authored.as_bytes()),
+    ])
+    .build();
+    let document = parsed(&image);
+    assert!(!document.dispatches[0].attachments_present);
+
+    let (plan, bytes) = repack(&image, &Edits::default());
+    assert_eq!(plan.attachment_count(), 0);
+    assert_eq!(
+        entry_bytes(&bytes, create::METADATA_NAME),
+        authored.as_bytes(),
+        "an empty edit must not add the container the document did not carry"
+    );
+
+    // Adding an attachment gives the block a container, because the reference
+    // it derives has to be listed inside one.
+    let mut edits = Edits::default();
+    edits.add.push(AttachmentAddition {
+        file_name: "added.pdf".to_owned(),
+        bytes: payload(9),
+        description: Some("an added attachment".to_owned()),
+    });
+    let (_, grown) = repack(&image, &edits);
+    let grown_document = parsed(&grown);
+    assert!(grown_document.dispatches[0].attachments_present);
+    assert_eq!(grown_document.attachment_count(), 1);
 }
 
 #[test]

@@ -168,6 +168,12 @@ impl Parser<'_> {
                         Some(integer(&text, MetadataField::MellekletekSzama)?);
                 }
                 Some(MetadataField::Mellekletek) => {
+                    // The presence of the container is retained on the value,
+                    // not just used here: an empty `MELLEKLETEK` and no
+                    // `MELLEKLETEK` at all are different documents, and a
+                    // writer that could not tell them apart would turn the
+                    // second into the first.
+                    //
                     // M7: one list per dispatch. A second one is a repeated
                     // element like any other, not a count to merge into the
                     // first: merging would report the document as a count
@@ -197,6 +203,7 @@ impl Parser<'_> {
         Ok(Dispatch {
             declared_attachment_count,
             attachments,
+            attachments_present,
             handling_instructions_unqualified,
         })
     }
