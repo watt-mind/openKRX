@@ -40,6 +40,23 @@ and such a change is recorded here explicitly.
   envelope, golden or stable code changed, and no Rust dependency was added.
   The schema describes this executable; it is not a conformance claim about
   any external format or service.
+- **The portable arm's created-then-refused directory has a test.** It was the
+  one branch of the output layer with none: on the portable path `create_dir`
+  succeeds and the `symlink_metadata` that reads the result back finds a
+  symbolic link someone put there in between, so the run has created a
+  directory it must then refuse. `Resolver::directory` now takes a closure
+  called in exactly that window — an ordinary parameter that
+  `writer::directories` fills with a no-op, in the same shape as the seam
+  `extract::run_between` already had, with no `cfg(test)` branch and no
+  feature on the shipped path — and
+  `a_directory_this_run_created_and_then_refused_is_accounted_for` in
+  `crates/openkrx-cli/src/extract/tests.rs` drives it: the refusal carries
+  `output.symlink_in_path`, the ledger has recorded the path, and the undo
+  pass reaches it, refuses to `remove_dir` what is now a link, and reports it
+  as left in place rather than deleting anything of anyone else's. No
+  behaviour changed. `SECURITY.md` and `docs/testing.md` record the case, and
+  the two comments that said the undo pass "removes" such a directory now say
+  what it does instead.
 - **Windows *symbolic* links are exercised by CI, not just junctions.** The
   Windows lane already put a directory junction in every position the output
   layer refuses; a symbolic link is a different reparse-point tag behind the
@@ -722,6 +739,20 @@ and such a change is recorded here explicitly.
   `merge_ci.workflow` scopes it to the CI workflow, and `docs/releasing.md`
   now describes the required set by reference instead of naming a count.
 
+- **Four review findings settled in the documentation (KRX-16).**
+  `docs/architecture.md` now names the fourth place a failed write to stdout
+  or stderr goes unreported — `clap`'s own help, version and usage output,
+  whose `io::Result` `main.rs` drops like the other three — instead of listing
+  three and saying "every byte". The `Repack it` example in
+  `crates/openkrx-core/src/lib.rs` reads the repacked image back and asserts
+  the new `consignment_id`, rather than only that the bytes differ. The
+  threat-model rows in `SECURITY.md` qualify each Windows-only test with the
+  module it lives in (`junctions::`, `symbolic_links::`), because some of them
+  share a bare name with the Unix test of the same rule. `AGENTS.md` gains a
+  **Referencing tickets** rule: a pull request or commit names the public
+  work-package key and never carries a `Fixes` line, because the
+  execution-queue identifier is private — so reviewers stop reading its
+  absence as an omission. No behaviour changed.
 - **The weekly fuzz campaign is cumulative, and retained crashes are replayed
   on every push (KRX-11).** `.github/workflows/fuzz.yml` used to reseed from
   the fixtures every week and throw the result away when the runner shut down.

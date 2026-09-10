@@ -48,6 +48,21 @@ Track follow-ups separately and keep the current work package bounded.
 Do not publish internal tracker details or maintainer-local paths in public
 issues, commits, or PRs.
 
+## Referencing tickets
+
+A pull request or commit names the **public work-package key** — `KRX-nn` for
+a review or follow-up package, `PC-nn` for a work package in
+[docs/work-packages.md](docs/work-packages.md) — in its body, and nothing
+else. It never carries a `Fixes <tracker-id>` or `Closes <tracker-id>` line,
+and never a tracker URL: the execution-queue identifier is private, and
+publishing it in a public branch, commit or PR is the leak the privacy rules
+above forbid. The tracker link is therefore not automated. The coordinator
+closes the ticket after the post-merge check, which is why a merged PR leaves
+its ticket open for a short while.
+
+Reviewers: the absence of a `Fixes` line is the convention, not an omission.
+Do not ask for one.
+
 ## Non-negotiables
 
 - Synthetic fixtures only. Never inspect, enumerate, print, hash, or publish

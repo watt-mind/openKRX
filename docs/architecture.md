@@ -1142,11 +1142,15 @@ byte openkrx puts on either stream goes through one of two helpers in
 drop the `io::Result`. `completions` needs a third shape for the same
 decision, because `clap_complete::generate` panics on a write error rather
 than returning one, so `crates/openkrx-cli/src/generate.rs` hands it a writer
-that reports every write as complete. The reason is the same in all three
-places: `openkrx list … | head -3`, `openkrx skill | head -5` and
-`openkrx man | col -b | less` close the pipe on purpose, and a diagnostic
-about that would be noise — and a diagnostic about a broken stderr could not
-be delivered at all.
+that reports every write as complete. The fourth site is the one openkrx does
+not write itself: `--help`, `--version` and a usage error are printed by
+`clap`, and `crates/openkrx-cli/src/main.rs` drops the `io::Result` of
+`error.print()` the same way before turning the parser's verdict into an
+[exit status](#exit-statuses). The reason is the same in all four places:
+`openkrx list … | head -3`, `openkrx skill | head -5`,
+`openkrx --help | head -2` and `openkrx man | col -b | less` close the pipe on
+purpose, and a diagnostic about that would be noise — and a diagnostic about a
+broken stderr could not be delivered at all.
 
 The consequence is a boundary a caller has to know: **a successful exit status
 means the package operation succeeded, not that every byte reached the
