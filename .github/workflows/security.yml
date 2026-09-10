@@ -16,9 +16,12 @@ on:
 permissions:
   contents: read
 
+# Push runs are keyed by commit so every integration commit keeps its own
+# Security result; only a newer revision of the same pull request cancels the
+# run it supersedes. This mirrors ci.yml.
 concurrency:
-  group: security-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: security-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   gitleaks:
