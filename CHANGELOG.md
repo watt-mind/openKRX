@@ -621,6 +621,16 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **Every push commit keeps its own Security run (PC-05).** The Security
+  workflow grouped push runs by `github.ref` and cancelled in progress
+  unconditionally, so a second push to `develop` erased the first commit's
+  secret-scan, workflow-lint and CodeQL result. The concurrency group is now
+  `security-<event>-<pr number or sha>` with
+  `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, matching
+  ci.yml: push runs are per commit and never cancelled, while a new revision
+  of a pull request still supersedes the previous one. Triggers, permissions,
+  jobs and action pins are unchanged.
+
 - **The core crate's documentation carries a compiled example per layer
   (KRX-13).** `crates/openkrx-core/src/lib.rs` gains an `# Examples` section
   with five doctests: writing a package through the public `draft` and
