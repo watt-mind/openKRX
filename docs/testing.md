@@ -42,6 +42,7 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/profile_structure.rs` | The check inventory over synthetic KRX-shaped archives: the canonical layout, all three observed root prefixes, both metadata file-name spellings, a lower-case `Metalayer`, missing and ambiguous metadata, a missing, misplaced, mismatched and prefixed marker, a deflated marker producing no finding, missing, prefix-variant and duplicate references, a shared file name in different payload directories, count agreement and its absence, an omitted schema-required element, a document that does not parse, caller-tightened limits, and that every check is reported exactly once in the documented order. |
 | `crates/openkrx-core/tests/create_package.rs` | What the deterministic writer produces: the documented layout and its fixed entry order for zero, one and three attachments, the stored marker beside deflated entries, the UTF-8 flag, host system and file mode on every entry, the document's declaration, prefix, element order and unqualified `KEZELESI_UTASITASOK`, the derived references and count, byte-identical output across runs and its sensitivity to one attachment byte, the caller's timestamp in both headers of every entry, attachment bytes read back unchanged, a document that survives parse and re-write unchanged, and the report a written package produces — no failing check, and exactly A19 and M13 left undecided. |
 | `crates/openkrx-core/tests/create_rejects.rs` | Everything the writer refuses, each by its stable code: every unsafe file-name class including the ones only the extraction planner would catch, a reference or a declared count that disagrees with the attachments, attachments with no dispatch block and a document with two, elements the grammar does not define, text XML 1.0 cannot carry and text the reader would trim, every timestamp field out of range, an attachment that compresses far enough for the reader to call it a bomb, and every output ceiling at its boundary with the package still readable under the tightened limits — including the invariant those ceilings exist for, that whatever `package` returns passes the inventory, the structural checks and `entry_bytes` on every attachment. |
+| `crates/openkrx-core/tests/property_round_trip.rs` | The five [property-based tests](#property-based-tests) over generated requests: a written package read back with byte-identical attachments, the documented normalised document and no failing check; byte-identical output across two writes; a single-byte mutation refused or read back inside every ceiling; a request over one documented ceiling refused with that ceiling's code; and every written name accepted by the extraction planner. Its strategies live in `crates/openkrx-core/tests/support/strategies.rs`. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
 | `crates/openkrx-core/examples/golden_fixtures.rs` | The generator behind the five committed packages under `tests/fixtures/golden/`, not a test: a canonical two-attachment package, the same package without the `KRX/OCD/` prefix, one declaring an attachment the archive does not hold, a truncated image and an over-limit one. Deterministic by construction; see [the golden output contract](#golden-output-contract). |
@@ -114,6 +115,7 @@ To run one part by hand:
 cargo test --workspace --locked
 cargo test --workspace --locked profile_structure
 cargo test -p openkrx-core --locked -- --nocapture single_byte_mutations
+PROPTEST_CASES=1024 cargo test -p openkrx-core --locked --test property_round_trip
 ```
 
 Coverage:
@@ -379,6 +381,80 @@ What that guarantees: no reachable arithmetic overflow, slice index or
 `unwrap` on any input one byte away from a valid one. It does not guarantee
 anything about inputs two bytes away; that is what the [fuzz
 targets](#fuzzing) are for.
+
+## Property-based tests
+
+The sweeps above are exhaustive over one dimension of one fixed input. The
+property tests are the other half: they generate the *input* and assert the
+contract over whatever comes out. They live in
+`crates/openkrx-core/tests/property_round_trip.rs`, with every strategy in
+`crates/openkrx-core/tests/support/strategies.rs`, and they use
+[`proptest`](https://crates.io/crates/proptest) — a dev-dependency of
+`openkrx-core` alone, with default features off, so no shipped binary and no
+other crate carries it.
+
+### What is generated
+
+A `PackageSpec` the writer accepts under `Limits::DEFAULT`, so that a refusal
+is a finding rather than a generator accident:
+
+| Part | Range |
+| --- | --- |
+| `Metadata` | Built by serialising a drafted `KER_META_V0_9` document and parsing it back, because `Metadata` and its parts are `#[non_exhaustive]` and a parse is the only honest way to obtain one. Both M4 enumerations in full; every optional header element and every `ERKEZTETES`/`BONTASOK`/`TERTIVEVENY` marker block present or absent independently; `TESZT` present or absent (M11); one `EXPEDIALAS` block, with or without an unqualified `KEZELESI_UTASITASOK` (M8). |
+| Text | Trimmed, and drawn from an alphabet of Latin, Hungarian and punctuation characters plus `&`, `<` and `>`, so escaping is exercised rather than avoided. Anything untrimmed or outside XML 1.0 is what the writer refuses, and is generated only by the tests that assert those refusals. |
+| Attachments | Zero to eight per package. File names come from a component alphabet holding no separator, colon, control or Windows-reserved character, never start or end with a space and never end with a dot, include precomposed (NFC) Hungarian letters, and are filtered of Windows reserved device names — the union of the archive layer's name rules and the extraction planner's component rules. `MELLEKLET_LEIRASA`, `MENNYISEG` and `MENNYISEGI_EGYSEG` present or absent. |
+| Attachment bytes | Nothing, small incompressible noise, a run of zero bytes up to and including `Limits::RATIO_GRACE_BYTES`, and incompressible bytes just past that grace. The compressible arm stops *at* the grace deliberately: one byte more and the writer would apply the reader's compression-ratio ceiling to it and refuse the package. |
+| `FixedTimestamp` | The MS-DOS epoch, or any date and time inside the representable 1980–2107 range. |
+
+### The five properties
+
+1. **Round trip.** `package` → `archive::inventory` → `metadata::parse` of the
+   metadata entry → `profile::check` reports no `Fail`, and the summary is
+   `Unresolved` — A19 leaves the `KRX/OCD/` marker prefix open and M13 the unit
+   of `MERET`, and no package the writer produces resolves either. Every
+   attachment's `entry_bytes` equals the input byte for byte. The parsed
+   document equals the **documented normalised form** of the input: the header,
+   the three marker blocks and the `KEZELESI_UTASITASOK` flag come back
+   unchanged, and the single dispatch's `MELLEKLET` list and
+   `MELLEKLETEK_SZAMA` are the ones derived from the attachments actually
+   written — the 1-based number, the file name, the `KRX/OCD/Payload/ID-<n>`
+   location and `MERET` in kilobytes rounded up (M6). That form is also a fixed
+   point: handing it back with the same attachments writes the same bytes.
+2. **Determinism.** One request, written twice, is byte-identical output.
+3. **Mutation.** One byte of a written package is changed, and the reader
+   either refuses the image or stays inside every ceiling it was given. The
+   property is deliberately not "a mutation is always detected" — a byte in an
+   unused header field need not be — but that nothing panics and no limit is
+   exceeded. Nothing in the test is unwrapped, so a panic can only come from
+   the crate under test.
+4. **Limits.** One documented ceiling — entry count, name bytes, entry size,
+   total size, image size or compression ratio — is tightened to just below
+   what the request needs, derived from the package the request actually
+   writes rather than guessed, and the refusal must carry that ceiling's
+   `create.over_limit.*` code.
+5. **Planning.** `extract::plan` accepts the inventory of every written
+   package, plans exactly one item per entry, and each item's components join
+   back to the entry name.
+
+### Case counts and regressions
+
+Each property runs **64 cases**, which keeps the whole file well under a
+second locally. `PROPTEST_CASES` overrides that for a deliberate long run:
+
+```sh
+PROPTEST_CASES=4096 cargo test -p openkrx-core --locked --test property_round_trip
+```
+
+A failing case is shrunk and its seed persisted under
+`crates/openkrx-core/proptest-regressions/`, one file per property. Those
+files are **committed**: the seeds are synthetic by construction — every byte
+they reproduce comes from the strategies above, and no real package can reach
+them — so a case found once is re-run first by everyone thereafter. The
+directory is deliberately not ignored by Git.
+
+Property tests are not a mutation-testing target: `cargo mutants` mutates
+`crates/*/src/**` only, and everything here lives under `tests/`. See
+[mutation testing](#mutation-testing).
 
 ## Fixture policy
 
