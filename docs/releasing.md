@@ -381,6 +381,11 @@ moved, because a tag-triggered run reads the workflow from the tagged commit.
 re-apply and no generated block to preserve: edit the file, run `actionlint`,
 and rehearse with a dry run.
 
+Every `uses:` in it is pinned to a full commit SHA with the version in a
+trailing comment, as [CONTRIBUTING.md](../CONTRIBUTING.md) requires. Where the
+same action is already used by `ci.yml` the SHA is the same one, so a bump
+moves both files together.
+
 ### Artifact retention
 
 Every `actions/upload-artifact` step sets `retention-days` explicitly. The
@@ -402,11 +407,6 @@ Each exception is repeated as a comment beside the setting in the workflow
 file, so a reader of the YAML does not have to find this table to know why the
 value is not one. Shortening either one discards security-regression and
 floor-decision evidence, so it is a maintainer decision, not a tidy-up.
-
-Every `uses:` in it is pinned to a full commit SHA with the version in a
-trailing comment, as [CONTRIBUTING.md](../CONTRIBUTING.md) requires. Where the
-same action is already used by `ci.yml` the SHA is the same one, so a bump
-moves both files together.
 
 ## Rehearsing with a `workflow_dispatch` dry run
 
