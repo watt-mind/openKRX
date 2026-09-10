@@ -242,9 +242,9 @@ this run had created. A partial result is never reported as a success.
 
 | Required check | Error code prefix | Test |
 | --- | --- | --- |
-| Confinement to a caller-selected destination: it must already exist, be a real directory, and not be a symbolic link or reparse point; `extract` never creates it, and `create` never creates the parent directory of `--out` | `output.destination_missing`, `.destination_not_a_directory`, `.destination_symlink` | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `a_destination_that_is_a_file_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused`, `a_destination_that_is_itself_a_junction_is_refused` (Windows), `an_output_directory_that_is_missing_or_not_a_directory_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_symbolic_link_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_junction_is_refused` (Windows, `tests/create.rs` and `tests/repack.rs`) |
-| No overwrite: a planned path, or a `create --out` file, that exists in any form — file, directory, symbolic link, or a link with a missing target — refuses the whole run before anything is written, as does an entry named like the marker an extraction creates | `output.exists` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`), `an_output_that_is_a_dangling_symbolic_link_counts_as_occupied` (`tests/create.rs`) |
-| No symlink or reparse-point escape through the path: every existing ancestor inside the destination must be a real directory, checked in preflight and again after each directory this run creates | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_symlink_inside_the_destination_is_refused`, `an_ancestor_junction_inside_the_destination_is_refused` (Windows), `a_destination_or_write_problem_is_nine` (`src/exit.rs`) |
+| Confinement to a caller-selected destination: it must already exist, be a real directory, and not be a symbolic link or reparse point; `extract` never creates it, and `create` never creates the parent directory of `--out` | `output.destination_missing`, `.destination_not_a_directory`, `.destination_symlink` | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `a_destination_that_is_a_file_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused`, `a_destination_that_is_itself_a_junction_is_refused` and `a_destination_that_is_itself_a_symbolic_link_is_refused` (Windows), `an_output_directory_that_is_missing_or_not_a_directory_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_symbolic_link_is_refused` (`tests/create.rs`), `an_output_directory_that_is_a_junction_is_refused` and `an_output_directory_that_is_a_symbolic_link_is_refused` (Windows, `tests/create.rs` and `tests/repack.rs`) |
+| No overwrite: a planned path, or a `create --out` file, that exists in any form — file, directory, symbolic link, or a link with a missing target — refuses the whole run before anything is written, as does an entry named like the marker an extraction creates | `output.exists` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`), `an_output_that_is_a_dangling_symbolic_link_counts_as_occupied` (`tests/create.rs`), `a_leaf_target_that_is_a_dangling_symbolic_link_is_refused` and `a_leaf_target_that_is_a_live_symbolic_link_is_refused` (Windows) |
+| No symlink or reparse-point escape through the path: every existing ancestor inside the destination must be a real directory, checked in preflight and again after each directory this run creates | `output.symlink_in_path`, `output.not_a_directory` | `an_ancestor_symlink_inside_the_destination_is_refused`, `an_ancestor_junction_inside_the_destination_is_refused` and `an_ancestor_symbolic_link_inside_the_destination_is_refused` (Windows), `a_destination_or_write_problem_is_nine` (`src/exit.rs`) |
 | Exclusive creation: files with `create_new` (`O_EXCL` / `CREATE_NEW`), directories with `create_dir` and never `create_dir_all`; `create` opens its output the same way | `output.exists`, `output.io` | `a_package_is_extracted_with_byte_identical_payloads`, `a_target_file_that_already_exists_refuses_the_whole_extraction`, `an_output_that_already_exists_is_refused_and_left_alone` (`tests/create.rs`) |
 | Interrupted-write detection: a `.openkrx-extract.partial` marker exists for the length of the run, and its presence refuses the next one | `output.partial_marker_present` | `a_marker_left_by_an_interrupted_run_refuses_the_next_one`, `the_json_report_names_every_file_and_the_marker_it_removed` |
 | Cleanup that never deletes pre-existing data: only paths this run created are removed, newest first, with `remove_dir` rather than `remove_dir_all` | `output.io`, and the `cleanup` counts | `a_failed_write_removes_this_runs_files_and_leaves_everything_else` |
@@ -275,13 +275,16 @@ this run had created. A partial result is never reported as a success.
   a read-only destination, a full disk — can stop the removal too. Such paths
   are counted as `left_in_place` rather than retried or hidden, so the report
   says the destination is not as it was found.
-- **Windows symbolic links are not exercised by CI.** Junctions now are: the
-  Windows lane creates one with `mklink /J`, which needs no elevation, and
-  runs the ancestor, destination and leaf cases against it, so
-  `FILE_ATTRIBUTE_REPARSE_POINT` detection is tested on the platform that has
-  it. A Windows *symbolic* link needs developer mode or an elevated process,
-  so that one reparse-point tag is still covered only by the shared code path
-  — `is_link` reads the same attribute for every tag.
+- **Windows reparse points are exercised by CI on an elevated runner.** The
+  Windows lane creates both tags: a junction with `mklink /J`, which needs no
+  elevation, and a *symbolic* link with `mklink /D` and `mklink`, which needs
+  developer mode or an elevated process — which the GitHub-hosted
+  `windows-latest` runner is. Both are run through the ancestor, destination
+  and leaf cases, and the leaf twice over, dangling and live. On a runner that
+  is not elevated the symbolic-link cases skip themselves with a `SKIPPED
+  <test>:` line rather than pass silently, and the junction cases still hold
+  the rule; a self-hosted, unelevated Windows runner would therefore exercise
+  one tag rather than two.
 - **Extraction is not verification.** A file `extract` wrote is a byte-exact
   copy of what the package declared. It is not evidence that the package is
   authentic, that its contents are what they claim to be, or that a document

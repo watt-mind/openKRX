@@ -674,6 +674,62 @@ caller did not name"
     }
 }
 
+/// The same two rules on Windows again, against a real *symbolic* link.
+///
+/// A junction and a symbolic link are different reparse-point tags behind the
+/// same `FILE_ATTRIBUTE_REPARSE_POINT` bit, so what these two add over
+/// [`junctions`] is the tag an attacker on this platform would actually plant.
+/// `mklink /D` and `mklink` need developer mode or an elevated process, which
+/// a GitHub-hosted `windows-latest` runner has; a runner without it leaves a
+/// `SKIPPED <test>:` line and the test returns.
+#[cfg(windows)]
+mod symbolic_links {
+    use super::{Scratch, diagnostic, edits_file, repack_json, source, status};
+    use crate::support::{windows_dir_symlink, windows_file_symlink};
+
+    #[test]
+    fn an_output_directory_that_is_a_symbolic_link_is_refused() {
+        let scratch = Scratch::new("repack-output-symlink");
+        let package = source(&scratch);
+        let before = std::fs::read(&package).expect("the source package");
+        let edits = edits_file(&scratch, "");
+        let real = scratch.dir("real");
+        let link = scratch.path().join("link");
+        if !windows_dir_symlink(&link, &real) {
+            return;
+        }
+        let output = repack_json(&package, &edits, &link.join("out.krx"));
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.destination_symlink");
+        assert!(
+            !real.join("out.krx").exists(),
+            "writing through the link would have left the destination the \
+caller did not name"
+        );
+        assert_eq!(std::fs::read(&package).expect("the package"), before);
+    }
+
+    #[test]
+    fn an_output_that_is_a_dangling_symbolic_link_counts_as_occupied() {
+        let scratch = Scratch::new("repack-dangling-out");
+        let package = source(&scratch);
+        let edits = edits_file(&scratch, "");
+        let target = scratch.path().join("nowhere.krx");
+        let out = scratch.path().join("out.krx");
+        if !windows_file_symlink(&out, &target) {
+            return;
+        }
+        let output = repack_json(&package, &edits, &out);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert!(
+            !target.exists(),
+            "a dangling link is an existing path, not free space, and its \
+target was never written through"
+        );
+    }
+}
+
 #[test]
 fn an_unreadable_package_is_an_input_failure_and_a_broken_one_a_package_failure() {
     let scratch = Scratch::new("repack-input");

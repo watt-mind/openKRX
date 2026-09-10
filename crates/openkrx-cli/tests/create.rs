@@ -672,6 +672,58 @@ caller did not name"
     }
 }
 
+/// The same two rules on Windows again, against a real *symbolic* link.
+///
+/// A junction and a symbolic link are different reparse-point tags behind the
+/// same `FILE_ATTRIBUTE_REPARSE_POINT` bit, so what these two add over
+/// [`junctions`] is the tag an attacker on this platform would actually
+/// plant. `mklink /D` and `mklink` need developer mode or an elevated process,
+/// which a GitHub-hosted `windows-latest` runner has; a runner without it
+/// leaves a `SKIPPED <test>:` line and the test returns.
+#[cfg(windows)]
+mod symbolic_links {
+    use super::{Scratch, create_json, diagnostic, scene, status};
+    use crate::support::{windows_dir_symlink, windows_file_symlink};
+
+    #[test]
+    fn an_output_directory_that_is_a_symbolic_link_is_refused() {
+        let scratch = Scratch::new("create-output-symlink-win");
+        let manifest_path = scene(&scratch, "", &[]);
+        let real = scratch.dir("real");
+        let link = scratch.path().join("link");
+        if !windows_dir_symlink(&link, &real) {
+            return;
+        }
+        let output = create_json(&manifest_path, &link.join("package.krx"));
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.destination_symlink");
+        assert!(
+            !real.join("package.krx").exists(),
+            "writing through the link would have left the destination the \
+caller did not name"
+        );
+    }
+
+    #[test]
+    fn an_output_that_is_a_dangling_symbolic_link_counts_as_occupied() {
+        let scratch = Scratch::new("create-dangling-out-win");
+        let manifest_path = scene(&scratch, "", &[]);
+        let target = scratch.path().join("nowhere.krx");
+        let out = scratch.path().join("package.krx");
+        if !windows_file_symlink(&out, &target) {
+            return;
+        }
+        let output = create_json(&manifest_path, &out);
+        assert_eq!(status(&output), 9);
+        assert_eq!(diagnostic(&output)["code"], "output.exists");
+        assert!(
+            !target.exists(),
+            "a dangling link is an existing path, not free space, and its \
+target was never written through"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_destination_that_cannot_be_written_reports_an_output_failure() {
