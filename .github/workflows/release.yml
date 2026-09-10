@@ -1,0 +1,500 @@
+name: Release
+
+# Hand-maintained, deliberately. There is no generator to re-run and no
+# generated block to preserve: what this file says is what runs, so a
+# reviewer reads one file to know what a release does.
+#
+# Nothing here publishes. On a `v*` tag it builds the six target archives,
+# checksums them, attests their provenance, and opens a **draft** GitHub
+# release; a human publishes the draft. It never pushes to a registry, never
+# touches `master`, and never creates a tag. Both crates still set
+# `publish = false`; see docs/releasing.md for the gates that stand before a
+# first release exists at all.
+#
+# `workflow_dispatch` rehearses the whole build and smoke path without
+# creating anything: `dry_run` defaults to true, and the attestation and
+# release jobs are the only ones skipped. A pull request that changes the
+# release machinery rehearses the same way.
+
+on:
+  push:
+    tags: ["v*"]
+  # A pull request that changes the release machinery *itself* rehearses it,
+  # as a dry run, on the six targets. The filter is deliberately just these
+  # two files: a rehearsal costs six native builds and six smokes, which is
+  # far too much to spend on every ordinary code pull request, and
+  # `workflow_dispatch` covers rehearsing against arbitrary code.
+  #
+  # This trigger is also the only way to rehearse a release workflow before it
+  # reaches the default branch at all: GitHub registers a `workflow_dispatch`
+  # workflow only from the default branch, so a brand-new release workflow
+  # cannot be dispatched from the branch that adds it.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "scripts/release-notes.py"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Rehearse only: build every target, smoke-test each archive, and
+          upload the results as workflow artifacts. No release is created.
+        type: boolean
+        default: true
+
+# Every job narrows this further; only `release` widens it, to
+# `contents: write`, and only `attest` asks for an identity token.
+permissions:
+  contents: read
+
+concurrency:
+  # Serialise runs for the same ref: a manual rehearsal started while a tag
+  # run is going queues behind it rather than racing it for the same
+  # artifact names.
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable @ 2026-09-03
+        with:
+          toolchain: stable
+      # The version is read from `cargo metadata`, not from the tag and not
+      # from a regex over Cargo.toml, so the number the binaries carry is the
+      # number checked against the tag.
+      - name: Resolve the workspace version and the run mode
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --format-version 1 --no-deps --locked \
+            | python3 -c 'import json,sys; p=json.load(sys.stdin)["packages"]; v={x["version"] for x in p}; print(sorted(v)[0] if len(v)==1 else sys.exit("workspace packages disagree on the version: "+repr(sorted(v))))')
+          echo "workspace version: $version"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # A rehearsal on a branch: there is no tag to check against, and
+            # nothing may be created.
+            tag="v${version}"
+            dry_run=true
+          elif [ "$EVENT_NAME" = "push" ]; then
+            tag="$REF_NAME"
+            dry_run=false
+            # Tag/version consistency. A tag that does not name the version
+            # the binaries report would ship archives whose contents
+            # contradict their own file names, so it fails the run here,
+            # before anything is built.
+            if [ "$tag" != "v${version}" ]; then
+              echo "::error::tag ${tag} does not match the workspace version ${version}; expected v${version}"
+              exit 1
+            fi
+          else
+            dry_run="${DRY_RUN_INPUT:-true}"
+            tag="v${version}"
+            if [ "$dry_run" != "true" ]; then
+              echo "::error::a release is cut by pushing a v* tag, not by workflow_dispatch; re-run with dry_run: true"
+              exit 1
+            fi
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "dry_run=$dry_run"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release plan"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| version | \`$version\` |"
+            echo "| tag | \`$tag\` |"
+            echo "| dry run | \`$dry_run\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The changelog is the release notes. On a tag the version's own
+      # section must exist; a rehearsal uses [Unreleased], which is where the
+      # entries live until a version is cut.
+      - name: Extract the release notes
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          DRY_RUN: ${{ steps.plan.outputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            python3 scripts/release-notes.py --unreleased > release-notes.md
+          else
+            python3 scripts/release-notes.py "$VERSION" > release-notes.md
+          fi
+          head -20 release-notes.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: plan
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Every target is built on a runner of its own architecture, so no
+          # cross toolchain, emulator or container is involved and the smoke
+          # job below can run the binary it just packaged. That is why
+          # `cross` and `cargo-zigbuild` appear nowhere in this file: the
+          # aarch64 Linux leg uses GitHub's arm64 Linux runner instead, which
+          # is free for public repositories.
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            format: tar.gz
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            format: tar.gz
+            musl: true
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            format: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            format: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            format: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            format: zip
+            exe: .exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the musl C toolchain
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable @ 2026-09-03
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build the CLI
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: cargo build --release --locked -p openkrx-cli --target "$TARGET"
+      # The archive carries the binary, the licence, the two documents a user
+      # needs to read it, and the agent skill. SKILL.md is written by the
+      # binary itself (`openkrx skill`), not copied from the sources, so the
+      # shipped document is the one compiled into the shipped executable.
+      - name: Stage and archive
+        id: archive
+        env:
+          TARGET: ${{ matrix.target }}
+          FORMAT: ${{ matrix.format }}
+          EXE: ${{ matrix.exe }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="openkrx-${VERSION}-${TARGET}"
+          bin="$PWD/target/${TARGET}/release/openkrx${EXE:-}"
+          mkdir -p "dist/${stage}"
+          cp "$bin" "dist/${stage}/openkrx${EXE:-}"
+          cp LICENSE README.md CHANGELOG.md "dist/${stage}/"
+          "$bin" skill > "dist/${stage}/SKILL.md"
+          cd dist
+          if [ "$FORMAT" = "zip" ]; then
+            archive="${stage}.zip"
+            7z a -tzip -mx=9 "$archive" "$stage" > /dev/null
+          else
+            archive="${stage}.tar.gz"
+            tar --numeric-owner -czf "$archive" "$stage"
+          fi
+          if command -v sha256sum > /dev/null 2>&1; then
+            sha256sum "$archive" > "${archive}.sha256"
+          else
+            shasum -a 256 "$archive" > "${archive}.sha256"
+          fi
+          cat "${archive}.sha256"
+          rm -rf "$stage"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archive-${{ matrix.target }}
+          path: |
+            dist/${{ steps.archive.outputs.archive }}
+            dist/${{ steps.archive.outputs.archive }}.sha256
+          if-no-files-found: error
+
+  smoke:
+    name: Smoke (${{ matrix.target }})
+    needs: [plan, build]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            format: tar.gz
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            format: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            format: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            format: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            format: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            format: zip
+            exe: .exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      # Only for tests/fixtures/golden/consistent.krx; nothing is built here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist
+      - name: Verify the checksum and unpack
+        env:
+          TARGET: ${{ matrix.target }}
+          FORMAT: ${{ matrix.format }}
+          EXE: ${{ matrix.exe }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="openkrx-${VERSION}-${TARGET}"
+          cd dist
+          if [ "$FORMAT" = "zip" ]; then
+            archive="${stage}.zip"
+          else
+            archive="${stage}.tar.gz"
+          fi
+          if command -v sha256sum > /dev/null 2>&1; then
+            sha256sum --check "${archive}.sha256"
+          else
+            shasum -a 256 --check "${archive}.sha256"
+          fi
+          if [ "$FORMAT" = "zip" ]; then
+            7z x -y "$archive" > /dev/null
+          else
+            tar -xzf "$archive"
+          fi
+          chmod +x "${stage}/openkrx${EXE:-}"
+          echo "BIN=${PWD}/${stage}/openkrx${EXE:-}" >> "$GITHUB_ENV"
+          echo "STAGE=${PWD}/${stage}" >> "$GITHUB_ENV"
+      - name: Check the archive contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in LICENSE README.md CHANGELOG.md SKILL.md; do
+            test -s "${STAGE}/${name}" || { echo "::error::${name} missing from the archive"; exit 1; }
+          done
+          # The shipped SKILL.md must be what the shipped binary emits.
+          "$BIN" skill > packaged-skill.md
+          diff -u "${STAGE}/SKILL.md" packaged-skill.md
+      - name: Report the version
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$("$BIN" --version)
+          printf '%s\n' "$out"
+          case "$out" in
+            *"$VERSION"*) ;;
+            *) echo "::error::--version printed '${out}', which does not name ${VERSION}"; exit 1 ;;
+          esac
+      # The JSON envelope is the contract every consumer parses. Asserting on
+      # substrings rather than through jq keeps this identical on all three
+      # operating systems, with no tool that is not already on the runner.
+      - name: Report the capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$("$BIN" capabilities --json)
+          printf '%s\n' "$out"
+          case "$out" in
+            *'"schema_version":1'*) ;;
+            *) echo "::error::capabilities --json did not report schema_version 1"; exit 1 ;;
+          esac
+          case "$out" in
+            *'"operations":["inspect","list","validate-structure","extract"]'*) ;;
+            *) echo "::error::capabilities --json reported an unexpected operation list"; exit 1 ;;
+          esac
+      - name: Write out the agent skill
+        shell: bash
+        run: |
+          set -euo pipefail
+          first=$("$BIN" skill | head -1)
+          printf '%s\n' "$first"
+          test "$first" = "---"
+      # `consistent.krx` is the fixture in which no check fails and some
+      # profile rules are undecidable, which is exit status 4 (unresolved) by
+      # design and documented as such. A 0 here would mean the binary had
+      # started claiming conformance, so it fails the release.
+      - name: Validate a fixture (expects exit 4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          "$BIN" validate-structure tests/fixtures/golden/consistent.krx --json > validate.json || status=$?
+          cat validate.json
+          echo "exit status: $status"
+          test "$status" = "4"
+          case "$(cat validate.json)" in
+            *'"summary":"unresolved"'*) ;;
+            *) echo "::error::validate-structure did not report the unresolved summary"; exit 1 ;;
+          esac
+
+  checksums:
+    name: Checksums
+    needs: [plan, build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+      # One SHA256SUMS over every archive, regenerated here rather than
+      # concatenated from the per-target files, so the file is byte-stable
+      # regardless of the order the matrix legs finished in.
+      - name: Build SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          rm -f ./*.sha256 SHA256SUMS
+          # Written beside the archives and moved in, not redirected into
+          # place: `> SHA256SUMS` creates the file before `ls` runs, and the
+          # file would then list itself with the hash of zero bytes.
+          ls -1 | LC_ALL=C sort | xargs sha256sum > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: checksums
+          path: dist/SHA256SUMS
+          if-no-files-found: error
+
+  attest:
+    name: Attest build provenance
+    needs: [plan, build, smoke, checksums]
+    # Two independent guards, not one. `dry_run` is decided by the `plan`
+    # job's own logic; the `github.ref` test is a fact about the trigger that
+    # no future change to that logic, and no trigger added to this file
+    # later, can talk its way past. Both must hold for the two jobs that have
+    # effects outside the run.
+    if: needs.plan.outputs.dry_run == 'false' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # SLSA build provenance: a signed statement by GitHub's Actions OIDC
+    # identity that these bytes came out of this workflow, at this commit, on
+    # this runner. It is **not** a signature by a maintainer, it says nothing
+    # about the contents being correct or safe, and it is verified with
+    # `gh attestation verify`, not with a maintainer key.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+      - name: Drop the per-archive checksum files
+        run: rm -f dist/*.sha256
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/openkrx-*
+
+  release:
+    name: Draft release
+    needs: [plan, build, smoke, checksums, attest]
+    # The same two guards as `attest` above.
+    if: needs.plan.outputs.dry_run == 'false' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The only job that can write to the repository, and the only thing it
+    # writes is a draft release. Publishing it is a human action.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: checksums
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes
+          path: notes
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f dist/*.sha256
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::a release for ${TAG} already exists; delete it or pick another tag"
+            exit 1
+          fi
+          # --draft, never --latest, never published here. The maintainer
+          # reads the body and the assets and presses publish.
+          gh release create "$TAG" \
+            --draft \
+            --title "openKRX ${VERSION}" \
+            --notes-file notes/release-notes.md \
+            dist/SHA256SUMS dist/openkrx-*
+          gh release view "$TAG" --json isDraft,assets \
+            --jq '"draft: \(.isDraft)  assets: \(.assets | length)"'
