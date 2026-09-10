@@ -40,11 +40,14 @@ what it observed and reports an undecidable rule as undecided. See
 | Extraction planning (`openkrx_core::extract::plan`) and the `extract` command | Implemented |
 | `capabilities`, reporting the stage and the implemented operations | Implemented |
 | Deterministic writing (`openkrx_core::create::package`) and the `create` command | Implemented for the documented layout; interoperability with real producers is unverified |
+| Deterministic editing (`openkrx_core::repack::{plan, apply}`) and the `repack` command | Implemented for packages already in that layout; every other package is refused rather than rewritten |
 | Signature handling of any kind | Not implemented, and not planned |
 
 The three reader commands render the three library layers and add no rule of
-their own; `extract` writes what the planner decided and `create` writes what
-the writer produced, and neither adds a rule of its own either. The
+their own; `extract` writes what the planner decided, `create` writes what the
+writer produced, and `repack` reads a package with the first three layers and
+writes the edited result with the fourth. None of them adds a rule of its
+own. The
 implementation sequence is in the
 [roadmap](docs/roadmap.md).
 
@@ -80,15 +83,24 @@ nothing external.
   back. That layout is **unverified against every real producer**, because
   rules A19–A22 and M11–M15 are unresolved.
 
-`openkrx-cli` adds the only filesystem writing in the project, in `extract`
-and `create`, and it is deliberately narrow: an extraction destination must
-already exist and be a real directory, a `create --out` file must not exist
-at all, nothing is ever overwritten, no symbolic link or reparse point is
+- **Repacking** edits a package that already exists: it sets header fields,
+  adds, replaces and removes attachments, and re-derives the references and
+  the count, while carrying every attachment no edit names through **byte for
+  byte**. It edits only a package already in the layout openKRX writes, and
+  refuses every other one — another root prefix, an entry the layout has no
+  place for, metadata openKRX reads but cannot write back — rather than
+  relaying it out or dropping what it cannot re-emit.
+
+`openkrx-cli` adds the only filesystem writing in the project, in `extract`,
+`create` and `repack`, and it is deliberately narrow: an extraction
+destination must already exist and be a real directory, a `create` or
+`repack --out` file must not exist at all, nothing is ever overwritten and
+nothing is edited in place, no symbolic link or reparse point is
 followed out of the destination, no permission bit or timestamp is copied,
 and a run that fails part-way removes everything it created and nothing that
 was already there.
 
-Every failure carries a stable dotted code — the catalogue lists 133 — and a
+Every failure carries a stable dotted code — the catalogue lists 147 — and a
 diagnostic
 prints the code, an entry index and numeric limit values only, never an
 entry name, document text, attribute value or filesystem path.
@@ -110,6 +122,7 @@ target/release/openkrx inspect            package.krx
 target/release/openkrx validate-structure package.krx
 target/release/openkrx extract            package.krx --into ./out
 target/release/openkrx create             --manifest manifest.json --out ./package.krx
+target/release/openkrx repack             package.krx --edits edits.json --out ./edited.krx
 target/release/openkrx capabilities
 target/release/openkrx skill
 ```
@@ -124,11 +137,13 @@ target/release/openkrx skill
 | `validate-structure` | Prints the check inventory and puts the structural reading in the exit status. | 0, 2, 3, 4, 5, 6, 7, 8 |
 | `extract` | Writes the package's files into a directory that already exists. | 0, 2, 5, 6, 7, 8, 9 |
 | `create` | Writes one package from a JSON manifest, to a file that must not exist. | 0, 2, 5, 6, 8, 9 |
+| `repack` | Edits one package into a new file that must not exist, preserving every attachment no edit names. | 0, 2, 5, 6, 7, 8, 9 |
 | `skill` | Writes the agent skill document embedded in the binary to stdout. Reads no package. | 0, 2 |
 
 Each of the four reading commands takes one package file, or `-` to read
-standard input; `create` takes `--manifest` and either `--out` or `--stdout`,
-and `capabilities` and `skill` take none. Every command except `skill`
+standard input; `create` takes `--manifest` and either `--out` or `--stdout`;
+`repack` takes a package, `--edits`, and either `--out` or `--stdout`; and
+`capabilities` and `skill` take none. Every command except `skill`
 accepts `--json`. `list` prints what the archive holds:
 
 ```text
@@ -213,6 +228,36 @@ declared attachment size cites M13. That is the definition of success here,
 not a defect — and it is not a conformance claim, not a signature, and not a
 statement that any receiving service would accept the package.
 
+`repack` is the two halves together: it reads a package, applies a JSON
+document of edits, and writes the result to a new file.
+
+```json
+{
+  "schema_version": 1,
+  "timestamp": "2026-01-02T03:04:06",
+  "metadata": {"consignment_id": "CASE-2026-0001", "note": "annex added"},
+  "add": [{"path": "annex.pdf", "description": "the annex"}],
+  "remove": [2]
+}
+```
+
+**Every attachment no edit names comes out byte for byte**, with its
+description and quantity; the numbers, locations, declared sizes and count
+are re-derived, so removing one renumbers the rest. `remove` and `replace`
+name attachments by the number `inspect` prints. The report says what was
+preserved and what changed, by number and never by file name.
+
+**`repack` edits only a package already in the layout openKRX writes.** A
+package under another root prefix, carrying a signature file or a
+service-specific document, or carrying metadata openKRX reads but cannot
+write back, is refused with a `repack.unsupported.*` code and exit 7. Such a
+package is **not damaged** — `inspect`, `list`, `validate-structure` and
+`extract` all read it — and the refusal is the point: repacking never hands
+back a package that quietly lost part of what it was given. The `--out` file
+must not exist in any form, so the package being edited is never overwritten
+and nothing is edited in place. The full schema is in
+[the architecture reference](docs/architecture.md#repacking-a-package).
+
 `--json` writes exactly one object on stdout and leaves stderr empty on
 success. `cargo run -p openkrx-cli -- capabilities --json` prints this
 object, on a single line; it is indented here for reading:
@@ -225,7 +270,7 @@ object, on a single line; it is indented here for reading:
   "data": {
     "project": "openKRX",
     "stage": "reader-writer",
-    "operations": ["inspect", "list", "validate-structure", "extract", "create"]
+    "operations": ["inspect", "list", "validate-structure", "extract", "create", "repack"]
   },
   "verified": false
 }

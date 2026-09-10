@@ -626,12 +626,20 @@ fn the_summary_is_consistent_only_when_nothing_failed_or_stayed_open() {
     assert_eq!(report.summary(), StructureSummary::Consistent);
     // And Consistent is still not a conformance claim; it says only that no
     // check failed and none was left unresolved. The crate advertises reading,
-    // protected extraction and deterministic creation, and nothing else: no
-    // verdict and no verification anywhere, and a package the writer produces
-    // is layout-consistent rather than conforming.
+    // protected extraction, deterministic creation and deterministic
+    // repacking, and nothing else: no verdict and no verification anywhere,
+    // and a package the writer produces is layout-consistent rather than
+    // conforming.
     assert_eq!(
         openkrx_core::capabilities().operations,
-        ["inspect", "list", "validate-structure", "extract", "create"]
+        [
+            "inspect",
+            "list",
+            "validate-structure",
+            "extract",
+            "create",
+            "repack"
+        ]
     );
     assert_eq!(openkrx_core::capabilities().stage, "reader-writer");
 }

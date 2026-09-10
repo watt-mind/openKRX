@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":true,"command":"repack","data":{"bytes_written":1317,"entries":5,"preserved":[1,2],"changed":[],"added":[3],"removed":[],"header_fields":["consignment_id","note"],"unresolved_rules":["A19","M13"],"layout":"canonical-documented"},"verified":false}

@@ -1,0 +1,2 @@
+openkrx: repack.unsupported.root_prefix at entry 1 — the package is not in the layout openkrx writes: its metadata document sits under a different root prefix, which rule A19 leaves open. Repacking would move every entry of the package, so openkrx refuses rather than relaying it out; the package is not damaged, and inspect, list, validate-structure and extract all read it (exit 7)
+openkrx: nothing had been written, so the destination is as it was found

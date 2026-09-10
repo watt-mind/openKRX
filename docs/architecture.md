@@ -32,16 +32,22 @@ rules that no primary source settles, so that claim is not available.
 The three reading layers are reachable from the command line: `inspect`,
 `list` and `validate-structure` render them, `extract` writes what
 [Extraction planning](#extraction-planning) decided, `create` writes what
-[Deterministic creation](#deterministic-creation) produced, and
-`capabilities().operations` names exactly those five. Everything below is
-still absent.
+[Deterministic creation](#deterministic-creation) produced, `repack` composes
+the readers onto the writer as [Repacking a package](#repacking-a-package)
+sets out, and `capabilities().operations` names exactly those six. Everything
+below is still absent.
 
 - Any verified interoperability of what `create` writes. It emits the
   canonical documented layout and reads it back through its own structural
   checks, which is the only gate available; no real producer or receiving
   service has been checked against, and no output says otherwise.
-- Editing or repacking an existing package. `create` writes a new package
-  from a manifest and local files; it never reads one in.
+- Editing a package openKRX could not have written itself. `repack` edits a
+  package that is already in the layout the writer emits, and refuses every
+  other one with a `repack.unsupported.*` code rather than relaying it out or
+  dropping what it cannot re-emit; see
+  [Repacking a package](#repacking-a-package).
+- Editing any package in place. `repack` writes a new file that must not
+  already exist, and never touches the package it read.
 - Atomic whole-tree extraction. Files are created directly in the
   destination, not staged elsewhere and renamed into place, so an interrupted
   run is detected rather than prevented; see
@@ -118,6 +124,11 @@ as a failure rather than as a success.
 | `src/create/spec.rs` | `PackageSpec`, `AttachmentInput`, `FixedTimestamp`, `Layout`, and the derivation of the `MELLEKLET` references from the attachments actually written. |
 | `src/create/names.rs` | Entry names checked before they are written, against the archive layer's name rules and the extraction planner's component rules alike. |
 | `src/create/xml.rs` | The `KER_META_V0_9`-shaped serialiser: the M2, M3 and M5 element order, the `ns2` prefix, deterministic escaping, and the text XML 1.0 cannot carry. |
+| `src/repack/mod.rs` | `plan()` and `apply()`, the repacking entry points, and what repacking refuses rather than re-emitting. |
+| `src/repack/edits.rs` | `Edits`, `HeaderEdits`, `OptionalEdit`, `AttachmentAddition` and `AttachmentReplacement`: what a caller asks to change, as a pure value. |
+| `src/repack/error.rs` | `RepackError` and its two category enums; the archive, metadata and creation errors it passes through keep their own codes. |
+| `src/repack/layout.rs` | Reading an archive as the canonical documented layout, byte-exactly, or refusing it with the code that says which part did not match. |
+| `src/repack/plan.rs` | `RepackPlan`: what is preserved, changed, added and removed, decided before anything is written, and the faithfulness checks over the document. |
 | `src/create/zip.rs` | The deterministic ZIP image: every record field fixed, compressed first so the exact image length is known before a byte is assembled. |
 | `src/extract/mod.rs` | `plan()`, the extraction-planning entry point: `ExtractLimits`, `ExtractionPlan` and `PlanItem`, and the per-entry walk that produces them. |
 | `src/extract/error.rs` | `PlanError` and its four category enums, each mapping to a stable dotted code; `Display` prints code, entry index and numbers only. |
@@ -144,15 +155,20 @@ as a failure rather than as a success.
 | `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the core entry points, and hands the result to a renderer. |
 | `src/input.rs` | The only I/O in openKRX: opening a file exactly as named, or reading standard input as binary, bounded by the input cap. |
 | `src/skill.rs` | The agent skill document, embedded with `include_str!`, and the `skill` command that writes it to stdout outside the envelope. |
-| `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*` and `manifest.invalid.*` diagnostic explains itself with. |
+| `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*`, `manifest.invalid.*` and `repack.*` diagnostic explains itself with. |
 | `src/commands/mod.rs` | The shared check, outcome and name views every command's report is built from. |
 | `src/commands/inspect.rs` | The `inspect` report: observations, the declared document, and every check. |
 | `src/commands/list.rs` | The `list` report: one row per archive entry, in central-directory order. |
 | `src/commands/validate.rs` | The `validate-structure` report: the summary word, the checks, and the undecided rules. |
 | `src/commands/extract.rs` | The `extract` report: the counts, one record per file written, and whether the run removed its marker. |
+| `src/commands/repack.rs` | The `repack` report: the four attachment lists, the header fields the edits set, and the counts of what was written. |
 | `src/commands/create.rs` | The `create` report: the byte and entry counts, the layout, and the rules the written package's own self-check left undecided. |
-| `src/manifest.rs` | The manifest schema and its strict validation: the fixed key sets, the schema paths a diagnostic may name, and the conversion to the typed metadata and timestamp the writer takes. |
-| `src/create.rs` | The four phases of a creation — read, build, place, self-check — the no-clobber output rule, and the removal of a half-written file. |
+| `src/json.rs` | Strict reading of the two JSON documents openKRX takes: the unknown-key refusal, the required-field rule, the schema version and the timestamp conversion, shared so the two schemas cannot drift apart. |
+| `src/manifest.rs` | The manifest schema: the fixed key sets, the schema paths a diagnostic may name, and the conversion to the typed metadata and timestamp the writer takes. |
+| `src/edits.rs` | The edits schema `repack` takes, in the manifest's own field spelling, with `null` reading as "remove this optional element". |
+| `src/create.rs` | The four phases of a creation — read, build, place, self-check. |
+| `src/repack.rs` | The five phases of a repacking — read, plan, build, place, self-check — over a package that is read and never written to. |
+| `src/output.rs` | Where a written package goes: the existing real parent, the file that must not exist in any form, and the exclusive creation both writing commands share. |
 | `src/extract/mod.rs` | The four phases of a protected extraction — plan, preflight, write, commit — the marker name, and the failure policy that undoes this run's work. |
 | `src/extract/preflight.rs` | What is decided before a byte is written: the destination, the marker, and every planned path against what is already there. Holds the link and reparse-point test. |
 | `src/extract/writer.rs` | Exclusive creation of the marker, the directories and the files, each recorded as this run created it. |
@@ -512,8 +528,9 @@ with nothing beneath it produces nothing at all.
 
 ## Extraction output
 
-`extract` is one of the two commands that write — `create` is the other, and
-its output rule is [Creating a package](#creating-a-package) — and
+`extract` is one of the three commands that write — `create` and `repack` are
+the others, and their output rule is
+[Creating a package](#creating-a-package) — and
 `crates/openkrx-cli/src/extract/` is the code that owns an extraction's
 destination. It adds no rule about names, entry kinds, collisions
 or ceilings: those belong to the planner above, and are enforced before this
@@ -828,11 +845,124 @@ package openKRX wrote is structurally consistent with the documented layout,
 which is unverified against every real producer; it is not conforming, not
 signed, and not something any receiving service has agreed to accept.
 
+## Repacking a package
+
+`openkrx repack <FILE|-> --edits <FILE> --out <FILE>` edits a package that
+already exists. It is the composition of the layers above and adds no rule of
+its own: `archive::inventory` reads the package, `metadata::parse` turns its
+document into typed values, `openkrx_core::repack::plan` decides what the edits
+would do, and `create::package` writes the result. The core half is a pure
+function — no filesystem, clock, process or network — and the command half, in
+`crates/openkrx-cli/src/repack.rs`, does the reading and the placing.
+
+**Preservation is the contract.** An attachment no edit names is carried
+through byte for byte: its entry's decoded bytes go into the result unchanged,
+and so do its `MELLEKLET_LEIRASA`, `MENNYISEG` and `MENNYISEGI_EGYSEG`. Its
+number and location are re-derived, because removing an earlier attachment
+renumbers the ones after it and a document describing the old numbering would
+describe a package that no longer exists.
+
+**The package being edited is never written to.** `--out` is a different file
+that must not already exist in any form, so naming the input as `--out` is
+refused with `output.exists` like any other occupied path. Nothing is edited in
+place, and an interrupted run cannot damage the package someone already had.
+
+### The edits document
+
+One JSON object, validated exactly as `create`'s manifest is and by the same
+module: a required field that is absent is refused, and a key the schema does
+not define is refused rather than ignored. The field spelling under `metadata`
+is the manifest's own, and the diagnostics name the same JSON Pointers.
+
+```json
+{
+  "schema_version": 1,
+  "timestamp": "2026-01-02T03:04:06",
+  "metadata": {"consignment_id": "CASE-2026-0001", "note": "annex added", "barcode": null},
+  "add": [
+    {"path": "annex.pdf", "file_name": "annex.pdf", "description": "the annex"}
+  ],
+  "replace": [{"number": 1, "path": "invoice-v2.pdf"}],
+  "remove": [2]
+}
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `schema_version` | yes | `1`, the only edits schema this build applies. |
+| `timestamp` | yes | `YYYY-MM-DDTHH:MM:SS`, the MS-DOS date and time every record of the *result* carries. openKRX has no clock, so there is no default and no "keep the old one": the value is written, and two runs over the same package and the same edits produce byte-identical packages. |
+| `metadata` | no | Any subset of the manifest's header fields: `version`, `source_system`, `consignment_id`, `created_at`, `consignment_kind`, `test`, `barcode`, `reference_id`, `error_code`, `note`. A field that is absent keeps the package's own value. `dispatches` is not accepted: the references and the count are derived. |
+| `metadata.barcode`, `.reference_id`, `.error_code`, `.note` | no | The four optional elements, and the only place `null` is meaningful: `null` **removes** the element, an absent key leaves it as it was. A required field written as `null` is a `manifest.invalid.type` refusal, because a required element cannot be removed. |
+| `add[]` | no | Attachments appended after the ones that remain, in document order. `path` is a local file resolved against the **edits document's own directory**; `file_name` defaults to the path's last component; `description` is `MELLEKLET_LEIRASA`. |
+| `replace[]` | no | `number` names an attachment of the package being edited, counted from 1, and `path` names the local file whose bytes take its place. The file name, description and quantity of that attachment are preserved; only the bytes, and therefore the derived `MERET`, change. |
+| `remove[]` | no | Attachment numbers to drop, counted from 1. |
+
+**Three files can fail to open**, so `input.unreadable` from `repack` carries
+the schema path of the one that did: `/` for the `--edits` document,
+`/add/path` or `/replace/path` for a local file an edit names, and no field
+at all for the package given as the argument. The path itself is never
+reported — it is the caller's own filesystem — but which argument failed is
+not content, and without it a caller with two paths on the command line has
+to guess.
+
+`remove` and `replace` name attachments by their `CSATOLMANY_SZAMA` in the
+package that was read, which is what `inspect` prints. A number the package
+does not carry is `repack.invalid.no_such_attachment`, and two edits naming the
+same number are `repack.invalid.duplicate_target`: what should happen to it is
+not decided by the request, so openKRX asks rather than choosing.
+
+### What is refused, and why
+
+The writer emits one layout and one grammar. **Anything the input carries that
+the writer cannot re-emit is refused with a `repack.unsupported.*` code rather
+than dropped**, and the rule behind every one of them is one sentence:
+repacking with no edit must produce the package it was given.
+
+| Refused | Code | Because |
+| --- | --- | --- |
+| A root prefix other than `KRX/OCD/` | `repack.unsupported.root_prefix` | Rule A19 leaves the prefix open; re-emitting would move every entry |
+| Another spelling of the metadata file name | `repack.unsupported.metadata_name` | Rule M12 leaves the casing open; re-emitting would rename the entry |
+| No single metadata document | `repack.unsupported.metadata_missing` | There is nothing to edit, or nothing settles which document is meant |
+| A first entry that is not the marker | `repack.unsupported.marker` | A2 and A19 again: re-emitting would move or rewrite it |
+| An entry outside the documented layout | `repack.unsupported.extra_entry` | A signature document (A7) or a service-specific document (A11–A16) would be dropped |
+| `unknown_elements > 0` | `repack.unsupported.unknown_elements` | The reader counts elements outside the grammar (A9) and keeps none |
+| `ERKEZTETES`, `BONTASOK`, `TERTIVEVENY`, an unqualified `KEZELESI_UTASITASOK` | `repack.unsupported.opaque_block` | The reader records their presence only, so they would be written back empty |
+| More than one `EXPEDIALAS` block | `repack.unsupported.dispatch_count` | There is no single place for the derived references (M7) |
+| A reference the writer would derive differently | `repack.unsupported.attachment_reference` | Repacking would rewrite a `MERET`, a location or a number nobody asked it to |
+| A dispatch that declares no `MELLEKLETEK_SZAMA` | `repack.unsupported.attachment_reference` | The writer derives the count and always emits it, so the document would *gain* the element (M7) |
+| Payload entries the references do not describe | `repack.unsupported.attachment_entry` | Repacking would have to decide which of the two is right |
+
+**One residual gap is known, and is not detectable here.** The reader records
+that a dispatch carries attachment references, but not whether the
+`MELLEKLETEK` container element itself was present, and the writer always
+emits it. A dispatch carrying no `MELLEKLETEK` element at all — possible only
+with no references, since the references live inside it — therefore gains an
+empty one, and nothing in the repacking layer can tell that it happened.
+Closing it needs the reader to retain the fact, which is tracked separately;
+until then it is the one case where "the package it was given" is not exact,
+and it is stated here rather than left for someone to find.
+
+**A package refused this way is not damaged.** `inspect`, `list`,
+`validate-structure` and `extract` all still read it; the refusal says what
+openKRX cannot *write*, and the diagnostic sentence says so in as many words.
+In practice this means `repack` edits packages openKRX itself could have
+written, and leaves every other producer's package alone rather than
+reformatting it — which is the honest position while A19 to A22 and M11 to M15
+remain unresolved.
+
+### Reporting and the self-check
+
+`repack` reads its own output back exactly as `create` does, and a single
+failing check removes the file and exits 6 with
+`repack.internal.self_check_failed`. As for `create`, the definition of
+success is `validate-structure` over the result exiting 4: the marker cites
+A19 and any declared attachment size cites M13.
+
 ## Command contract and JSON envelope
 
 The supported surface is `openkrx --help`, `openkrx --version`,
-`openkrx capabilities [--json]`, the three reader commands, the two commands
-that write — `extract` and `create` — and `skill`:
+`openkrx capabilities [--json]`, the three reader commands, the three commands
+that write — `extract`, `create` and `repack` — and `skill`:
 
 ```text
 openkrx inspect            <FILE|-> [--json]
@@ -841,6 +971,8 @@ openkrx validate-structure <FILE|-> [--json]
 openkrx extract            <FILE|-> --into <DIR> [--json]
 openkrx create             --manifest <FILE> --out <FILE> [--json]
 openkrx create             --manifest <FILE> --stdout [--json]
+openkrx repack             <FILE|-> --edits <FILE> --out <FILE> [--json]
+openkrx repack             <FILE|-> --edits <FILE> --stdout [--json]
 openkrx skill
 ```
 
@@ -852,6 +984,7 @@ openkrx skill
 | `validate-structure` | one package | stdout | yes, with `--json` | 0, 2, 3, 4, 5, 6, 7, 8 |
 | `extract` | one package | stdout and `--into <DIR>` | yes, with `--json` | 0, 2, 5, 6, 7, 8, 9 |
 | `create` | one manifest and the files it names | stdout and `--out <FILE>`, or the package on stdout | yes, with `--json` | 0, 2, 5, 6, 8, 9 |
+| `repack` | one package, one edits document and the files it names | stdout and `--out <FILE>`, or the package on stdout | yes, with `--json` | 0, 2, 5, 6, 7, 8, 9 |
 | `skill` | none | stdout | **no: it bypasses the envelope** | 0, 2 |
 
 **`skill` is outside the envelope.** It writes the agent skill document
@@ -867,7 +1000,10 @@ package for a `command`, `data` or `verified` field to be about.
 
 The three reader commands write nothing anywhere. `extract` writes exactly
 the files the package declares, into the directory `--into` names, under the
-rules in [Extraction output](#extraction-output).
+rules in [Extraction output](#extraction-output). `create` and `repack` each
+write one package to a path that must not already exist, under the rules in
+[Creating a package](#creating-a-package) and
+[Repacking a package](#repacking-a-package).
 
 Each reader command takes exactly one input: a path, opened exactly as
 written with no normalisation, globbing or extension inference on any
@@ -1123,7 +1259,7 @@ failed `extract` carries the ordinary failed envelope plus one extra object:
 }
 ```
 
-`cleanup` is present for the two commands that write. It counts paths the run
+`cleanup` is present for the three commands that write. It counts paths the run
 had created and then removed, and paths it created and could not remove; both
 zero means nothing had been written when the run was refused. Human mode
 prints the same fact as a second line on standard error. Neither carries a
@@ -1177,6 +1313,62 @@ the manifest's `attachments` array.
 position, so neither is content: the manifest's values, and the spelling of a
 key the schema does not define, are never reported.
 
+### `repack`
+
+`bytes_written`, `entries` and `layout` are `create`'s. The four attachment
+lists are what the command exists to report: `preserved` names the attachments
+carried through byte for byte, `changed` the ones whose bytes the edits
+replaced and `removed` the ones that are gone — all three by their number in
+the package that was **read** — while `added` names the numbers the new
+attachments took in the package that was **written**. Removing an attachment
+renumbers the ones after it, so the two sides are reported separately rather
+than as one list. `header_fields` names the header fields the edits set, by
+their manifest spelling. Every list carries numbers or schema-fixed field
+names: no file name, identifier or value an edits document wrote appears
+anywhere in the report.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "repack",
+  "data": {
+    "bytes_written": 1317,
+    "entries": 5,
+    "preserved": [1, 2],
+    "changed": [],
+    "added": [3],
+    "removed": [],
+    "header_fields": ["consignment_id", "note"],
+    "unresolved_rules": ["A19", "M13"],
+    "layout": "canonical-documented"
+  },
+  "verified": false
+}
+```
+
+A failed `repack` carries the ordinary failed envelope, `cleanup`, the
+`field` and `attachment_index` a manifest refusal carries, and one field no
+other command sets: `attachment_number`, the attachment's
+`CSATOLMANY_SZAMA` in the package being edited, counted from 1. It is a
+position in a package rather than a position in an array, which is why it is
+not `attachment_index`.
+
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "command": "repack",
+  "error": {
+    "code": "repack.invalid.no_such_attachment",
+    "category": "package",
+    "attachment_number": 9
+  },
+  "cleanup": {"removed": 0, "left_in_place": 0},
+  "verified": false
+}
+```
+
 There is deliberately no field named `valid`, `conforming` or `is_krx` in any
 response, and no command prints such a word as a claim.
 
@@ -1200,11 +1392,11 @@ category holds each row.
 | 2 | `usage` | The arguments were rejected: an unknown or missing command, a missing file argument, or an invalid flag. |
 | 3 | `structure_inconsistent` | `validate-structure` only: at least one check failed. |
 | 4 | `structure_unresolved` | `validate-structure` only: no check failed, and at least one rule could not be decided. |
-| 5 | `input` | The input could not be opened or read, or it reached the input cap. For `create`, the manifest or one of the attachment files it names. |
-| 6 | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. For `create`, the manifest does not describe a package that can be written, or the package openKRX wrote did not read back cleanly. |
-| 7 | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, a multi-disk archive, another compression method, or an XML feature the parser refuses. |
+| 5 | `input` | The input could not be opened or read, or it reached the input cap. For `create` and `repack`, the manifest or edits document, or one of the local files it names. |
+| 6 | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. For `create` and `repack`, the manifest or the edits do not describe a package that can be written, or the package openKRX wrote did not read back cleanly. |
+| 7 | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, a multi-disk archive, another compression method, or an XML feature the parser refuses. For `repack`, the package carries something the writer cannot re-emit — it is read, and simply not rewritable. |
 | 8 | `limit` | A documented parsing, extraction or writing limit was exceeded. |
-| 9 | `output` | `extract` and `create` only: the destination could not be used, or a write failed. Nothing incomplete was left behind. |
+| 9 | `output` | `extract`, `create` and `repack` only: the destination could not be used, or a write failed. Nothing incomplete was left behind. |
 
 `inspect` and `list` never exit 3 or 4: a failing or undecided check is part
 of their report, not their status. A structural failure is therefore visible
@@ -1229,17 +1421,18 @@ segment: `input.*` to 5; `*.over_limit.*` to 8, except
 was parsed at all; `*.unsupported.*` to 7; `*.truncated.*`, `*.malformed.*`,
 `*.ambiguous.*`, `archive.unsafe_name.*`, `extract.unsafe_path.*` and
 `archive.no_such_entry`, `create.invalid.*`, `create.unsafe_name.*`,
-`create.internal.self_check_failed` and `manifest.invalid.*` to 6; and every
-`output.*` code to 9. The remaining
+`create.internal.self_check_failed`, `manifest.invalid.*`,
+`repack.invalid.*` and `repack.internal.self_check_failed` to 6;
+`repack.unsupported.*` to 7; and every `output.*` code to 9. The remaining
 `metadata.*` codes are structural-check failures, which reach a status only
 through `validate-structure`'s summary, as 3.
 
-Statuses 3 and 4 belong to `validate-structure` alone, and 9 to the two
+Statuses 3 and 4 belong to `validate-structure` alone, and 9 to the three
 commands that write. 9 says something the other statuses do not: the
 destination was left as it was found, either because the run was refused
 before writing or because the undo pass removed everything it had created —
-for `create`, the half-written package file. In human mode the second line on
-standard error states which of the two happened.
+for `create` and `repack`, the half-written package file. In human mode the
+second line on standard error states which of the two happened.
 
 The core error enums are `#[non_exhaustive]`, so no downstream `match` on
 their variants can be exhaustive and a new code cannot be made to fail

@@ -15,17 +15,23 @@ what the code asserts from them in [conformance.md](conformance.md).
 ## Not yet implemented
 
 The three reader commands expose the three library layers, `extract` writes
-what the planner decided and `create` writes what the deterministic writer
-produced, so `capabilities().operations` names all five and the stage reads
-`reader-writer`. Reading, protected extraction and deterministic creation are
-the package operations that exist. The authoritative, code-level version of
-this list is [architecture.md](architecture.md#not-yet-implemented).
+what the planner decided, `create` writes what the deterministic writer
+produced, and `repack` composes the readers onto the writer to edit a package
+that already exists, so `capabilities().operations` names all six and the
+stage reads `reader-writer`. Reading, protected extraction, deterministic
+creation and deterministic repacking are the package operations that exist.
+The authoritative, code-level version of this list is [architecture.md](architecture.md#not-yet-implemented).
 
 - Any claim that a package openKRX wrote is interoperable. `create` writes
   the canonical documented layout and reads it back through its own
   structural checks, which is the only gate available; what it writes is
   unverified against every real producer, and no output says otherwise. See
   the KRX-06 row below.
+- Editing a package openKRX could not have written itself. `repack` edits a
+  package already in the layout the writer emits and refuses every other one
+  with a `repack.unsupported.*` code, so a package from another producer is
+  read, extracted and reported on but never rewritten. Nothing edits a
+  package in place, either: the result is a new file that must not exist.
 - Atomic whole-tree extraction. Files are created directly in the
   destination, so a crash leaves partial output plus the
   `.openkrx-extract.partial` marker that makes it detectable; rename-based
@@ -44,9 +50,6 @@ this list is [architecture.md](architecture.md#not-yet-implemented).
 - A fuzzing campaign. Both parsers have a `cargo-fuzz` target and a
   30-second-per-target smoke lane in CI; a seed corpus, a scheduled long run
   and coverage measurement do not exist.
-- A CLI agent skill (`openkrx skill`). Now that the reader and extraction
-  commands ship there is a workflow to describe; a separate change is in
-  progress and nothing in the executable exposes a skill yet.
 - Configurable limits from the command line. `Limits` and `MetadataLimits`
   are library values a Rust caller can tighten; nothing on the command line
   reaches them.
@@ -67,6 +70,7 @@ criteria and verification.
 | [KRX-04: reader CLI and stable output](work-packages.md#krx-04-reader-cli-and-stable-output) | **Done** | `inspect`, `list` and `validate-structure` over the existing layers, with bounded input, eight stable exit statuses, a one-object JSON contract and content-free diagnostics. The first milestone that makes any of this usable without writing Rust; its output stays within [profile.md](profile.md) and reports observations, never a conformance verdict. |
 | [KRX-05: protected extraction](work-packages.md#krx-05-protected-extraction) | **Done** | `openkrx_core::extract::plan` and the `extract` command: the whole plan decided before a byte is written, a destination that must already exist, no overwrite, no link escape, exit status 9, and an undo pass that removes only what the run created. |
 | [KRX-06: deterministic profile writer](work-packages.md#krx-06-deterministic-profile-writer) | **Done** for the documented layout; interoperability unverified | `openkrx_core::create::package` and the `create` command: deterministic bytes for the canonical documented layout, derived attachment references, the reader's ceilings enforced on the output, 24 stable `create.*` codes and 7 `manifest.invalid.*` codes, a strictly validated JSON manifest, a no-clobber output file and a self-check that reads the written package back before reporting success. Built on an operator decision, not on new evidence — the layout is unverified, and A19 to A22 and M11 to M15 are as unresolved as before. |
+| [KRX-08: repack, deterministic package editing](work-packages.md#krx-08-repack-deterministic-package-editing) | **Done** for the layout openKRX writes; nothing else is editable | `openkrx_core::repack::{plan, apply}` and the `repack` command: a plan a caller can inspect before anything is written, every untouched attachment preserved byte for byte, header fields, additions, replacements and removals applied with the references and the count re-derived, 14 stable `repack.*` codes, and a refusal of every package the writer cannot re-emit rather than a silent relayout. Resolves no profile rule: a repacked package reports `Unresolved(A19)` and `Unresolved(M13)` exactly as a created one does. |
 | [KRX-07: consumer contract and first release review](work-packages.md#krx-07-consumer-contract-and-first-release-review) | Planned, and next | The openPapir integration contract, the openSzigno attachment handoff, and the first-release readiness review. |
 
 KRX-05 was the first milestone that writes to a filesystem, so the whole
@@ -96,6 +100,12 @@ requests that would settle the rules — one to the format owner, one for the
 SPOCS OCD deliverable — are recorded in
 [research.md](research.md#open-evidence-gaps), and both are still for a
 person to make.
+
+KRX-08 inherits that decision and narrows it: repacking edits only a package
+already in the layout `create` writes, and refuses every other one. That is
+not a limitation waiting to be lifted by more code — while A19 to A22 and M11
+to M15 stand, rewriting another producer's layout would mean choosing what
+the sources leave open, on someone else's correspondence.
 
 ## Engineering items
 

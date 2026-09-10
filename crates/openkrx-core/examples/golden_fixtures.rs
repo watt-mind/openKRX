@@ -73,11 +73,13 @@ fn fixtures() -> Vec<(&'static str, Vec<u8>)> {
     fixtures
 }
 
-/// The inputs of the `create` golden cases.
+/// The inputs of the `create` and `repack` golden cases.
 ///
-/// These are not archives: they are the manifest documents and the two small
-/// attachment files the creation cases point `--out` at a temporary directory
-/// with. They are committed for the same reason the packages are — the golden
+/// These are not archives: they are the manifest and edits documents, and the
+/// two small attachment files, that the creation and repacking cases point
+/// `--out` at a temporary directory with. The repacking cases create their own
+/// package from `create-manifest.json` first, because `repack` edits only a
+/// package already in the layout openKRX writes. They are committed for the same reason the packages are — the golden
 /// contract needs the same input bytes on every machine — and an attachment
 /// path inside a manifest is resolved against the manifest's own directory,
 /// which is this one.
@@ -100,8 +102,35 @@ fn manifests() -> Vec<(&'static str, Vec<u8>)> {
             "create-missing-attachment.json",
             manifest("{\"path\": \"no-such-attachment.txt\"}").into_bytes(),
         ),
+        ("repack-edits.json", EDITS.to_vec()),
+        ("repack-invalid-edits.json", INVALID_EDITS.to_vec()),
     ]
 }
+
+/// The edits the `repack` golden cases apply.
+///
+/// They change one header field, add one attachment and touch neither of the
+/// two the package already carries, so the case pins the distinction the
+/// command exists to make: what changed against what was preserved. The added
+/// attachment's path is resolved against this directory, as an edits
+/// document's paths always are.
+const EDITS: &[u8] = b"{
+  \"schema_version\": 1,
+  \"timestamp\": \"2026-01-02T03:04:06\",
+  \"metadata\": {\"consignment_id\": \"SYNTHETIC-CONSIGNMENT-2\", \"note\": \"repacked\"},
+  \"add\": [
+    {\"path\": \"create-attachment-b.txt\", \"file_name\": \"annex.txt\", \"description\": \"the annex\"}
+  ]
+}
+";
+
+/// Edits naming an attachment number the package does not carry.
+const INVALID_EDITS: &[u8] = b"{
+  \"schema_version\": 1,
+  \"timestamp\": \"2026-01-02T03:04:06\",
+  \"remove\": [9]
+}
+";
 
 /// The bytes of the first golden attachment.
 const ATTACHMENT_A: &[u8] = b"synthetic attachment a\n";

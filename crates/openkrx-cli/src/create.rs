@@ -34,31 +34,17 @@
 //! `docs/profile.md` leaves open. Nothing was signed, and nothing was
 //! verified.
 
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use openkrx_core::create::{AttachmentInput, PackageSpec};
 use openkrx_core::{Limits, MetadataLimits, create as writer};
 
 use crate::commands::create::CreateData;
-use crate::exit::{
-    Failure, OUTPUT_DESTINATION_MISSING, OUTPUT_DESTINATION_NOT_A_DIRECTORY,
-    OUTPUT_DESTINATION_SYMLINK, OUTPUT_EXISTS, OUTPUT_IO,
-};
+use crate::exit::Failure;
 use crate::extract::cleanup::{Cleanup, Ledger};
-use crate::extract::preflight::is_link;
 use crate::manifest::{self, Manifest};
+use crate::output::{self, Destination};
 use crate::{commands, input};
-
-/// Where the package bytes go.
-#[derive(Debug, Clone, Copy)]
-pub enum Destination<'a> {
-    /// A file that must not exist yet, created exclusively.
-    File(&'a Path),
-    /// Standard output, written only after the self-check has passed.
-    Stdout,
-}
 
 /// A refused creation: why it failed, and what was removed again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +80,7 @@ pub fn run(manifest_path: &Path, destination: Destination<'_>) -> Result<Written
     };
     let bytes = input::read(input::Source::File(manifest_path)).map_err(refuse)?;
     let manifest = manifest::parse(&bytes).map_err(refuse)?;
-    let spec = spec(&manifest, parent_of(manifest_path)).map_err(refuse)?;
+    let spec = spec(&manifest, output::parent_of(manifest_path)).map_err(refuse)?;
     let package =
         writer::package(&spec, &Limits::DEFAULT).map_err(|error| refuse(Failure::from(error)))?;
     let entries = u32::try_from(spec.attachments.len().saturating_add(2)).unwrap_or(u32::MAX);
@@ -127,7 +113,7 @@ fn place(
 ) -> Result<CreateData, Failure> {
     let written = match destination {
         Destination::File(path) => {
-            create_file(package, path, ledger)?;
+            output::create_file(package, path, ledger)?;
             input::read(input::Source::File(path))?
         }
         Destination::Stdout => package.to_vec(),
@@ -139,77 +125,6 @@ fn place(
     }
     let length = u64::try_from(written.len()).unwrap_or(u64::MAX);
     Ok(commands::create::run(length, entries, &report))
-}
-
-/// Create the output file exclusively, after checking what is already there.
-///
-/// The parent must already exist as a real directory: `create` never creates
-/// one, for the reason `extract` never creates its destination — a typo in the
-/// argument would silently produce a tree instead of a refusal. The file
-/// itself must not exist in any form, which `symlink_metadata` answers without
-/// following a link, so a dangling symbolic link counts as occupied rather
-/// than as free space. `create_new` then closes the window between that check
-/// and the creation.
-fn create_file(package: &[u8], path: &Path, ledger: &mut Ledger) -> Result<(), Failure> {
-    parent(path)?;
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => return Err(Failure::output(OUTPUT_EXISTS)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err(Failure::output(OUTPUT_IO)),
-    }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                Failure::output(OUTPUT_EXISTS)
-            } else {
-                Failure::output(OUTPUT_IO)
-            }
-        })?;
-    ledger.file(path.to_path_buf());
-    file.write_all(package)
-        .map_err(|_| Failure::output(OUTPUT_IO))?;
-    file.flush().map_err(|_| Failure::output(OUTPUT_IO))?;
-    Ok(())
-}
-
-/// The directory the output file goes in: it must be there, and be real.
-fn parent(path: &Path) -> Result<(), Failure> {
-    let directory = match path.parent() {
-        // An empty parent is what `--out package.krx` produces: the file goes
-        // in the working directory, which the process is already in.
-        Some(parent) if parent.as_os_str().is_empty() => return Ok(()),
-        Some(parent) => parent,
-        None => return Err(Failure::output(OUTPUT_DESTINATION_NOT_A_DIRECTORY)),
-    };
-    let metadata = std::fs::symlink_metadata(directory).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Failure::output(OUTPUT_DESTINATION_MISSING)
-        } else {
-            Failure::output(OUTPUT_IO)
-        }
-    })?;
-    if is_link(&metadata) {
-        return Err(Failure::output(OUTPUT_DESTINATION_SYMLINK));
-    }
-    if !metadata.is_dir() {
-        return Err(Failure::output(OUTPUT_DESTINATION_NOT_A_DIRECTORY));
-    }
-    Ok(())
-}
-
-/// The directory a relative attachment path is resolved against.
-///
-/// The manifest's own directory, so that a manifest and its attachments move
-/// together and the working directory the command happened to run in changes
-/// nothing about the package that comes out.
-fn parent_of(manifest_path: &Path) -> PathBuf {
-    match manifest_path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => PathBuf::from("."),
-    }
 }
 
 /// Read every attachment and build the request the writer takes.
@@ -233,7 +148,7 @@ fn spec(manifest: &Manifest, base: PathBuf) -> Result<PackageSpec, Failure> {
         let file_name = attachment
             .file_name
             .clone()
-            .unwrap_or_else(|| default_file_name(&attachment.path));
+            .unwrap_or_else(|| output::default_file_name(&attachment.path));
         attachments.push(AttachmentInput {
             file_name,
             bytes,
@@ -247,18 +162,4 @@ fn spec(manifest: &Manifest, base: PathBuf) -> Result<PackageSpec, Failure> {
         timestamp: manifest.timestamp,
         ..PackageSpec::new(manifest.metadata.clone())
     })
-}
-
-/// The last component of a manifest path, as the package-internal name.
-///
-/// A path with no last component — one ending in a separator or in `..` —
-/// yields an empty name, which the writer refuses with
-/// `create.unsafe_name.empty`: guessing a name for a file whose own name
-/// openKRX could not read would be an invention.
-fn default_file_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_owned()
 }

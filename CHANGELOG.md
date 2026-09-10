@@ -16,6 +16,75 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **`openkrx repack`: deterministic editing of an existing package (KRX-08).**
+  `openkrx repack <FILE|-> --edits <FILE.json> --out <FILE.krx> [--json]`
+  reads one package, applies a strictly validated JSON document of edits, and
+  writes the result to a file that must not already exist. `--stdout` writes
+  the package to standard output instead, with the report on standard error,
+  exactly as `create` does. The core half is
+  `openkrx_core::repack::{plan, apply}`: `plan` decides the whole edit before
+  anything is written and is inspectable — what is preserved, what changes,
+  what goes, what arrives and which header fields the edits set — and `apply`
+  writes it through `create::package` with the caller's timestamp. Neither
+  touches a filesystem, a clock, a process or a network.
+
+  **Every attachment no edit names is preserved byte for byte**, with its
+  `MELLEKLET_LEIRASA`, `MENNYISEG` and `MENNYISEGI_EGYSEG`. The numbers,
+  locations, declared sizes and `MELLEKLETEK_SZAMA` are re-derived from the
+  attachments the result carries, so removing one renumbers the rest. The
+  edits document is one object carrying `schema_version` 1, a required
+  `timestamp`, an optional `metadata` object taking any subset of the create
+  manifest's header fields in the manifest's own spelling, and the optional
+  `add`, `replace` and `remove` arrays; a key the schema does not define is
+  refused rather than ignored, and `null` on one of the four optional header
+  elements removes it. `remove` and `replace` name attachments by their
+  number in the package, counted from 1. The schema is documented in
+  [docs/architecture.md](docs/architecture.md#repacking-a-package).
+
+  **A package openKRX cannot re-emit is refused rather than repacked into one
+  that lost part of it.** Ten `repack.unsupported.*` codes cover a root
+  prefix other than `KRX/OCD/`, another metadata file-name spelling, a
+  missing or ambiguous document, a marker that is not where the layout puts
+  it, an entry the layout has no place for — a signature document (A7) or a
+  service-specific one (A11–A16) — elements outside the grammar (A9), a block
+  whose presence alone the reader records (M2, M8), more than one dispatch
+  block (M7), and a reference or count the writer would derive differently —
+  including a dispatch that declares *no* `MELLEKLETEK_SZAMA`, which would
+  otherwise gain the element, because the writer derives the count and always
+  emits it.
+  Such a package is **not damaged**: `inspect`, `list`,
+  `validate-structure` and `extract` all still read it, and the diagnostic
+  says so. Three `repack.invalid.*` codes cover an edit naming an attachment
+  the package does not carry, two edits naming the same one, and a plan
+  applied to an inventory it was not made from.
+
+  The output rules are `create`'s: `--out` must not exist in any form and its
+  parent must be an existing real directory, so **the package being edited is
+  never overwritten and nothing is edited in place**; a failure after the
+  file was created removes it again. The result is read back through the
+  structural checks before success is reported, and a failing check is a
+  defect in openKRX reported as `repack.internal.self_check_failed`.
+  `validate-structure` over a repacked package exits 4, citing A19 and, with
+  any attachment, M13 — the same definition of success as for `create`.
+
+  Repacking resolves no profile rule. A19 to A22 and M11 to M15 stay
+  unresolved, and a repacked package is "structurally consistent with the
+  documented layout", never conforming, never signed and never something a
+  receiving service has agreed to accept.
+
+- **14 stable codes**: `repack.unsupported.metadata_missing`,
+  `.root_prefix`, `.metadata_name`, `.marker`, `.extra_entry`,
+  `.unknown_elements`, `.opaque_block`, `.dispatch_count`,
+  `.attachment_reference` and `.attachment_entry`, each classifying to exit
+  status 7; `repack.invalid.no_such_attachment`, `.duplicate_target` and
+  `.inventory_mismatch`, and `repack.internal.self_check_failed`, each
+  classifying to 6. The seven `manifest.invalid.*` codes are reported over
+  the edits document too. All are catalogued in
+  [docs/codes.md](docs/codes.md#repacking-codes).
+
+- **`repack` in `capabilities().operations`**, beside the five operations
+  that were already there. The stage stays `reader-writer`.
+
 - **Three more fuzz targets: structural checks, extraction planning and the
   writer round trip.** `structure` runs `profile::check` over an inventory the
   reader accepted, `extract_plan` runs `extract::plan`, and `create_round_trip`
@@ -434,6 +503,33 @@ and such a change is recorded here explicitly.
   behaviour changed.
 
 ### Changed
+
+- **The failed JSON envelope may carry `attachment_number`.** `repack` sets
+  it when a refusal concerns one attachment of the package being edited: it
+  is that attachment's `CSATOLMANY_SZAMA`, counted from 1, and is a different
+  thing from `attachment_index`, which is a position in a manifest or edits
+  array. Adding a field does not raise `schema_version`, which stays `1`; a
+  consumer ignores fields it does not recognise.
+
+- **`manifest.invalid.unknown_field` now lists the keys the schema defines.**
+  The key a caller wrote is still never echoed — it is text they wrote — but
+  the sentence names the key set of **the object the diagnostic points at**,
+  so a misspelling can be found without reading the schema: a typo inside
+  `metadata` is answered with `metadata`'s own fields, not with the
+  document's top-level keys. A unit test holds each sentence against the key
+  array that defines that object, so the two cannot drift. This applies to
+  `create`'s manifest as well as to `repack`'s edits document.
+
+- **`input.unreadable` from `repack` names the file that failed.** `repack`
+  opens a package, an edits document and one file per edit, so the failure
+  carries the schema path of the one that could not be read: `/` for the
+  edits document, `/add/path` or `/replace/path` for a file an edit names,
+  and no field for the package. No path is reported, as before.
+
+- **The `output.*` diagnostic sentences `create` and `extract` differ in are
+  now keyed for `repack` too**, so a caller who ran `repack` is told about
+  `--out` rather than about `--into`, and `output.exists` says that the
+  package being repacked is not a legal `--out`.
 
 - **`capabilities` reports `stage: "reader-writer"` and names `create`.**
   `capabilities().operations` is now `["inspect", "list",

@@ -12,7 +12,8 @@ treat an unknown code as a failure rather than as a success.
 
 `scripts/check-codes.py` keeps this catalogue honest. It extracts every
 `"archive.…"`, `"create.…"`, `"extract.…"`, `"input.…"`, `"manifest.…"`,
-`"metadata.…"` and `"output.…"` string literal from `crates/*/src/**` and
+`"metadata.…"`, `"output.…"` and `"repack.…"` string literal from
+`crates/*/src/**` and
 fails when a code exists in the sources but not here, or here but not in the
 sources. It runs
 as part of `bash scripts/check.sh`.
@@ -32,14 +33,18 @@ its own: `validate-structure` reports 3 when any check failed. The `extract.*`
 codes follow the same segment rule as the archive ones — `extract.unsafe_path.*`
 and `extract.ambiguous.*` to 6, `extract.unsupported.*` to 7,
 `extract.over_limit.*` to 8 — and every `output.*` code classifies to 9, the
-status the two commands that write, `extract` and `create`, alone exit with.
+status the three commands that write, `extract`, `create` and `repack`, alone
+exit with.
 The `create.*` codes follow it too: `create.over_limit.*` to 8, and
 `create.invalid.*`, `create.unsafe_name.*` and
 `create.internal.self_check_failed` to 6, the status for a package that
 contradicts itself — here, a request describing one that would, or a written
 package openKRX could not read back. Every `manifest.invalid.*` code
 classifies to 6 for the same reason: a manifest that cannot become a package
-is that same reading, one step earlier.
+is that same reading, one step earlier. The `repack.*` codes split along the
+same line: `repack.unsupported.*` to 7, because the package carries a feature
+this build cannot re-emit, and `repack.invalid.*` and
+`repack.internal.self_check_failed` to 6.
 
 ## Reading a diagnostic
 
@@ -70,14 +75,15 @@ the shape of a filesystem.
 
 | Code | Meaning | Fields | Asserted by |
 | --- | --- | --- | --- |
-| `input.unreadable` | The named file, or standard input, could not be opened or read: it does not exist, it is a directory, it is not permitted, or the read failed part-way. | — | `an_unreadable_input_is_status_five` |
+| `input.unreadable` | The named file, or standard input, could not be opened or read: it does not exist, it is a directory, it is not permitted, or the read failed part-way. For `repack`, which opens three kinds of file, `field` says which one: `/` is the `--edits` document, `/add/path` or `/replace/path` a local file an edit names, and no field at all the package given as the argument. | `field`, `attachment` | `an_unreadable_input_is_status_five`, `an_unreadable_input_says_which_of_the_three_files_it_was` |
 | `input.over_limit.archive_bytes` | The input reached the input cap, one byte past `Limits::DEFAULT.max_archive_bytes`, and was refused before any parsing began. `limit` is the archive ceiling and `observed` the cap, because reading stops there and the real length is never learned. | `limit`, `observed` | `an_input_past_the_cap_is_refused_before_parsing` |
 
 ## Output codes
 
 `openkrx-cli`, defined in `crates/openkrx-cli/src/exit.rs` and produced by
-`crates/openkrx-cli/src/extract/` and `crates/openkrx-cli/src/create.rs`.
-These are the failures of the two commands that write. Every one of them
+`crates/openkrx-cli/src/output.rs`, `crates/openkrx-cli/src/extract/`,
+`crates/openkrx-cli/src/create.rs` and `crates/openkrx-cli/src/repack.rs`.
+These are the failures of the three commands that write. Every one of them
 classifies to exit status 9, and every one of
 them means **nothing incomplete was left behind**: before the first write,
 because the run was refused during preflight; after it, because the undo pass
@@ -88,7 +94,7 @@ No code carries a path. The destination is the caller's own argument and a
 diagnostic that repeated it could not be logged safely; the entry index says
 which planned file the failure concerns, wherever the failure belongs to one.
 
-The four codes both commands reach — `output.destination_missing`,
+The four codes the writing commands share — `output.destination_missing`,
 `output.destination_not_a_directory`, `output.destination_symlink` and
 `output.exists` — carry a different sentence for each of them in human mode,
 because they are fixed by different actions: telling a caller who ran
@@ -100,7 +106,7 @@ value, because none of these conditions is a ceiling. A `create` refusal
 carries no entry index either — nothing has been written when it is decided.
 Tests are in `crates/openkrx-cli/tests/extract.rs` and
 `crates/openkrx-cli/tests/create.rs`, except the classifier rows, which are
-the `#[cfg(test)]` module in `crates/openkrx-cli/src/exit.rs`.
+in `crates/openkrx-cli/src/exit/tests.rs`.
 
 | Code | Meaning | Fields | Asserted by |
 | --- | --- | --- | --- |
@@ -468,11 +474,77 @@ the schema does not define, are never reported. Tests are in
 | --- | --- | --- | --- |
 | `manifest.invalid.syntax` | The bytes are not one JSON object: not UTF-8, not parseable, an array or a scalar rather than an object, or carrying content after the object. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.schema_version` | The manifest declares a `schema_version` this build does not implement. Version 1 is the only one it writes from. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
-| `manifest.invalid.unknown_field` | The manifest, or an object inside it, carries a key the schema does not define. Refused rather than ignored: a misspelled `attachments` would otherwise write a package with no attachment and report success. `field` names the *object*, never the key. | `field`, `attachment` | `an_unknown_key_is_refused_rather_than_ignored`, `a_defect_inside_an_attachment_names_its_position` |
+| `manifest.invalid.unknown_field` | The manifest or the edits document, or an object inside it, carries a key the schema does not define. Refused rather than ignored: a misspelled `attachments` would otherwise write a package with no attachment and report success. `field` names the *object*, never the key, which is text the caller wrote; the human sentence lists the keys the *named object's* own schema defines instead, which is the actionable half and carries nothing of the input. | `field`, `attachment` | `an_unknown_key_is_refused_rather_than_ignored`, `a_defect_inside_an_attachment_names_its_position`, `the_unknown_key_sentence_lists_the_schemas_own_keys` |
 | `manifest.invalid.missing_field` | A required field is absent or `null`. | `field`, `attachment` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.type` | A field carries a JSON value of the wrong kind — a string where a boolean belongs, a scalar where an array does. | `field`, `attachment` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.enumeration` | `source_system` or `consignment_kind` carries a token outside the fixed set rule M4 defines. The tokens are byte-exact. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.timestamp` | `timestamp` is not of the form `YYYY-MM-DDTHH:MM:SS`, or names a time outside 1980-01-01T00:00:00 to 2107-12-31T23:59:58, which the MS-DOS fields of a ZIP record cannot express. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
+
+`repack` reads its edits document through the same module and reports the same
+seven codes over it, with the same field paths for `metadata`, plus `/add`,
+`/add/path`, `/add/file_name`, `/add/description`, `/replace`,
+`/replace/number`, `/replace/path` and `/remove`. Its tests are in
+`crates/openkrx-cli/tests/repack.rs`.
+
+## Repacking codes
+
+`RepackError`, defined in `crates/openkrx-core/src/repack/error.rs`, plus one
+code the command-line crate defines. These are the failures of editing a
+package that already exists.
+
+**`repack.unsupported.*` is a statement about what openKRX can write, not
+about the package.** A package refused here is not damaged and not malformed:
+`inspect`, `list`, `validate-structure` and `extract` all still read it. The
+writer emits one layout and one grammar, so anything the input carries that it
+cannot re-emit — another root prefix, an entry the layout has no place for, an
+element the reader counts but does not retain — is refused whole rather than
+dropped from the result. The rule behind every row is one sentence: repacking
+with no edit must produce the package it was given.
+
+The **fields** column is `entry`, the central-directory index of the entry the
+refusal concerns, and `number`, the attachment's `CSATOLMANY_SZAMA` in the
+package being edited, counted from 1. Neither is content, and no edit a caller
+wrote ever reaches a diagnostic. The three layers repacking composes report
+through their own codes unchanged: `archive.*` for reading the package,
+`metadata.*` for parsing its document and `create.*` for writing the result.
+
+Tests are in `crates/openkrx-core/tests/repack_rejects.rs`, except
+`repack.internal.self_check_failed`, whose test is in
+`crates/openkrx-cli/src/exit/tests.rs`.
+
+### `repack.unsupported.*`
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `repack.unsupported.metadata_missing` | No entry has the shape of a metadata document, or more than one does, so there is no single document to edit. | — | `an_archive_with_no_metadata_document_is_refused`, `an_archive_with_two_metadata_documents_is_refused` |
+| `repack.unsupported.root_prefix` | The metadata document does not sit under `KRX/OCD/`. Rule A19 leaves the prefix open and the writer emits one of the three layouts, so repacking would move every entry of the package. | `entry` | `a_metadata_document_under_another_root_prefix_is_refused` |
+| `repack.unsupported.metadata_name` | The document's last two segments are not `Metalayer/KULDEMENY_META.xml` byte-exactly. Rule M12 leaves the casing open, so re-emitting it would rename the entry. | `entry` | `a_metadata_file_name_spelled_differently_is_refused` |
+| `repack.unsupported.marker` | The archive's first entry is not `KRX/OCD/mimetype` holding `application/OCD+ZIP` (A2, A19). | `entry` | `a_marker_that_is_missing_elsewhere_or_holds_something_else_is_refused` |
+| `repack.unsupported.extra_entry` | An entry is neither the marker, the metadata document where the layout puts it, nor an attachment at `KRX/OCD/Payload/ID-<n>/<file>` numbered in entry order (A5, A22). A signature document (A7) and a service-specific document (A11–A16) reach this row: the writer emits neither, so repacking would drop them. | `entry` | `an_entry_the_documented_layout_does_not_place_is_refused` |
+| `repack.unsupported.unknown_elements` | The document counted elements the grammar does not define (A9). The reader keeps none of them, so the writer cannot put them back. | — | `a_document_carrying_elements_outside_the_grammar_is_refused` |
+| `repack.unsupported.opaque_block` | The document carries `ERKEZTETES`, `BONTASOK`, `TERTIVEVENY` (M2) or an unqualified `KEZELESI_UTASITASOK` (M8). The reader records their presence and never reads further, so re-emitting one would write it back empty. | — | `a_block_the_reader_records_only_the_presence_of_is_refused`, `an_unqualified_handling_instruction_element_is_refused` |
+| `repack.unsupported.dispatch_count` | The document carries more than one `EXPEDIALAS` block, which leaves no single place for the derived references (M7). | — | `a_document_with_two_dispatch_blocks_is_refused` |
+| `repack.unsupported.attachment_reference` | A `MELLEKLET` reference, or `MELLEKLETEK_SZAMA`, is not what this writer derives for the attachments the document declares — a different number, location, `MERET` value or count. Re-emitting the document would rewrite it. A dispatch that declares *no* count reaches this row too: the writer derives one and always emits it, so the document would gain the element (M7). | `entry`, `number` | `a_reference_the_writer_would_derive_differently_is_refused`, `a_declared_count_that_disagrees_with_the_references_is_refused`, `a_dispatch_that_declares_no_count_at_all_is_refused` |
+| `repack.unsupported.attachment_entry` | The payload entries are not exactly the ones the references name, in the order the layout numbers them. | `entry`, `number` | `a_reference_naming_another_entry_is_refused`, `a_payload_entry_no_reference_declares_is_refused` |
+
+### `repack.invalid.*`
+
+An edit that does not name something the package holds. Nothing is written
+when one is reported.
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `repack.invalid.no_such_attachment` | A `remove` or `replace` edit names an attachment number the package does not carry. Numbers are the document's own `CSATOLMANY_SZAMA`, counted from 1. | `number` | `an_edit_naming_an_attachment_the_package_does_not_hold_is_refused` |
+| `repack.invalid.duplicate_target` | Two edits name the same attachment number, so what is to happen to it is not decided by the request. | `number` | `two_edits_naming_the_same_attachment_are_refused` |
+| `repack.invalid.inventory_mismatch` | `repack::apply` was given an inventory other than the one `repack::plan` read — a different entry count, or an entry whose CRC-32 differs — so the bytes it would preserve are not the bytes the plan describes. A caller-side defect, and never reachable from the command line. | — | `applying_a_plan_to_another_package_is_refused_rather_than_written` |
+
+### `repack.internal.*`
+
+Defined in `crates/openkrx-cli/src/exit.rs` and produced by `repack` alone.
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `repack.internal.self_check_failed` | openKRX wrote a repacked package and its own reader did not accept it. This is a defect in openKRX, never in the edits; the file is removed again and the run exits 6. | — | `every_repacking_refusal_classifies_and_explains_itself` |
 
 ## What is deliberately absent
 

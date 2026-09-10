@@ -1,13 +1,13 @@
 ---
 name: openkrx
 description: >-
-  Inspect, list, structurally check, extract and create Hungarian KRX
+  Inspect, list, structurally check, extract, create and edit Hungarian KRX
   document packages (.krx, the ZIP-based OCD container used in Hungarian
   administrative correspondence) with the openkrx CLI. Use whenever a task
   involves a .krx file, a KÉR or Hivatali kapu consignment package, a
   KULDEMENY_META.xml metadata document, getting the attachments out of one,
-  or building one from a manifest. openkrx works locally, uploads nothing,
-  and verifies nothing.
+  building one from a manifest, or changing one that already exists. openkrx
+  works locally, uploads nothing, and verifies nothing.
 license: MIT
 compatibility: Requires the openkrx CLI on PATH; run `openkrx --version`.
 metadata:
@@ -20,15 +20,19 @@ openkrx is a command-line tool for KRX document packages: the ZIP-based
 container Hungarian public bodies and Magyar Posta services move
 correspondence in. It lists the archive entries, prints what the enclosed
 `KULDEMENY_META.xml` declares about itself, runs a fixed inventory of
-structural checks, writes the package's files into a directory you name, and
-writes a new package from a manifest you give it. It opens no socket, keeps
+structural checks, writes the package's files into a directory you name,
+writes a new package from a manifest you give it, and edits an existing
+package into a new file. It opens no socket, keeps
 no cache, logs nothing, and performs no cryptography of any kind.
 
 Writing is as bounded as reading. `create` emits one documented layout,
 reads its own output back through the same structural checks, and produces
 byte-identical packages from the same inputs — and a package it wrote is
 "structurally consistent with the documented layout", never a conforming
-one, never accepted by any service on openkrx's word.
+one, never accepted by any service on openkrx's word. `repack` edits an
+existing package under exactly the same rules, preserves every attachment no
+edit names byte for byte, and refuses any package it cannot re-emit rather
+than handing back one that quietly lost part of it.
 
 It is deliberately not a validator. The public sources describing KRX
 contradict each other on nine essential points, so openkrx reports what it
@@ -165,11 +169,11 @@ invent an installer command.
 | `2` | `usage` | The arguments were rejected: unknown command, missing `FILE`, missing `--into`, unknown flag. Also `openkrx skill --json` or `openkrx skill FILE`. | Fix the command line. **No envelope is written**; nothing was read. |
 | `3` | `structure_inconsistent` | `validate-structure` only: at least one check failed. | Report which checks failed, by `check` and `code`. |
 | `4` | `structure_unresolved` | `validate-structure` only: nothing failed, at least one rule could not be decided. | Report the rules in `unresolved_rules`. Not a defect. |
-| `5` | `input` | The input could not be opened or read, or it reached the 64 MiB cap. For `create`, the manifest or one of its attachment files. | Check the path, permissions, and that it is a file. Read `attachment_index` to see which attachment. |
-| `6` | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. For `create`, the manifest does not describe a package that can be written (`manifest.invalid.*`, `create.invalid.*`, `create.unsafe_name.*`). | Report it; a truncated transfer is worth re-fetching. For `create`, read `error.field` and fix that field. |
-| `7` | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, multi-disk, another compression method, a refused XML feature. | Say the package is not damaged and another reader may open it. |
+| `5` | `input` | The input could not be opened or read, or it reached the 64 MiB cap. For `create` and `repack`, the manifest or edits document, or one of the local files it names. | Check the path, permissions, and that it is a file. Read `attachment_index` to see which one. |
+| `6` | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. For `create` and `repack`, the manifest or the edits do not describe a package that can be written (`manifest.invalid.*`, `create.invalid.*`, `create.unsafe_name.*`, `repack.invalid.*`). | Report it; a truncated transfer is worth re-fetching. For `create` and `repack`, read `error.field` or `attachment_number` and fix that field or that edit. |
+| `7` | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, multi-disk, another compression method, a refused XML feature. For `repack` (`repack.unsupported.*`), the package is readable but carries something openkrx cannot write back. | Say the package is not damaged and another reader may open it. For `repack`, say openkrx will not rewrite that package, and that reading it works. |
 | `8` | `limit` | A documented parsing, extraction or writing limit was exceeded. | Report the `limit` and `observed` numbers. Do not retry. |
-| `9` | `output` | `extract` and `create` only: the destination could not be used, or a write failed. | Read `cleanup`; nothing incomplete was left behind. |
+| `9` | `output` | `extract`, `create` and `repack` only: the destination could not be used, or a write failed. | Read `cleanup`; nothing incomplete was left behind. |
 
 There is no status `1`. Statuses `3` and `4` are successful runs whose
 *finding* is negative: the report is complete and `ok` is `true`.
@@ -216,14 +220,18 @@ A failed one:
 
 `error` carries `code` (the stable dotted string), `category` (the word for
 the exit status), and, when the failure is scoped or numeric,
-`entry_index`, `limit` and `observed`. A `create` failure adds `field` — the
-JSON Pointer path of the manifest field it concerns, such as
+`entry_index`, `limit` and `observed`. A `create` or `repack` failure adds
+`field` — the JSON Pointer path of the manifest or edits field it concerns,
+such as
 `/metadata/source_system` — and `attachment_index`, the position in the
-manifest's `attachments` array (array indices are left out of `field`). It
+manifest's `attachments` array or in an edits document's `add` or `replace`
+array (array indices are left out of `field`). A `repack` failure may add
+`attachment_number` instead: that is an attachment's number *inside the
+package being edited*, counted from 1, and not a position in an array. It
 never carries the input path, an entry name, a metadata value or anything a
 manifest author wrote, including an unknown key's own spelling —
-deliberately, so that a diagnostic can be logged safely. `extract` and
-`create` failures carry a `cleanup` object as well. The
+deliberately, so that a diagnostic can be logged safely. `extract`, `create`
+and `repack` failures carry a `cleanup` object as well. The
 complete code catalogue, with what each code means and which status it maps
 to, is `docs/codes.md` in the openKRX repository; quote the code itself to
 the user and look the meaning up there rather than guessing from the name.
@@ -235,7 +243,7 @@ stop rather than guess.
 ## Workflow
 
 Run the steps in order. Each is cheap, each reads the file afresh, and none
-of them writes anything except step 5.
+of them writes anything except steps 5, 6 and 7.
 
 ### 1. Identify the tool
 
@@ -244,7 +252,8 @@ openkrx capabilities --json
 ```
 
 Confirms the binary and lists the implemented package operations
-(`inspect`, `list`, `validate-structure`, `extract`, `create`); `data.stage`
+(`inspect`, `list`, `validate-structure`, `extract`, `create`, `repack`);
+`data.stage`
 reads `reader-writer`. Do this once per session, not once per file.
 `verified` is `false` here too.
 
@@ -472,6 +481,92 @@ unverified against every real producer, because `A19`–`A22` and `M11`–`M15`
 remain unresolved. Never tell a user their package is valid, conforming or
 ready to submit.
 
+### 7. Edit a package that already exists
+
+```sh
+openkrx repack PACKAGE.krx --edits edits.json --out ./edited.krx --json
+```
+
+Use this when the task is to *change* a package rather than to build one:
+correct a header field, add an annex, replace an attachment's bytes, drop
+one. The edits are one JSON object, and openkrx has no clock here either, so
+the same package and the same edits always produce byte-identical output:
+
+```json
+{
+  "schema_version": 1,
+  "timestamp": "2026-01-02T03:04:06",
+  "metadata": {"consignment_id": "CASE-2026-0001", "note": "annex added"},
+  "add": [{"path": "annex.pdf", "description": "the annex"}],
+  "replace": [{"number": 1, "path": "invoice-v2.pdf"}],
+  "remove": [2]
+}
+```
+
+- `schema_version` is `1` and `timestamp` is required, in the same
+  `YYYY-MM-DDTHH:MM:SS` form `create` takes; it is the time written into the
+  *result*, not the one the package had.
+- `metadata` takes any subset of the create manifest's header fields, spelled
+  the same way. A field you leave out keeps the package's own value. For the
+  four optional elements — `barcode`, `reference_id`, `error_code`, `note` —
+  writing `null` **removes** the element; leaving the key out keeps it.
+  `dispatches` is not accepted: the references and the count are derived.
+- `add[]` appends attachments (`path`, optional `file_name`, optional
+  `description`), `replace[]` swaps one attachment's bytes (`number` and
+  `path`), and `remove[]` drops attachments by `number`. A path is resolved
+  against the **edits file's own directory**.
+- `number` is the attachment's number *in the package you are editing* —
+  `CSATOLMANY_SZAMA`, counted from 1, which is what `inspect` prints as
+  `attachments[].number`. Naming one the package does not carry is
+  `repack.invalid.no_such_attachment` (exit `6`) and naming the same one
+  twice is `repack.invalid.duplicate_target`; neither is guessed at.
+- A failed read (exit `5`) names the file that failed in `error.field`: `/`
+  is the edits document, `/add/path` or `/replace/path` a file an edit names
+  (with `attachment_index`), and no `field` at all means the package. A key
+  the schema does not define is refused with `manifest.invalid.unknown_field`
+  (exit `6`); the key you wrote is never echoed back, and the human sentence
+  lists the keys the object named by `error.field` *does* define — so a typo
+  inside `metadata` is answered with `metadata`'s own fields.
+- `--out` must not exist in any form, so **the package you are editing is
+  never overwritten and nothing is edited in place**. Repacking onto the
+  input path is refused with `output.exists` (exit `9`). `--stdout` writes
+  the package to stdout with the report on stderr, as for `create`.
+
+On success `data` carries `bytes_written`, `entries`, `unresolved_rules[]`,
+`layout`, and the four attachment lists this command exists for:
+`preserved` (carried through byte for byte), `changed` (bytes replaced) and
+`removed`, all numbered as the package you *edited* numbered them, and
+`added`, numbered as the package that was *written* numbers them. Removing an
+attachment renumbers the ones after it, which is why the two sides are
+reported separately — do not read `added: [3]` as a position in the old
+package. `header_fields` names the header fields the edits set, and no report
+or diagnostic ever repeats a value or a file name.
+
+**Every attachment no edit names is preserved byte for byte**, with its
+description and quantity. Repacking a package with an empty edits document
+gives that package back, byte for byte, and repacking the result again
+changes nothing.
+
+**`repack` edits only a package openkrx could have written itself.** If the
+package uses another root prefix, spells the metadata file differently,
+carries an entry the documented layout has no place for — a signature file, a
+service-specific document — or carries metadata openkrx reads but cannot
+write back, the run is refused with a `repack.unsupported.*` code and exit
+`7`, and nothing is written. **Tell the user that such a package is not
+damaged**: `inspect`, `list`, `validate-structure` and `extract` all read it,
+and the refusal is openkrx declining to rewrite someone else's layout under
+rules the sources leave open, not a fault in their file. Suggest `extract`
+when they need the contents.
+
+**`repack` resolves nothing and settles nothing.** It cites the same
+unresolved rules a created package cites — `validate-structure` over the
+result exits `4` for `A19` and, with any attachment, `M13` — and an edited
+package is no more conforming, no more signed and no more acceptable to a
+service than the package it came from. It also carries **no evidence of
+having been edited**: openkrx writes no signature, so any signature over the
+original does not cover the result. Say so when a user asks whether they can
+send the edited package on.
+
 ### What to do on each failure category
 
 | Exit | Read as | Action |
@@ -481,9 +576,9 @@ ready to submit.
 | `4` | A rule could not be decided. | Name `unresolved_rules[]` and explain that the sources leave them open. Not a defect in the package. |
 | `5` | The bytes could not be read, or exceeded 64 MiB. | Check path, permissions and size. Retrying the same path unchanged is pointless. |
 | `6` | The package is malformed, truncated or ambiguous. | Report the code. `archive.malformed.eocd_missing` covers both a truncated archive and bytes that were never a ZIP at all, and the stderr sentence suggests re-fetching for both: check the file size and type before telling a user their download was corrupted. Nothing else here is retryable. |
-| `7` | An unimplemented feature. | Say the package is not damaged and that another reader may open it. Never present this as the package being broken. |
+| `7` | An unimplemented feature, or — for `repack` — a package openkrx can read but not write back. | Say the package is not damaged and that another reader may open it. For `repack`, say openkrx will not rewrite that package and that reading and extracting it still work. Never present this as the package being broken. |
 | `8` | A documented limit was reached. | Report `limit` and `observed`. There is no flag to raise it; do not retry. |
-| `9` | The destination could not be used, or a write failed. | Read `cleanup`; use a fresh empty directory, a `--out` file that does not exist, or clear a leftover marker. |
+| `9` | The destination could not be used, or a write failed. | Read `cleanup`; use a fresh empty directory, a `--out` file that does not exist — for `repack` that means a file beside the one you are editing — or clear a leftover marker. |
 
 Never loop over variations of a package to see what changes. openkrx is a
 reader, not an oracle, and a package is someone's correspondence.
@@ -501,7 +596,9 @@ Say what was **observed**, in this order:
 3. What was extracted: file and directory counts, byte total, where it went,
    and, on a failure, what `cleanup` reported. What was created: the byte
    count, the entry count, and that `validate-structure` over it exits `4`
-   citing `unresolved_rules[]` — by design, not as a defect.
+   citing `unresolved_rules[]` — by design, not as a defect. What was
+   repacked: which attachments were preserved, changed, added and removed, by
+   number, and which header fields were set — never their values.
 4. Anything a human should look at: a `missing` attachment reference, a
    `prefix_variant` resolution, a `count_mismatch`, a name that had to be
    reported as hex, or a leftover marker.
@@ -534,6 +631,8 @@ openkrx validate-structure <FILE|-> [--json]
 openkrx extract            <FILE|-> --into <DIR> [--json]
 openkrx create             --manifest <FILE> --out <FILE> [--json]
 openkrx create             --manifest <FILE> --stdout [--json]
+openkrx repack             <FILE|-> --edits <FILE> --out <FILE> [--json]
+openkrx repack             <FILE|-> --edits <FILE> --stdout [--json]
 openkrx skill
 ```
 
@@ -545,6 +644,7 @@ openkrx skill
 | `validate-structure` | one package | stdout | `0`, `2`, `3`, `4`, `5`, `6`, `7`, `8` |
 | `extract` | one package | stdout and `--into DIR` | `0`, `2`, `5`, `6`, `7`, `8`, `9` |
 | `create` | a manifest and its attachment files | stdout and `--out FILE`, or the package on stdout | `0`, `2`, `5`, `6`, `8`, `9` |
+| `repack` | one package, an edits file and the files it names | stdout and `--out FILE`, or the package on stdout | `0`, `2`, `5`, `6`, `7`, `8`, `9` |
 | `skill` | nothing | stdout, no envelope | `0`, `2` |
 
 Every command that reads a package takes exactly one input: a path, opened

@@ -17,7 +17,14 @@ fn capabilities_names_exactly_the_implemented_operations() {
             "data": {
                 "project": "openKRX",
                 "stage": "reader-writer",
-                "operations": ["inspect", "list", "validate-structure", "extract", "create"],
+                "operations": [
+                    "inspect",
+                    "list",
+                    "validate-structure",
+                    "extract",
+                    "create",
+                    "repack",
+                ],
             },
             "verified": false,
         })
@@ -79,8 +86,8 @@ fn the_help_says_which_statuses_belong_to_which_command() {
     assert!(top.contains("validate-structure only: nothing failed"));
     assert!(top.contains("inspect and list exit 0 whenever they produce"));
     assert!(
-        top.contains("extract and create only: the destination could not be used"),
-        "status 9 belongs to the two commands that write"
+        top.contains("extract, create and repack only: the destination could not be used"),
+        "status 9 belongs to the three commands that write"
     );
     assert!(
         top.contains("`ok` says only that the command produced a report"),

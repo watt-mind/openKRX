@@ -45,7 +45,7 @@ struct Failed<'a> {
     ok: bool,
     command: &'a str,
     error: Diagnostic<'a>,
-    /// What the undo pass removed, present for the two commands that write.
+    /// What the undo pass removed, present for the three commands that write.
     /// `removed` is `0` when nothing had been written, which is every refusal
     /// decided before the first write; for `create` it is `1` when the
     /// half-written package was removed again. Counts, never a path.
@@ -56,11 +56,14 @@ struct Failed<'a> {
 
 /// The diagnostic itself: a code, its category, where it happened, and numbers.
 ///
-/// `field` and `attachment_index` belong to `create` and say where in the
-/// manifest the refusal was decided. `field` is a JSON Pointer into the
-/// manifest, such as `/metadata/source_system`; neither carries a value a
-/// manifest author wrote, so the object stays as safe to log as every other
-/// diagnostic.
+/// `field` and `attachment_index` belong to `create` and `repack` and say
+/// where in the manifest, or in the edits document, the refusal was decided.
+/// `field` is a JSON Pointer into that document, such as
+/// `/metadata/source_system`. `attachment_number` belongs to `repack` alone
+/// and is an attachment's number inside the package being edited, counted
+/// from 1, which is a different thing from a position in an array. None of
+/// them carries a value an author wrote, so the object stays as safe to log
+/// as every other diagnostic.
 #[derive(Serialize)]
 struct Diagnostic<'a> {
     code: &'a str,
@@ -71,6 +74,8 @@ struct Diagnostic<'a> {
     field: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     attachment_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachment_number: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -121,6 +126,7 @@ fn failed(command: &str, failure: &Failure, cleanup: Option<Cleanup>) -> String 
             entry_index: failure.entry_index,
             field: failure.field,
             attachment_index: failure.attachment_index,
+            attachment_number: failure.attachment_number,
             limit: failure.limit,
             observed: failure.observed,
         },

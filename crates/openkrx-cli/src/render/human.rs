@@ -20,6 +20,7 @@ use crate::commands::create::CreateData;
 use crate::commands::extract::ExtractData;
 use crate::commands::inspect::{AttachmentView, InspectData, MetadataView};
 use crate::commands::list::ListData;
+use crate::commands::repack::RepackData;
 use crate::commands::validate::ValidateData;
 use crate::commands::{CheckView, OutcomeView};
 use crate::extract::cleanup::Cleanup;
@@ -223,6 +224,94 @@ or removed."
         BOUNDARY.to_owned(),
     ]
     .join("\n")
+}
+
+/// The repacking report: what changed, what did not, and what was written.
+///
+/// The lists are attachment numbers, never names: which files a package
+/// carries is what `inspect` is for, and a report that repeated them could not
+/// be pasted into a bug report unedited. The two sides are labelled separately
+/// because removing an attachment renumbers the ones after it — a reader who
+/// took `added: 3` for a position in the old package would misread the run.
+#[must_use]
+pub fn repack(data: &RepackData, to_stdout: bool) -> String {
+    let rules = if data.unresolved_rules.is_empty() {
+        "Reading it back left no rule undecided.".to_owned()
+    } else {
+        format!(
+            "Reading it back left {} undecided, so validate-structure over this package exits 4. \
+That is the expected outcome for a package openkrx wrote, not a defect in it.",
+            data.unresolved_rules.join(", ")
+        )
+    };
+    let mut lines = vec![
+        format!(
+            "Wrote {} {} in {} {}.",
+            data.bytes_written,
+            plural_u64(data.bytes_written, "byte", "bytes"),
+            data.entries,
+            plural(data.entries, "entry", "entries"),
+        ),
+        format!(
+            "In the package that was edited: {}, {}, {}.",
+            numbered(&data.preserved, "preserved byte for byte"),
+            numbered(&data.changed, "replaced"),
+            numbered(&data.removed, "removed"),
+        ),
+        format!(
+            "In the package that was written: {}.",
+            numbered(&data.added, "added"),
+        ),
+        if data.header_fields.is_empty() {
+            "No header field was changed.".to_owned()
+        } else {
+            format!(
+                "Header {} set: {}. No value is repeated here.",
+                plural_words(data.header_fields.len(), "field", "fields"),
+                data.header_fields.join(", ")
+            )
+        },
+        format!(
+            "Layout: {}, which docs/profile.md documents and no real producer has been checked \
+against. Nothing was signed.",
+            data.layout
+        ),
+        rules,
+    ];
+    lines.push(
+        if to_stdout {
+            "The package bytes went to standard output; no file was created and nothing on disk \
+was changed."
+        } else {
+            "Nothing was overwritten: the new file was created new, and the package that was \
+edited was not changed or removed."
+        }
+        .to_owned(),
+    );
+    lines.push(BOUNDARY.to_owned());
+    lines.join("\n")
+}
+
+/// `n attachments <label>` followed by the numbers, when there are any.
+fn numbered(numbers: &[u32], label: &str) -> String {
+    if numbers.is_empty() {
+        return format!("none {label}");
+    }
+    let list = numbers
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{} {} {label} ({list})",
+        numbers.len(),
+        plural_words(numbers.len(), "attachment", "attachments"),
+    )
+}
+
+/// `one` when the count is exactly one, `many` otherwise, for a `usize`.
+fn plural_words(count: usize, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
 }
 
 /// The extra line a failed extraction writes on standard error.

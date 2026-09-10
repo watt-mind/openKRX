@@ -24,7 +24,8 @@ depth is to call it. The one in `crates/openkrx-core/src/create/mod.rs`
 holds the entry-count ceiling a non-ZIP64 end record imposes: writing 65 536
 entries through the public writer would cost seconds of compression to prove
 a `u16`, so the ceiling check is called directly. The one in
-`crates/openkrx-cli/src/exit.rs` holds one test per exit-status category and
+`crates/openkrx-cli/src/exit/tests.rs` holds one test per exit-status category
+and
 reads every code out of `docs/codes.md` to assert that each classifies, with
 no head list of its own: a subprocess can
 reach only the codes an archive can be built to produce, and
@@ -42,16 +43,19 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/profile_structure.rs` | The check inventory over synthetic KRX-shaped archives: the canonical layout, all three observed root prefixes, both metadata file-name spellings, a lower-case `Metalayer`, missing and ambiguous metadata, a missing, misplaced, mismatched and prefixed marker, a deflated marker producing no finding, missing, prefix-variant and duplicate references, a shared file name in different payload directories, count agreement and its absence, an omitted schema-required element, a document that does not parse, caller-tightened limits, and that every check is reported exactly once in the documented order. |
 | `crates/openkrx-core/tests/create_package.rs` | What the deterministic writer produces: the documented layout and its fixed entry order for zero, one and three attachments, the stored marker beside deflated entries, the UTF-8 flag, host system and file mode on every entry, the document's declaration, prefix, element order and unqualified `KEZELESI_UTASITASOK`, the derived references and count, byte-identical output across runs and its sensitivity to one attachment byte, the caller's timestamp in both headers of every entry, attachment bytes read back unchanged, a document that survives parse and re-write unchanged, and the report a written package produces — no failing check, and exactly A19 and M13 left undecided. |
 | `crates/openkrx-core/tests/create_rejects.rs` | Everything the writer refuses, each by its stable code: every unsafe file-name class including the ones only the extraction planner would catch, a reference or a declared count that disagrees with the attachments, attachments with no dispatch block and a document with two, elements the grammar does not define, text XML 1.0 cannot carry and text the reader would trim, every timestamp field out of range, an attachment that compresses far enough for the reader to call it a bomb, and every output ceiling at its boundary with the package still readable under the tightened limits — including the invariant those ceilings exist for, that whatever `package` returns passes the inventory, the structural checks and `entry_bytes` on every attachment. |
+| `crates/openkrx-core/tests/repack_plan.rs` | What repacking preserves and what it writes: an empty edit reproducing the package `create` wrote byte for byte, repacking a repacked package changing nothing, every preserved attachment's bytes equal to the input's after a removal renumbered it, a repacked package failing no structural check, header fields set and optional elements set and cleared, an added attachment appended with its reference derived, a replacement changing the bytes and the declared size while keeping the name and description, removal down to a document declaring none, the three edit kinds together renumbering the result, a plan applied twice writing the same bytes, and a repacked package equal to creating the same package from scratch. |
+| `crates/openkrx-core/tests/repack_rejects.rs` | Everything repacking refuses, each by its stable code, over packages that differ from a canonical control in exactly one respect: another root prefix, another metadata file-name spelling, no metadata document and two of them, a marker that is missing, displaced or holding something else, an entry the layout has no place for, elements outside the grammar, each block the reader records only the presence of, an unqualified handling-instruction element, two dispatch blocks, a reference or a declared count the writer would derive differently, a reference naming another entry, a payload entry no reference declares, a document that does not parse reporting the parser's own code, an edit naming an attachment number the package does not carry or naming one twice, a plan applied to another package, and a result above the entry ceiling refused while planning. |
 | `crates/openkrx-core/tests/property_round_trip.rs` | The five [property-based tests](#property-based-tests) over generated requests: a written package read back with byte-identical attachments, the documented normalised document and no failing check; byte-identical output across two writes; a single-byte mutation refused or read back inside every ceiling; a request over one documented ceiling refused with that ceiling's code; and every written name accepted by the extraction planner. Its strategies live in `crates/openkrx-core/tests/support/strategies.rs`. |
 | `crates/openkrx-core/tests/scaling_guard.rs` | The [scaling guard](#the-scaling-guard): `archive::inventory` at 4 MiB and 64 MiB of stored entries, `extract::plan` at 32 and 256 entries with long Unicode names, and `profile::check` at 32 and 254 referenced attachments, each asserted to cost no more than 32 times as much at the ceiling as at the small size. It measures wall time, so it holds a shape rather than a number. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
-| `crates/openkrx-core/examples/golden_fixtures.rs` | The generator behind the ten committed files under `tests/fixtures/golden/`, not a test: five packages — a canonical two-attachment package, the same package without the `KRX/OCD/` prefix, one declaring an attachment the archive does not hold, a truncated image and an over-limit one — and the inputs of the `create` cases: two small attachment files and three manifests, one that writes a package, one carrying a key the schema does not define, and one naming an attachment that is not there. Deterministic by construction; see [the golden output contract](#golden-output-contract). |
+| `crates/openkrx-core/examples/golden_fixtures.rs` | The generator behind the twelve committed files under `tests/fixtures/golden/`, not a test: five packages — a canonical two-attachment package, the same package without the `KRX/OCD/` prefix, one declaring an attachment the archive does not hold, a truncated image and an over-limit one — and the inputs of the `create` cases: two small attachment files and three manifests, one that writes a package, one carrying a key the schema does not define, and one naming an attachment that is not there — and the two edits documents the `repack` cases apply, one that changes a header field and adds an attachment and one naming an attachment number the package does not carry. Deterministic by construction; see [the golden output contract](#golden-output-contract). |
 | `tests/golden/` | The byte-exact output contract: one directory per command run, holding its `cmd`, its exact `stdout` and `stderr` and its exit status, compared by `scripts/golden.py`. |
 | `crates/openkrx-cli/tests/contract.rs` | The executable's argument surface by subprocess: the capability envelope's exact shape and its operation list, that the human output states the boundary rather than a verdict, that help names every command and the exit statuses, and that six kinds of argument error each exit 2. |
 | `crates/openkrx-cli/tests/reader.rs` | Each reader command on a package that can be read, in both modes: the consistent package, the entry listing and its stable ordering, the declared document beside the observed archive, every check rendered as its own outcome, the two other layouts leaving A19 undecided, `-` on all three commands producing the same report as a file, a name that is not UTF-8 reported as bytes, an invisible character escaped, a long name cut with its remainder counted, and that a successful run writes nothing on stderr. |
 | `crates/openkrx-cli/tests/extract.rs` | `extract`, the one command that writes, by subprocess against a destination each test owns and then reads back: a successful extraction with byte-identical payloads and nothing else created, the JSON report and its item order, a target file that already exists, a destination that is missing, a file, or a symbolic link, a marker left by an interrupted run, an entry named like that marker refused under the no-clobber code, a non-empty destination whose contents survive, a planner refusal keeping its own category and naming no path, a malformed and an unreadable package never reaching the destination, the usage errors, and — behind `cfg(unix)` — an ancestor symlink inside the destination, a pre-existing symlink at the leaf, and an injected write failure proving the cleanup pass removes exactly this run's files and leaves everything else. |
 | `crates/openkrx-cli/tests/create.rs` | `create`, the other command that writes, by subprocess over manifests and attachment files each test writes itself: the two fixed entries of a package with no attachment, three attachments placed and numbered with `file_name` honoured, the round trip through `list`, `inspect`, `validate-structure` (exit 4, never 3) and `extract`, byte-identical output across two runs, `--stdout` producing the same bytes with the report on stderr, one case per manifest defect asserting its code and its schema path, an unknown key refused rather than ignored, a missing manifest and a missing attachment, the file-name classes the writer refuses, a declared count that agrees and one that does not, an output file that already exists, a missing and a non-directory output parent, and — behind `cfg(unix)` — a symbolic-link parent, a dangling link at the output path, and a read-only destination directory reporting `output.io`. One test holds the `--stdout` failure rule: stdout carries the package or nothing, so a refused run leaves it empty and puts one JSON object on stderr. Every refusal asserts that no package was written, and two canary tests assert that no manifest value reaches either stream. |
+| `crates/openkrx-cli/tests/repack.rs` | `repack`, the third command that writes, by subprocess over a package the executable itself created: an attachment no edit names extracted from both packages and compared byte for byte, an empty edit rewriting the source package byte for byte and idempotently, the package being edited left untouched, the JSON report's four attachment lists and header fields, the human report distinguishing the two numberings, a header edit visible through `inspect`, the package read from standard input, `--stdout` producing the same bytes with the report on stderr, a foreign layout refused with exit 7 and a diagnostic that says the package is not damaged, an edit naming an attachment the package does not hold and one naming the same attachment twice, one case per edits-document defect asserting its code and schema path, a missing timestamp and an unknown schema version, a file an edit names that cannot be read, an output that already exists, repacking onto the package being edited, an unreadable and a malformed package, the usage errors, and two canary tests asserting that no value an edits document carried reaches either stream. |
 | `crates/openkrx-cli/tests/failures.rs` | Every exit-status category end to end: a failing check (3) for `validate-structure` only, malformed and truncated images (6), a ZIP64 extra field (7), an over-limit entry count with its numbers (8), a missing file, a directory and both an over-cap file and an over-cap standard input (5), one stderr line in human mode, and exactly one object on stdout in JSON mode even when the run failed. |
 | `crates/openkrx-cli/tests/render_text.rs` | The human renderer's own lines, asserted whole rather than by substring: each attachment block with the entry it resolves to and its observed decoded size, a reference that resolves to nothing, one matched only after a root-prefix adjustment, the metadata entry with its index, the format-marker outcome, the failed and undecided check counts in the summary sentence, a check that does not apply reported as such rather than as undecided, the 200-character cut boundary at the limit and one past it, and the declared attachment count taken from the document rather than from the number of references. |
 | `crates/openkrx-cli/tests/diagnostics.rs` | The rest of the diagnostic contract: the one content-free sentence each `output.*` code is given instead of its category's, for a destination that is not a directory, an occupied ancestor, an ancestor symbolic link and a failed write; the cleanup line a refusal reached before any write produces; and that a limit failure keeps its limit and observed numbers whichever command reported it. |
@@ -88,7 +92,7 @@ What the suite does **not** provide evidence about: that a package openKRX
 writes is accepted by any real producer or service — the writer's round-trip
 tests prove only that openKRX agrees with its own reading of the documents,
 and A19–A22 and M11–M15 stay unresolved over a package it wrote itself;
-writing a package to a file, which no command does; extraction under a
+ extraction under a
 concurrent writer at the destination,
 which is outside the threat model and stated as a residual risk in
 [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer);
@@ -181,7 +185,7 @@ golden contract closes that gap: `tests/golden/<case>/` holds one command's
 exact `stdout`, exact `stderr` and `status`, and `scripts/golden.py` compares
 them byte for byte.
 
-What it pins, in 44 cases: `capabilities` in both modes; `inspect`, `list`
+What it pins, in 52 cases: `capabilities` in both modes; `inspect`, `list`
 and `validate-structure` in both modes over all five committed fixtures —
 which between them cover a consistent package, an undecided rule (A19), a
 failed check, a malformed image and an exceeded limit, so exit statuses 0, 3,
@@ -190,7 +194,14 @@ plus a second run into the same directory, which is refused under the
 no-clobber rule with status 9; and `create` in both modes over the committed
 manifests — a package written into a fresh directory, a second run refused
 under the same no-clobber rule (9), a manifest carrying a key the schema does
-not define (6) and one naming an attachment that is not there (5).
+not define (6) and one naming an attachment that is not there (5); and
+`repack` in both modes over a package the case's own `setup` step creates
+first — a successful edit that preserves two attachments, adds one and sets
+two header fields, an edits document naming an attachment number the package
+does not carry (6), an `--out` that already exists because it *is* the package
+being edited (9), and the committed no-prefix fixture refused as
+`repack.unsupported.root_prefix` (7), which is the one golden that pins what a
+caller sees when openKRX will not rewrite someone else's layout.
 
 A case directory holds `cmd`, one line of arguments, and optionally `setup`,
 one line run first whose output is discarded — that is how the no-clobber
@@ -200,21 +211,23 @@ substituted: `{fixture}` becomes the repository-relative
 owns. **Nothing is normalised.** The JSON envelope is serialised from Rust
 structs in declaration order, so its key order is fixed; both renderers are
 pure functions of the package; `extract` reports destination-relative
-paths and never the destination itself; and `create` reports counts, cited
-rules and the layout name, and never a path or a manifest value. A `create`
-golden is byte-stable for the same reason the writer is: the manifest carries
-the timestamp, and openKRX reads no clock.
+paths and never the destination itself; and `create` and `repack` report
+counts, attachment numbers, cited rules and the layout name, and never a
+path, a file name or a manifest or edits value. A `create` or `repack`
+golden is byte-stable for the same reason the writer is: the manifest or the
+edits document carries the timestamp, and openKRX reads no clock.
 
 The only absolute path any case is given is its `{outdir}`, and the runner
 *fails* when that name appears on either stream rather than masking it,
 because an output that carried it would be a privacy bug in the executable,
 not a gap in the script.
 
-`create --stdout` has no golden case, because a golden compares the two text
-streams and that mode writes a binary package to one of them. The subprocess
-tests cover it instead: one asserts that `--stdout` and `--out` produce
-byte-identical packages with the report on stderr, and one that a failed
-`--stdout` run leaves stdout empty and puts a single JSON object on stderr.
+`create --stdout` and `repack --stdout` have no golden case, because a golden
+compares the two text streams and that mode writes a binary package to one of
+them. The subprocess tests cover it instead: for each command, one test
+asserts that `--stdout` and `--out` produce byte-identical packages with the
+report on stderr, and `create`'s asserts as well that a failed `--stdout` run
+leaves stdout empty and puts a single JSON object on stderr.
 
 Run it locally against a release build:
 

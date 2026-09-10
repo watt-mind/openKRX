@@ -1,1 +1,1 @@
-{"schema_version":1,"ok":true,"command":"capabilities","data":{"project":"openKRX","stage":"reader-writer","operations":["inspect","list","validate-structure","extract","create"]},"verified":false}
+{"schema_version":1,"ok":true,"command":"capabilities","data":{"project":"openKRX","stage":"reader-writer","operations":["inspect","list","validate-structure","extract","create","repack"]},"verified":false}

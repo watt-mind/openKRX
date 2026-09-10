@@ -5,14 +5,16 @@
 //! timestamp every ZIP record gets. It is the whole input to `create` apart
 //! from those files, and it is deliberately not a free-form document.
 //!
-//! **Validation is strict in both directions.** A required field that is
-//! absent is refused with `manifest.invalid.missing_field`, and a key the
-//! schema does not define is refused with `manifest.invalid.unknown_field`
-//! rather than ignored: a manifest whose `atachments` key was silently dropped
-//! would produce a package with no attachment and a success report, which is
-//! the worst outcome available. Every refusal names the *field*, from the
-//! fixed set of schema paths in this module — never the value, and never the
-//! unknown key itself, so a diagnostic stays as safe to log as any other.
+//! **Validation is strict in both directions**, and [`crate::json`] is what
+//! enforces it: a required field that is absent is refused with
+//! `manifest.invalid.missing_field`, and a key the schema does not define is
+//! refused with `manifest.invalid.unknown_field` rather than ignored. Every
+//! refusal names the *field*, from the fixed set of schema paths in this
+//! module — never the value, and never the unknown key itself.
+//!
+//! The field paths and the `metadata` key list are `pub(crate)` because
+//! `repack`'s edits document names the same fields with the same spelling, and
+//! two lists would be two spellings.
 //!
 //! Nothing here reads a file, resolves a path or consults a clock. The
 //! attachment paths are carried as written and resolved by `crate::create`
@@ -28,21 +30,17 @@ use openkrx_core::draft::{self, HeaderDraft};
 use openkrx_core::metadata::{ConsignmentKind, Metadata, SourceSystem};
 use serde_json::{Map, Value};
 
-use crate::exit::{
-    Failure, MANIFEST_ENUMERATION, MANIFEST_MISSING_FIELD, MANIFEST_SCHEMA_VERSION,
-    MANIFEST_SYNTAX, MANIFEST_TIMESTAMP, MANIFEST_TYPE, MANIFEST_UNKNOWN_FIELD,
-};
-
-/// The only manifest schema this build writes from.
-pub const SCHEMA_VERSION: u64 = 1;
-
-/// The characters of `YYYY-MM-DDTHH:MM:SS`.
-const TIMESTAMP_LENGTH: usize = 19;
+use crate::exit::{Failure, MANIFEST_TYPE};
+use crate::json;
 
 /// The keys of the manifest object.
-const MANIFEST_KEYS: [&str; 4] = ["schema_version", "metadata", "attachments", "timestamp"];
+///
+/// `pub(crate)` because the sentence `manifest.invalid.unknown_field`
+/// explains itself with lists them, and a test holds the two together.
+pub(crate) const MANIFEST_KEYS: [&str; 4] =
+    ["schema_version", "metadata", "attachments", "timestamp"];
 /// The keys of `metadata`.
-const METADATA_KEYS: [&str; 11] = [
+pub(crate) const METADATA_KEYS: [&str; 11] = [
     "version",
     "source_system",
     "consignment_id",
@@ -56,9 +54,9 @@ const METADATA_KEYS: [&str; 11] = [
     "dispatches",
 ];
 /// The keys of one `metadata.dispatches` element.
-const DISPATCH_KEYS: [&str; 1] = ["declared_attachment_count"];
+pub(crate) const DISPATCH_KEYS: [&str; 1] = ["declared_attachment_count"];
 /// The keys of one `attachments` element.
-const ATTACHMENT_KEYS: [&str; 3] = ["path", "file_name", "description"];
+pub(crate) const ATTACHMENT_KEYS: [&str; 3] = ["path", "file_name", "description"];
 
 /// The schema path of every field a diagnostic may name.
 ///
@@ -67,7 +65,7 @@ const ATTACHMENT_KEYS: [&str; 3] = ["path", "file_name", "description"];
 /// and the pointer names the shape. The separator is `/` rather than `.` for
 /// a second reason too — a dotted lower-case path is the shape of a stable
 /// code, and a field name must never be mistaken for one.
-mod field {
+pub(crate) mod field {
     /// The manifest object itself.
     pub const ROOT: &str = "/";
     /// `schema_version`.
@@ -148,31 +146,26 @@ pub struct Manifest {
 /// carries the schema path of the field it concerns, and no value from the
 /// manifest.
 pub fn parse(bytes: &[u8]) -> Result<Manifest, Failure> {
-    let value: Value = serde_json::from_slice(bytes)
-        .map_err(|_| Failure::manifest(MANIFEST_SYNTAX, field::ROOT))?;
-    let root = value
-        .as_object()
-        .ok_or_else(|| Failure::manifest(MANIFEST_SYNTAX, field::ROOT))?;
-    known_keys(root, &MANIFEST_KEYS, field::ROOT, None)?;
-    schema_version(root)?;
+    let root = json::document(bytes, field::ROOT)?;
+    json::known_keys(&root, &MANIFEST_KEYS, field::ROOT, None)?;
+    json::schema_version(&root, field::SCHEMA_VERSION)?;
 
     let attachments = match root.get("attachments") {
         None | Some(Value::Null) => Vec::new(),
         Some(value) => attachments(value)?,
     };
-    let metadata_object = object(
-        required(root, "metadata", field::METADATA, None)?,
+    let metadata_object = json::object(
+        json::required(&root, "metadata", field::METADATA, None)?,
         field::METADATA,
         None,
     )?;
-    known_keys(metadata_object, &METADATA_KEYS, field::METADATA, None)?;
+    json::known_keys(metadata_object, &METADATA_KEYS, field::METADATA, None)?;
     let metadata = document(metadata_object, attachments.len())?;
 
-    let timestamp = timestamp(text(
-        required(root, "timestamp", field::TIMESTAMP, None)?,
+    let timestamp = json::timestamp(
+        &json::required_text(&root, "timestamp", field::TIMESTAMP)?,
         field::TIMESTAMP,
-        None,
-    )?)?;
+    )?;
     Ok(Manifest {
         metadata,
         attachments,
@@ -180,55 +173,33 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, Failure> {
     })
 }
 
-/// `schema_version` must be exactly the version this build implements.
-fn schema_version(root: &Map<String, Value>) -> Result<(), Failure> {
-    let value = required(root, "schema_version", field::SCHEMA_VERSION, None)?;
-    let declared = value
-        .as_u64()
-        .ok_or_else(|| Failure::manifest(MANIFEST_TYPE, field::SCHEMA_VERSION))?;
-    if declared != SCHEMA_VERSION {
-        return Err(Failure::manifest(
-            MANIFEST_SCHEMA_VERSION,
-            field::SCHEMA_VERSION,
-        ));
-    }
-    Ok(())
-}
-
 /// The typed document, carrying no attachment reference: the writer derives
 /// every one of them from the files it is actually given.
 fn document(map: &Map<String, Value>, attachment_count: usize) -> Result<Metadata, Failure> {
     let header = HeaderDraft {
-        version: required_text(map, "version", field::VERSION)?,
-        source_system: enumeration(
+        version: json::required_text(map, "version", field::VERSION)?,
+        source_system: json::enumeration(
             SourceSystem::parse,
-            &required_text(map, "source_system", field::SOURCE_SYSTEM)?,
+            &json::required_text(map, "source_system", field::SOURCE_SYSTEM)?,
             field::SOURCE_SYSTEM,
         )?,
-        consignment_id: required_text(map, "consignment_id", field::CONSIGNMENT_ID)?,
-        created_at_text: required_text(map, "created_at", field::CREATED_AT)?,
-        consignment_kind: enumeration(
+        consignment_id: json::required_text(map, "consignment_id", field::CONSIGNMENT_ID)?,
+        created_at_text: json::required_text(map, "created_at", field::CREATED_AT)?,
+        consignment_kind: json::enumeration(
             ConsignmentKind::parse,
-            &required_text(map, "consignment_kind", field::CONSIGNMENT_KIND)?,
+            &json::required_text(map, "consignment_kind", field::CONSIGNMENT_KIND)?,
             field::CONSIGNMENT_KIND,
         )?,
-        test: flag(map)?,
-        barcode: optional_text(map, "barcode", field::BARCODE)?,
-        reference_id: optional_text(map, "reference_id", field::REFERENCE_ID)?,
-        error_code: optional_text(map, "error_code", field::ERROR_CODE)?,
-        note: optional_text(map, "note", field::NOTE)?,
+        test: json::flag(map, "test", field::TEST)?,
+        barcode: json::optional_text(map, "barcode", field::BARCODE)?,
+        reference_id: json::optional_text(map, "reference_id", field::REFERENCE_ID)?,
+        error_code: json::optional_text(map, "error_code", field::ERROR_CODE)?,
+        note: json::optional_text(map, "note", field::NOTE)?,
     };
     Ok(draft::metadata(
         header.build(),
         dispatches(map, attachment_count)?,
     ))
-}
-
-/// `TESZT`, which is required here: the writer emits it in every document.
-fn flag(map: &Map<String, Value>) -> Result<bool, Failure> {
-    required(map, "test", field::TEST, None)?
-        .as_bool()
-        .ok_or_else(|| Failure::manifest(MANIFEST_TYPE, field::TEST))
 }
 
 /// The `EXPEDIALAS` blocks.
@@ -254,13 +225,11 @@ fn dispatches(
     if value.is_null() {
         return Ok(derived());
     }
-    let items = value
-        .as_array()
-        .ok_or_else(|| Failure::manifest(MANIFEST_TYPE, field::DISPATCHES))?;
+    let items = json::array(value, field::DISPATCHES)?;
     let mut dispatches = Vec::with_capacity(items.len());
     for item in items {
-        let block = object(item, field::DISPATCHES, None)?;
-        known_keys(block, &DISPATCH_KEYS, field::DISPATCHES, None)?;
+        let block = json::object(item, field::DISPATCHES, None)?;
+        json::known_keys(block, &DISPATCH_KEYS, field::DISPATCHES, None)?;
         let count = match block.get("declared_attachment_count") {
             None | Some(Value::Null) => None,
             Some(value) => Some(
@@ -276,170 +245,21 @@ fn dispatches(
 
 /// The `attachments` array, in the order it is written.
 fn attachments(value: &Value) -> Result<Vec<Attachment>, Failure> {
-    let items = value
-        .as_array()
-        .ok_or_else(|| Failure::manifest(MANIFEST_TYPE, field::ATTACHMENTS))?;
+    let items = json::array(value, field::ATTACHMENTS)?;
     let mut attachments = Vec::with_capacity(items.len());
     for (position, item) in items.iter().enumerate() {
         let index = u32::try_from(position).unwrap_or(u32::MAX);
-        let map = object(item, field::ATTACHMENTS, Some(index))?;
-        known_keys(map, &ATTACHMENT_KEYS, field::ATTACHMENTS, Some(index))?;
+        let map = json::object(item, field::ATTACHMENTS, Some(index))?;
+        json::known_keys(map, &ATTACHMENT_KEYS, field::ATTACHMENTS, Some(index))?;
         attachments.push(Attachment {
-            path: text(
-                required(map, "path", field::PATH, Some(index))?,
+            path: json::text(
+                json::required(map, "path", field::PATH, Some(index))?,
                 field::PATH,
                 Some(index),
             )?,
-            file_name: optional_at(map, "file_name", field::FILE_NAME, index)?,
-            description: optional_at(map, "description", field::DESCRIPTION, index)?,
+            file_name: json::optional_at(map, "file_name", field::FILE_NAME, index)?,
+            description: json::optional_at(map, "description", field::DESCRIPTION, index)?,
         });
     }
     Ok(attachments)
-}
-
-/// `YYYY-MM-DDTHH:MM:SS`, converted to the two fields a ZIP record holds.
-///
-/// The shape is fixed: no time zone, no fractional second, no other separator.
-/// openKRX has no clock, so there is no default and no "now": a manifest that
-/// omits the field is refused rather than stamped with the machine's time,
-/// which would make two runs over the same manifest produce different bytes.
-fn timestamp(text: String) -> Result<FixedTimestamp, Failure> {
-    let refuse = || Failure::manifest(MANIFEST_TIMESTAMP, field::TIMESTAMP);
-    let bytes = text.as_bytes();
-    if bytes.len() != TIMESTAMP_LENGTH {
-        return Err(refuse());
-    }
-    for (position, byte) in bytes.iter().enumerate() {
-        let expected = match position {
-            4 | 7 => b'-',
-            10 => b'T',
-            13 | 16 => b':',
-            _ => {
-                if byte.is_ascii_digit() {
-                    continue;
-                }
-                return Err(refuse());
-            }
-        };
-        if *byte != expected {
-            return Err(refuse());
-        }
-    }
-    let number = |from: usize, to: usize| text[from..to].parse::<u32>().map_err(|_| refuse());
-    let small = |from: usize, to: usize| {
-        number(from, to).and_then(|value| u8::try_from(value).map_err(|_| refuse()))
-    };
-    let year = u16::try_from(number(0, 4)?).map_err(|_| refuse())?;
-    FixedTimestamp::from_parts(
-        year,
-        small(5, 7)?,
-        small(8, 10)?,
-        small(11, 13)?,
-        small(14, 16)?,
-        small(17, 19)?,
-    )
-    .map_err(|_| refuse())
-}
-
-/// Refuse a key the schema does not define, naming the object it was in.
-///
-/// The unknown key is deliberately not reported: it is text the manifest's
-/// author wrote, and a diagnostic carries no part of the input. Naming the
-/// object is enough to find a typo, and keeps the line safe to log.
-fn known_keys(
-    map: &Map<String, Value>,
-    allowed: &[&str],
-    field: &'static str,
-    attachment: Option<u32>,
-) -> Result<(), Failure> {
-    if map.keys().all(|key| allowed.contains(&key.as_str())) {
-        return Ok(());
-    }
-    Err(match attachment {
-        Some(index) => Failure::manifest_at(MANIFEST_UNKNOWN_FIELD, field, index),
-        None => Failure::manifest(MANIFEST_UNKNOWN_FIELD, field),
-    })
-}
-
-/// A field that must be present and must not be null.
-fn required<'a>(
-    map: &'a Map<String, Value>,
-    key: &str,
-    field: &'static str,
-    attachment: Option<u32>,
-) -> Result<&'a Value, Failure> {
-    match map.get(key) {
-        Some(Value::Null) | None => Err(match attachment {
-            Some(index) => Failure::manifest_at(MANIFEST_MISSING_FIELD, field, index),
-            None => Failure::manifest(MANIFEST_MISSING_FIELD, field),
-        }),
-        Some(value) => Ok(value),
-    }
-}
-
-/// A value that must be a JSON object.
-fn object<'a>(
-    value: &'a Value,
-    field: &'static str,
-    attachment: Option<u32>,
-) -> Result<&'a Map<String, Value>, Failure> {
-    value.as_object().ok_or(match attachment {
-        Some(index) => Failure::manifest_at(MANIFEST_TYPE, field, index),
-        None => Failure::manifest(MANIFEST_TYPE, field),
-    })
-}
-
-/// A value that must be a JSON string.
-fn text(value: &Value, field: &'static str, attachment: Option<u32>) -> Result<String, Failure> {
-    value.as_str().map(str::to_owned).ok_or(match attachment {
-        Some(index) => Failure::manifest_at(MANIFEST_TYPE, field, index),
-        None => Failure::manifest(MANIFEST_TYPE, field),
-    })
-}
-
-/// A required string field of `metadata`.
-fn required_text(
-    map: &Map<String, Value>,
-    key: &str,
-    field: &'static str,
-) -> Result<String, Failure> {
-    text(required(map, key, field, None)?, field, None)
-}
-
-/// An optional string field: absent and `null` are the same thing.
-fn optional_text(
-    map: &Map<String, Value>,
-    key: &str,
-    field: &'static str,
-) -> Result<Option<String>, Failure> {
-    match map.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => text(value, field, None).map(Some),
-    }
-}
-
-/// The same, inside one element of the `attachments` array.
-fn optional_at(
-    map: &Map<String, Value>,
-    key: &str,
-    field: &'static str,
-    attachment: u32,
-) -> Result<Option<String>, Failure> {
-    match map.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => text(value, field, Some(attachment)).map(Some),
-    }
-}
-
-/// A token that must be one of a schema-fixed set.
-///
-/// The refusal names the field, and the advice sentence for
-/// `manifest.invalid.enumeration` lists the tokens: what the manifest actually
-/// wrote is content, and is never echoed.
-fn enumeration<T>(
-    parse: impl Fn(&str) -> Option<T>,
-    token: &str,
-    field: &'static str,
-) -> Result<T, Failure> {
-    parse(token).ok_or_else(|| Failure::manifest(MANIFEST_ENUMERATION, field))
 }
