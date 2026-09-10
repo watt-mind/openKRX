@@ -24,7 +24,8 @@ depth is to call it. The one in `crates/openkrx-core/src/create/mod.rs`
 holds the entry-count ceiling a non-ZIP64 end record imposes: writing 65 536
 entries through the public writer would cost seconds of compression to prove
 a `u16`, so the ceiling check is called directly. The one in
-`crates/openkrx-cli/src/exit.rs` holds one test per exit-status category and
+`crates/openkrx-cli/src/exit/tests.rs` holds one test per exit-status category
+and
 reads every code out of `docs/codes.md` to assert that each classifies, with
 no head list of its own: a subprocess can
 reach only the codes an archive can be built to produce, and

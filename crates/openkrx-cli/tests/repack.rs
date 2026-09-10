@@ -483,6 +483,69 @@ fn a_file_an_edit_names_that_cannot_be_read_is_an_input_failure() {
 }
 
 #[test]
+fn an_unreadable_input_says_which_of_the_three_files_it_was() {
+    // Three paths can fail to open, and a caller must not have to guess which
+    // one they mistyped. None of them is ever reported — they are the
+    // caller's own filesystem — but the schema path of the argument is not
+    // content, and it answers the question.
+    let scratch = Scratch::new("repack-which-file");
+    let package = source(&scratch);
+    let edits = edits_file(&scratch, "\"add\":[{\"path\":\"no-such-file.bin\"}]");
+    let out = scratch.path().join("out.krx");
+
+    let missing_package = scratch.path().join("no-such-package.krx");
+    let error = diagnostic(&repack_json(&missing_package, &edits, &out));
+    assert_eq!(error["code"], "input.unreadable");
+    assert_eq!(error.get("field"), None, "the package carries no field");
+
+    let missing_edits = scratch.path().join("no-such-edits.json");
+    let error = diagnostic(&repack_json(&package, &missing_edits, &out));
+    assert_eq!(
+        error["field"], "/",
+        "the edits document is the document root"
+    );
+
+    let error = diagnostic(&repack_json(&package, &edits, &out));
+    assert_eq!(error["field"], "/add/path", "the edit that named the file");
+    assert_eq!(error["attachment_index"], 0);
+
+    // And the human sentence explains the three cases without a path.
+    let human = stderr(&repack(&package, &missing_edits, &out));
+    assert!(human.contains("--edits document"), "{human}");
+    assert!(
+        !human.contains("no-such-edits"),
+        "no path reaches a diagnostic"
+    );
+}
+
+#[test]
+fn an_unknown_key_is_refused_with_the_keys_the_schema_defines() {
+    // openkrx never echoes the key a caller wrote, so the sentence carries
+    // what they can act on instead: the key set of the object it was in.
+    let scratch = Scratch::new("repack-unknown-key");
+    let package = source(&scratch);
+    let edits = edits_file(&scratch, "\"ad\":[]");
+    let out = scratch.path().join("out.krx");
+    let output = repack(&package, &edits, &out);
+    assert_eq!(status(&output), 6);
+    let line = stderr(&output);
+    for key in [
+        "schema_version",
+        "timestamp",
+        "metadata",
+        "add",
+        "replace",
+        "remove",
+    ] {
+        assert!(line.contains(key), "the sentence omits {key}: {line}");
+    }
+    assert!(
+        !line.contains("\"ad\""),
+        "the key itself is never echoed: {line}"
+    );
+}
+
+#[test]
 fn an_output_that_already_exists_is_refused_and_left_alone() {
     let scratch = Scratch::new("repack-clobber");
     let package = source(&scratch);

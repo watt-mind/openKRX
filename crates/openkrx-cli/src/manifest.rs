@@ -34,7 +34,11 @@ use crate::exit::{Failure, MANIFEST_TYPE};
 use crate::json;
 
 /// The keys of the manifest object.
-const MANIFEST_KEYS: [&str; 4] = ["schema_version", "metadata", "attachments", "timestamp"];
+///
+/// `pub(crate)` because the sentence `manifest.invalid.unknown_field`
+/// explains itself with lists them, and a test holds the two together.
+pub(crate) const MANIFEST_KEYS: [&str; 4] =
+    ["schema_version", "metadata", "attachments", "timestamp"];
 /// The keys of `metadata`.
 pub(crate) const METADATA_KEYS: [&str; 11] = [
     "version",

@@ -87,8 +87,14 @@ pub fn run(
         failure,
         cleanup: Cleanup::NONE,
     };
+    // Three different files can fail to open here, and a caller must not have
+    // to guess which. The path is never reported — it is the caller's own
+    // filesystem — but the *argument* is not content: the edits document is
+    // tagged with its own schema root, a file an edit names with the edit that
+    // named it, and the package with neither.
     let package = input::read(input::Source::parse(file)).map_err(refuse)?;
-    let document = input::read(input::Source::File(edits_path)).map_err(refuse)?;
+    let document = input::read(input::Source::File(edits_path))
+        .map_err(|failure| refuse(at_field(failure, edits::field::ROOT)))?;
     let document = edits::parse(&document).map_err(refuse)?;
     let edits = resolve(&document, output::parent_of(edits_path)).map_err(refuse)?;
 
@@ -158,7 +164,7 @@ fn resolve(document: &EditsDocument, base: PathBuf) -> Result<Edits, Failure> {
     let mut add = Vec::with_capacity(document.add.len());
     for (position, addition) in document.add.iter().enumerate() {
         let index = u32::try_from(position).unwrap_or(u32::MAX);
-        let bytes = read_at(&base, &addition.path, index)?;
+        let bytes = read_at(&base, &addition.path, index, edits::field::ADD_PATH)?;
         add.push(AttachmentAddition {
             file_name: addition
                 .file_name
@@ -173,7 +179,7 @@ fn resolve(document: &EditsDocument, base: PathBuf) -> Result<Edits, Failure> {
         let index = u32::try_from(position).unwrap_or(u32::MAX);
         replace.push(AttachmentReplacement {
             number: replacement.number,
-            bytes: read_at(&base, &replacement.path, index)?,
+            bytes: read_at(&base, &replacement.path, index, edits::field::REPLACE_PATH)?,
         });
     }
     Ok(Edits {
@@ -184,10 +190,23 @@ fn resolve(document: &EditsDocument, base: PathBuf) -> Result<Edits, Failure> {
     })
 }
 
-/// Read one file the edits name, saying which element of the array it was.
-fn read_at(base: &Path, path: &str, index: u32) -> Result<Vec<u8>, Failure> {
+/// Read one file the edits name, saying which edit named it.
+///
+/// `field` is the schema path of the edit — `/add/path` or `/replace/path` —
+/// and `index` its position in that array. Neither is content, and together
+/// they answer the one question a failed open leaves open: which of the paths
+/// on the command line, or in the document, could not be read.
+fn read_at(base: &Path, path: &str, index: u32, field: &'static str) -> Result<Vec<u8>, Failure> {
     input::read(input::Source::File(&base.join(path))).map_err(|failure| Failure {
         attachment_index: Some(index),
-        ..failure
+        ..at_field(failure, field)
     })
+}
+
+/// The same failure, scoped to the schema path of the field that named it.
+fn at_field(failure: Failure, field: &'static str) -> Failure {
+    Failure {
+        field: Some(field),
+        ..failure
+    }
 }

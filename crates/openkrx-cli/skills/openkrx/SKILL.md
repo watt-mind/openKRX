@@ -520,6 +520,12 @@ the same package and the same edits always produce byte-identical output:
   `attachments[].number`. Naming one the package does not carry is
   `repack.invalid.no_such_attachment` (exit `6`) and naming the same one
   twice is `repack.invalid.duplicate_target`; neither is guessed at.
+- A failed read (exit `5`) names the file that failed in `error.field`: `/`
+  is the edits document, `/add/path` or `/replace/path` a file an edit names
+  (with `attachment_index`), and no `field` at all means the package. A key
+  the schema does not define is refused with `manifest.invalid.unknown_field`
+  (exit `6`); the key you wrote is never echoed back, and the human sentence
+  lists the keys that object *does* define, which is what you compare against.
 - `--out` must not exist in any form, so **the package you are editing is
   never overwritten and nothing is edited in place**. Repacking onto the
   input path is refused with `output.exists` (exit `9`). `--stdout` writes

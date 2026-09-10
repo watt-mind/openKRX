@@ -508,6 +508,18 @@ and such a change is recorded here explicitly.
   array. Adding a field does not raise `schema_version`, which stays `1`; a
   consumer ignores fields it does not recognise.
 
+- **`manifest.invalid.unknown_field` now lists the keys the schema defines.**
+  The key a caller wrote is still never echoed — it is text they wrote — but
+  the sentence names the key set of the object it was in, and says that `/`
+  is the document itself, so a misspelling can be found without reading the
+  schema. A unit test holds each sentence against the key list it describes.
+
+- **`input.unreadable` from `repack` names the file that failed.** `repack`
+  opens a package, an edits document and one file per edit, so the failure
+  carries the schema path of the one that could not be read: `/` for the
+  edits document, `/add/path` or `/replace/path` for a file an edit names,
+  and no field for the package. No path is reported, as before.
+
 - **The `output.*` diagnostic sentences `create` and `extract` differ in are
   now keyed for `repack` too**, so a caller who ran `repack` is told about
   `--out` rather than about `--into`, and `output.exists` says that the

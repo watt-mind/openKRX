@@ -36,7 +36,9 @@ use crate::json;
 use crate::manifest::{METADATA_KEYS, field as metadata_field};
 
 /// The keys of the edits object.
-const EDITS_KEYS: [&str; 6] = [
+///
+/// `pub(crate)` for the reason [`crate::manifest::MANIFEST_KEYS`] is.
+pub(crate) const EDITS_KEYS: [&str; 6] = [
     "schema_version",
     "timestamp",
     "metadata",

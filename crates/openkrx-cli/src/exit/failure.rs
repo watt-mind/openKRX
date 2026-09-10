@@ -43,7 +43,8 @@ const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this
 /// typed, and nothing else.
 fn advice(code: &str, command: &str) -> Option<&'static str> {
     output_advice(code, command)
-        .or_else(|| document_advice(code))
+        .or_else(|| input_advice(code, command))
+        .or_else(|| document_advice(code, command))
         .or_else(|| repack_advice(code))
 }
 
@@ -116,13 +117,53 @@ writable and has free space"
     })
 }
 
+/// The sentence `input.unreadable` deserves from a command taking two paths.
+///
+/// `repack` opens a package, an edits document and each local file an edit
+/// names, so "the input could not be read" leaves a caller guessing which of
+/// them it was. The path is never reported — it is the caller's own
+/// filesystem — but which *argument* failed is not content, and the failure
+/// already carries it as a field: the edits document is `/`, a file an edit
+/// names is the edit that named it, and the package carries neither.
+fn input_advice(code: &str, command: &str) -> Option<&'static str> {
+    if code != "input.unreadable" || command != "repack" {
+        return None;
+    }
+    Some(
+        "a file could not be read: check that it exists, is readable, is a \
+file rather than a directory, and is not larger than the 64 MiB input cap. \
+The field says which one — / is the --edits document itself, /add/path or \
+/replace/path is a local file an edit names, and no field at all means the \
+package given as the argument",
+    )
+}
+
 /// The sentence one `manifest.invalid.*` code deserves.
 ///
 /// Both documents openKRX reads report through these codes, and the sentence
 /// is where a caller learns what the schema allows: the diagnostic names the
 /// field, never its value.
-fn document_advice(code: &str) -> Option<&'static str> {
+fn document_advice(code: &str, command: &str) -> Option<&'static str> {
     Some(match code.as_bytes() {
+        // The key a caller wrote is content and is never echoed. What can be
+        // named is the schema's own key list, which is what a caller actually
+        // needs to spot a typo, and the object the key was in — `/` being the
+        // document itself. `unknown_key_advice_lists_the_schemas_own_keys`
+        // holds each sentence against the key set it describes.
+        b"manifest.invalid.unknown_field" if command == "repack" => {
+            "the edits document carries a key the schema does not define. The \
+key itself is not echoed, because you wrote it; the diagnostic names the \
+object it was in as a JSON Pointer, / being the document itself, whose own \
+keys are schema_version, timestamp, metadata, add, replace and remove. \
+Compare that object against the schema in docs/architecture.md"
+        }
+        b"manifest.invalid.unknown_field" if command == "create" => {
+            "the manifest carries a key the schema does not define. The key \
+itself is not echoed, because you wrote it; the diagnostic names the object \
+it was in as a JSON Pointer, / being the manifest itself, whose own keys are \
+schema_version, timestamp, metadata and attachments. Compare that object \
+against the schema in docs/architecture.md"
+        }
         b"manifest.invalid.syntax" => {
             "the manifest is not one JSON object: it must be UTF-8, must parse \
 as a single object, and must carry nothing after it"

@@ -75,7 +75,7 @@ the shape of a filesystem.
 
 | Code | Meaning | Fields | Asserted by |
 | --- | --- | --- | --- |
-| `input.unreadable` | The named file, or standard input, could not be opened or read: it does not exist, it is a directory, it is not permitted, or the read failed part-way. | — | `an_unreadable_input_is_status_five` |
+| `input.unreadable` | The named file, or standard input, could not be opened or read: it does not exist, it is a directory, it is not permitted, or the read failed part-way. For `repack`, which opens three kinds of file, `field` says which one: `/` is the `--edits` document, `/add/path` or `/replace/path` a local file an edit names, and no field at all the package given as the argument. | `field`, `attachment` | `an_unreadable_input_is_status_five`, `an_unreadable_input_says_which_of_the_three_files_it_was` |
 | `input.over_limit.archive_bytes` | The input reached the input cap, one byte past `Limits::DEFAULT.max_archive_bytes`, and was refused before any parsing began. `limit` is the archive ceiling and `observed` the cap, because reading stops there and the real length is never learned. | `limit`, `observed` | `an_input_past_the_cap_is_refused_before_parsing` |
 
 ## Output codes
@@ -106,7 +106,7 @@ value, because none of these conditions is a ceiling. A `create` refusal
 carries no entry index either — nothing has been written when it is decided.
 Tests are in `crates/openkrx-cli/tests/extract.rs` and
 `crates/openkrx-cli/tests/create.rs`, except the classifier rows, which are
-the `#[cfg(test)]` module in `crates/openkrx-cli/src/exit.rs`.
+in `crates/openkrx-cli/src/exit/tests.rs`.
 
 | Code | Meaning | Fields | Asserted by |
 | --- | --- | --- | --- |
@@ -474,7 +474,7 @@ the schema does not define, are never reported. Tests are in
 | --- | --- | --- | --- |
 | `manifest.invalid.syntax` | The bytes are not one JSON object: not UTF-8, not parseable, an array or a scalar rather than an object, or carrying content after the object. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.schema_version` | The manifest declares a `schema_version` this build does not implement. Version 1 is the only one it writes from. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
-| `manifest.invalid.unknown_field` | The manifest, or an object inside it, carries a key the schema does not define. Refused rather than ignored: a misspelled `attachments` would otherwise write a package with no attachment and report success. `field` names the *object*, never the key. | `field`, `attachment` | `an_unknown_key_is_refused_rather_than_ignored`, `a_defect_inside_an_attachment_names_its_position` |
+| `manifest.invalid.unknown_field` | The manifest or the edits document, or an object inside it, carries a key the schema does not define. Refused rather than ignored: a misspelled `attachments` would otherwise write a package with no attachment and report success. `field` names the *object*, never the key, which is text the caller wrote; the human sentence lists the keys that object's schema does define instead, which is the actionable half and carries nothing of the input. | `field`, `attachment` | `an_unknown_key_is_refused_rather_than_ignored`, `a_defect_inside_an_attachment_names_its_position`, `the_unknown_key_sentence_lists_the_schemas_own_keys` |
 | `manifest.invalid.missing_field` | A required field is absent or `null`. | `field`, `attachment` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.type` | A field carries a JSON value of the wrong kind — a string where a boolean belongs, a scalar where an array does. | `field`, `attachment` | `each_manifest_defect_names_the_field_it_concerns` |
 | `manifest.invalid.enumeration` | `source_system` or `consignment_kind` carries a token outside the fixed set rule M4 defines. The tokens are byte-exact. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
@@ -509,8 +509,8 @@ through their own codes unchanged: `archive.*` for reading the package,
 `metadata.*` for parsing its document and `create.*` for writing the result.
 
 Tests are in `crates/openkrx-core/tests/repack_rejects.rs`, except
-`repack.internal.self_check_failed`, whose test is the `#[cfg(test)]` module in
-`crates/openkrx-cli/src/exit.rs`.
+`repack.internal.self_check_failed`, whose test is in
+`crates/openkrx-cli/src/exit/tests.rs`.
 
 ### `repack.unsupported.*`
 

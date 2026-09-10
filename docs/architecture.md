@@ -897,6 +897,14 @@ is the manifest's own, and the diagnostics name the same JSON Pointers.
 | `replace[]` | no | `number` names an attachment of the package being edited, counted from 1, and `path` names the local file whose bytes take its place. The file name, description and quantity of that attachment are preserved; only the bytes, and therefore the derived `MERET`, change. |
 | `remove[]` | no | Attachment numbers to drop, counted from 1. |
 
+**Three files can fail to open**, so `input.unreadable` from `repack` carries
+the schema path of the one that did: `/` for the `--edits` document,
+`/add/path` or `/replace/path` for a local file an edit names, and no field
+at all for the package given as the argument. The path itself is never
+reported — it is the caller's own filesystem — but which argument failed is
+not content, and without it a caller with two paths on the command line has
+to guess.
+
 `remove` and `replace` name attachments by their `CSATOLMANY_SZAMA` in the
 package that was read, which is what `inspect` prints. A number the package
 does not carry is `repack.invalid.no_such_attachment`, and two edits naming the
