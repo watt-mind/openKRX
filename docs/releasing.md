@@ -45,7 +45,7 @@ branch, so a reader outside the project can check each row.
 | --- | --- | --- | --- |
 | 1. Operations and supported profile documented, with independent conformance evidence and explicit limitations | **Not met** | Operations, profile and limitations are documented: [architecture.md](https://github.com/watt-mind/openKRX/blob/develop/docs/architecture.md#not-yet-implemented), [profile.md](https://github.com/watt-mind/openKRX/blob/develop/docs/profile.md), [conformance.md](https://github.com/watt-mind/openKRX/blob/develop/docs/conformance.md). Independent conformance evidence does **not** exist: nine of thirty-seven rules are undecidable from the retrieved sources ([Known gaps](https://github.com/watt-mind/openKRX/blob/develop/docs/conformance.md#known-gaps), [Unresolved essential rules](https://github.com/watt-mind/openKRX/blob/develop/docs/profile.md#unresolved-essential-rules)), and the 2026-09-09 search found no public sample archive and no independent implementation ([Conformance evidence](https://github.com/watt-mind/openKRX/blob/develop/docs/profile.md#conformance-evidence)). | An authoritative statement from the format owner on A19–A22, or a lawfully usable sample archive or independent implementation. The two routes are the outreach questions in [research.md](https://github.com/watt-mind/openKRX/blob/develop/docs/research.md#open-evidence-gaps) and an aggregate-only run of the private-corpus harness ([private opt-in corpus check](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#private-opt-in-corpus-check)); neither is code, and both are for a person. |
 | 2. Published limits, stable command and error contracts, platform extraction guarantees backed by adversarial tests | **Partially met** | Limits are published as a contract ([Limits](https://github.com/watt-mind/openKRX/blob/develop/docs/architecture.md#limits)) and held by the [scaling guard](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#the-scaling-guard). The command contract, the JSON envelope with `schema_version` 1 and the nine [exit statuses](https://github.com/watt-mind/openKRX/blob/develop/docs/architecture.md#exit-statuses) are pinned byte for byte by the [golden output contract](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#golden-output-contract) and by `scripts/check-codes.py`. Adversarial tests exist: the truncation and mutation [sweeps](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#sweeps), [property-based tests](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#property-based-tests), five [fuzz targets](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#fuzzing), and the link and reparse-point cases including the Windows junction tests. | Two extraction guarantees are stated rather than tested: the check-to-create race needs `openat2`-style resolution, and a Windows *symbolic* link is still covered only by the shared attribute path ([residual risks of the output layer](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#residual-risks-of-the-output-layer)). Closing either, plus a fuzzing campaign with a persisted corpus rather than the bounded lane, moves this row. |
-| 3. Required CI green on the release commit, including dependency/security review and MSRV | **Met per commit; unproven for a release commit that does not exist yet** | The nine required checks are named in [.factory.yaml](https://github.com/watt-mind/openKRX/blob/develop/.factory.yaml) and run in [ci.yml](https://github.com/watt-mind/openKRX/actions/workflows/ci.yml): format and lint, documentation, tests on three operating systems, the golden output contract, `Minimum supported Rust (1.88)`, `Dependencies` (`cargo deny` over [deny.toml](https://github.com/watt-mind/openKRX/blob/develop/deny.toml)), `Coverage` against the 90 % floor, plus the bounded fuzz lane. [security.yml](https://github.com/watt-mind/openKRX/actions/workflows/security.yml) adds Gitleaks over the full history, `actionlint`, the advisory scan and CodeQL. | Nothing structural. The gate is satisfied only by a green required run on the exact commit that is tagged, so it is re-checked at release time, on the `develop` → `master` merge commit. [mutants.yml](https://github.com/watt-mind/openKRX/actions/workflows/mutants.yml) and [fuzz.yml](https://github.com/watt-mind/openKRX/actions/workflows/fuzz.yml) are weekly and deliberately not required; a red weekly lane is a reason to stop, not a blocking check. |
+| 3. Required CI green on the release commit, including dependency/security review and MSRV | **Met per commit; unproven for a release commit that does not exist yet** | The nine required checks are named in [.factory.yaml](https://github.com/watt-mind/openKRX/blob/develop/.factory.yaml) and run in [ci.yml](https://github.com/watt-mind/openKRX/actions/workflows/ci.yml): format and lint, documentation, tests on three operating systems, the golden output contract, `Minimum supported Rust (1.88)`, `Dependencies` (`cargo deny` over [deny.toml](https://github.com/watt-mind/openKRX/blob/develop/deny.toml)), `Coverage` against the 90 % floor, plus the bounded fuzz lane. [security.yml](https://github.com/watt-mind/openKRX/actions/workflows/security.yml) adds Gitleaks over the full history, `actionlint` and CodeQL on every push and pull request, and its `Advisory scan (cargo-deny)` job on the weekly cron and on dispatch only — that job is the re-check of an unchanged dependency tree against newly published advisories, not the per-commit one; `Dependencies` in `ci.yml` runs the full `cargo deny check` on the release commit itself. | Nothing structural. The gate is satisfied only by a green required run on the exact commit that is tagged, so it is re-checked at release time, on the `develop` → `master` merge commit. [mutants.yml](https://github.com/watt-mind/openKRX/actions/workflows/mutants.yml) and [fuzz.yml](https://github.com/watt-mind/openKRX/actions/workflows/fuzz.yml) are weekly and deliberately not required; a red weekly lane is a reason to stop, not a blocking check. |
 | 4. Public fixtures and dependency licences, privacy boundaries, documentation, changelog, vulnerability reporting | **Met** | Fixtures are synthetic originals with recorded provenance and a generator ([tests/fixtures/README.md](https://github.com/watt-mind/openKRX/blob/develop/tests/fixtures/README.md)) under their own MIT [licence](https://github.com/watt-mind/openKRX/blob/develop/tests/fixtures/LICENSE); dependency licences are allow-listed in [deny.toml](https://github.com/watt-mind/openKRX/blob/develop/deny.toml) and enforced by the required `Dependencies` check. Privacy boundaries: content-free diagnostics with canary tests ([command-line input layer](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#threat-model-mapping-command-line-input-layer)), the [data and key policy](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#data-and-key-policy) and the [private-corpus policy](https://github.com/watt-mind/openKRX/blob/develop/docs/roadmap.md#private-corpus-policy-for-maintainers). The documentation set is gated by `check-doc-links.py`, `check-codes.py` and markdownlint. [CHANGELOG.md](https://github.com/watt-mind/openKRX/blob/develop/CHANGELOG.md) is Keep a Changelog and is the release notes. Vulnerability reporting is GitHub private advisories ([Reporting](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#reporting)). | Nothing outstanding. A new committed binary fixture, a dependency outside the allow-list, or a diagnostic that carries a value would reopen the row. |
 | 5. A separate release change: versioning, provenance, checksums, package contents, smoke tests | **Met** | [release.yml](https://github.com/watt-mind/openKRX/blob/develop/.github/workflows/release.yml) is that change, reviewed on its own. `plan` re-reads the workspace version through `cargo metadata` and fails when the tag is not exactly `v<version>`; `build` produces six archives; `checksums` writes one `SHA256SUMS`; `attest` produces SLSA build provenance; `smoke` verifies each archive's checksum, contents and packaged `SKILL.md` and runs the binary on its own architecture. The whole path is rehearsable as a dry run, and the workflow publishes nothing. | The `attest` and `release` pair is the one part a dry run cannot exercise, because both have effects outside the run; the first real tag is what exercises it. |
 | 6. A reviewed `develop` → `master` release pull request merged before tagging | **Not met** | No release pull request exists, no tag exists, and `master` has never received a release merge. The procedure is written down in [Cutting a release](#cutting-a-release) and the tag is created by hand. | Opening the `develop` → `master` pull request, having a human review it and merging it. This gate cannot be satisfied in advance; it is satisfied by doing it. |
@@ -156,12 +156,13 @@ procedure.
 4. Watch the run: `plan`, six `build` legs, six `smoke` legs, `checksums`,
    `attest`, `release`. The smoke job asserts, among the rest, that
    `validate-structure` over the consistent fixture still exits 4.
-5. Publish the draft by hand, **as a pre-release**. The workflow creates the
-   draft without a pre-release marker, so the flag is set at publication:
+5. Publish the draft by hand. The tag carries a hyphen, so the workflow has
+   already marked the draft as a pre-release; verify the flag rather than
+   setting it:
 
    ```sh
-   gh release view v0.1.0-alpha.1
-   gh release edit v0.1.0-alpha.1 --draft=false --prerelease
+   gh release view v0.1.0-alpha.1   # confirm isPrerelease: true
+   gh release edit v0.1.0-alpha.1 --draft=false
    ```
 
    Until that command is run, no user-visible release exists. The release
@@ -191,11 +192,17 @@ containing:
 | `openkrx` (`openkrx.exe` on Windows) | `cargo build --release --locked -p openkrx-cli --target <triple>` |
 | `LICENSE`, `README.md`, `CHANGELOG.md` | The repository at the tagged commit |
 | `SKILL.md` | `openkrx skill`, run against the binary being packaged |
+| `completions/openkrx.{bash,zsh,fish,ps1,elv}` | `openkrx completions <shell>`, run against the binary being packaged |
+| `man/openkrx.1` | `openkrx man`, run against the binary being packaged |
 
-`SKILL.md` is written out by the packaged executable rather than copied from
-`crates/openkrx-cli/skills/openkrx/SKILL.md`, so the document in the archive
-is the one compiled into the binary in the same archive; the smoke job diffs
-the two and fails if they ever disagree.
+`SKILL.md`, the five completion scripts and the manual page are all written
+out by the packaged executable rather than copied from the sources, so every
+document in the archive describes the binary in the same archive; the smoke
+job regenerates `SKILL.md`, the bash script and the page and fails if any of
+the three disagrees with what was packaged. The completion scripts and the man
+page are generated by `clap_complete` and `clap_mangen` from the CLI's own
+`clap` definition, so their exact bytes follow those dependency versions and
+are not pinned by a golden case.
 
 Targets built for every release:
 
@@ -256,23 +263,27 @@ a mistyped tag stops the run before anything is built.
 | Job | Does |
 | --- | --- |
 | `plan` | Reads the workspace version from `cargo metadata`, checks it against the tag, decides whether this is a dry run, and extracts the release notes from `CHANGELOG.md`. |
-| `build` | Six matrix legs: builds `openkrx-cli` for the target, stages the archive contents, writes `SKILL.md` from the binary, packs the archive and its `.sha256`. |
+| `build` | Six matrix legs: builds `openkrx-cli` for the target, stages the archive contents, writes `SKILL.md`, the five completion scripts and the manual page from the binary, packs the archive and its `.sha256`. |
 | `smoke` | Six matrix legs: downloads that target's archive, checks its SHA-256, unpacks it, and runs the packaged binary. |
 | `checksums` | Downloads every archive and writes one `SHA256SUMS` over all of them. |
 | `attest` | Produces SLSA build provenance for every archive. Skipped on a dry run. |
-| `release` | Creates the **draft** GitHub release with the archives, `SHA256SUMS` and the changelog section as its body. Skipped on a dry run. |
+| `release` | Creates the **draft** GitHub release with the archives, `SHA256SUMS` and the changelog section as its body, marked as a pre-release when the tag carries a hyphen. Skipped on a dry run. |
 
 The smoke job is what stands between a build and a release. For each of the
 six targets it verifies the archive checksum, unpacks the archive, checks that
-`LICENSE`, `README.md`, `CHANGELOG.md` and `SKILL.md` are all present and
-non-empty, diffs the packaged `SKILL.md` against `openkrx skill`, and then
-runs:
+`LICENSE`, `README.md`, `CHANGELOG.md`, `SKILL.md`, the five files under
+`completions/` and `man/openkrx.1` are all present and non-empty, diffs the
+packaged `SKILL.md`, bash completion script and manual page against what the
+packaged binary emits, and then runs:
 
 - `openkrx --version`, asserting it names the version being released;
 - `openkrx capabilities --json`, asserting `schema_version` is `1` and that
   the operation list is exactly `inspect`, `list`, `validate-structure`,
-  `extract`;
+  `extract`, `create`, `repack`;
 - `openkrx skill | head -1`, asserting the skill's front matter opens;
+- `openkrx completions <shell>` for all five shells, asserting each writes a
+  non-empty script, that an unknown shell exits 2 with an empty stdout, and
+  that `openkrx man` opens a roff page with `.TH openkrx 1`;
 - `openkrx validate-structure tests/fixtures/golden/consistent.krx --json`,
   asserting **exit status 4** and the `unresolved` summary.
 
@@ -284,12 +295,22 @@ change, so the smoke job treats anything but 4 as a failure.
 ### 5. Publish the draft by hand
 
 The run leaves a draft release. Nothing publishes it. Read the body, check the
-asset list and the checksums, and publish it yourself:
+asset list and the checksums, confirm the pre-release flag is what the tag
+implies, and publish it yourself:
 
 ```sh
 gh release view vX.Y.Z
 gh release edit vX.Y.Z --draft=false
 ```
+
+The `release` job passes `--prerelease` whenever the tag contains a hyphen,
+which is exactly the SemVer pre-release form: `v0.1.0-alpha.1` is created as
+a pre-release draft and `v0.1.0` is not. The flag is set at creation rather
+than left to the publisher, because a draft published without it is a stable
+release from the moment the button is pressed, and nothing a user's tooling
+already fetched would notice it being corrected afterwards. It stays a
+verification step for the human, not an action: `gh release view` reports
+`isPrerelease`, and the `release` job prints the same field as its last line.
 
 Until that command is run, no user-visible release exists. If the run produced
 something you do not want to ship, delete the draft instead; the tag can stay
@@ -340,7 +361,7 @@ moved, because a tag-triggered run reads the workflow from the tagged commit.
 | Workflow | Trigger | Does |
 | --- | --- | --- |
 | `ci.yml` | push and pull request on `develop`/`master`; dispatch | Format, lint, docs, tests on three operating systems, the golden output contract, MSRV, dependency policy, coverage and the bounded fuzz lane. Also builds a release binary and smokes `--help`, `--version` and `capabilities --json`. |
-| `security.yml` | push, pull request, weekly cron, dispatch | Gitleaks over the full history, `actionlint` over every workflow, the advisory scan, and CodeQL. |
+| `security.yml` | push, pull request, weekly cron, dispatch | Gitleaks over the full history, `actionlint` over every workflow, and CodeQL, on every trigger; the advisory scan on the weekly cron and on dispatch only. |
 | `mutants.yml` | weekly cron; dispatch | Mutation testing with per-crate floors. Deliberately not a required check. |
 | `release.yml` | push of a `v*` tag; dispatch with `dry_run`; pull request changing `release.yml` or `release-notes.py` | Everything in [Watch the run](#4-watch-the-run). Creates a draft release and nothing else, and on anything but a `v*` tag creates nothing at all. |
 

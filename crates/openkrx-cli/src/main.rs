@@ -44,6 +44,13 @@
 //! but the executable can read the contract it is about to rely on. It is the
 //! one command outside the JSON envelope.
 //!
+//! Two further commands report on the binary itself rather than on any
+//! package: [`completions`] writes the shell completion script for one of the
+//! five shells `clap_complete` supports, and [`man`] writes the roff manual
+//! page. Both are generated from the same `clap` definition the dispatch below
+//! reads, so neither can drift from the command surface, and both bypass the
+//! envelope exactly as `skill` does.
+//!
 //! The binary's contract — the commands, their flags, the JSON envelope, the
 //! exit statuses and the stable codes behind them — is specified in
 //! `docs/architecture.md`, with the code catalogue in `docs/codes.md`. The
@@ -56,6 +63,8 @@
 //! [`create`]: mod@crate::create
 //! [`repack`]: mod@crate::repack
 //! [`skill`]: mod@crate::skill
+//! [`completions`]: crate::generate::completions
+//! [`man`]: crate::generate::man
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -79,6 +88,7 @@ mod create;
 mod edits;
 mod exit;
 mod extract;
+mod generate;
 mod input;
 mod json;
 mod manifest;
@@ -103,7 +113,8 @@ use std::path::PathBuf;
     about = "Read a Hungarian KRX document package locally, extract one into a \
 directory you name, create one from a manifest file, and edit an existing one \
 into a new file. Nothing is uploaded and nothing is verified. `skill` writes \
-the agent skill this binary carries.",
+the agent skill this binary carries, `completions` a shell completion script \
+and `man` this manual page.",
     after_help = EXIT_STATUS_HELP
 )]
 struct Args {
@@ -242,8 +253,9 @@ reading as an exit status.";
 /// these comments are part of the user-visible contract and are kept in step
 /// with `docs/architecture.md`, `README.md` and the embedded skill document.
 /// `Capabilities`, `Inspect`, `List` and `ValidateStructure` only read;
-/// `Extract`, `Create` and `Repack` write to paths the caller named; `Skill`
-/// touches no package at all.
+/// `Extract`, `Create` and `Repack` write to paths the caller named; `Skill`,
+/// `Completions` and `Man` touch no package at all and describe the binary
+/// itself.
 #[derive(Subcommand)]
 enum Command {
     /// Report implemented operations and development status.
@@ -353,6 +365,31 @@ command takes no arguments and no flags, so `skill --json` and `skill FILE` \
 are usage errors and exit 2.\n\nSave it where your agent harness looks for \
 skills, for example: openkrx skill > .claude/skills/openkrx/SKILL.md")]
     Skill,
+    /// Write the shell completion script for SHELL to standard output.
+    #[command(after_help = "The script is written to stdout and nothing else \
+is: no JSON envelope, no diagnostic, and no file is read. It is generated from \
+this executable's own argument definition, so it always describes the commands \
+and flags this build has. The shell name is required and must be one of the \
+five listed; anything else, and any flag, is a usage error and exits 2.\n\n\
+Save it where your shell looks for completions, for example:\n  \
+openkrx completions bash > /etc/bash_completion.d/openkrx\n  \
+openkrx completions zsh  > ~/.zsh/completions/_openkrx\n  \
+openkrx completions fish > ~/.config/fish/completions/openkrx.fish")]
+    Completions {
+        /// The shell to generate the script for.
+        #[arg(value_name = "SHELL", value_enum)]
+        shell: clap_complete::Shell,
+    },
+    /// Write the roff manual page for this executable to standard output.
+    #[command(after_help = "The page is written to stdout and nothing else is: \
+no JSON envelope, no diagnostic, and no file is read. It is generated from \
+this executable's own argument definition, so it always describes the commands \
+and flags this build has, and it is one page for the whole binary — every \
+subcommand is a section inside it, not a page of its own. This command takes \
+no arguments and no flags, so `man --json` and `man FILE` are usage errors and \
+exit 2.\n\nSave it where man looks for pages, for example:\n  \
+openkrx man > /usr/local/share/man/man1/openkrx.1")]
+    Man,
 }
 
 /// Which reader command is running, and the name its response carries.
@@ -402,15 +439,28 @@ fn run() -> i32 {
             };
         }
     };
-    // `skill` reports on no package, so it never reaches the envelope, the
-    // input reader or a `Category` other than success: it writes the document
-    // it carries and stops.
-    if matches!(parsed.command, Command::Skill) {
-        skill::run();
-        return Category::Success.status();
+    // `skill`, `completions` and `man` report on no package, so none of them
+    // reaches the envelope, the input reader or a `Category` other than
+    // success: each writes the document it was asked for and stops.
+    match parsed.command {
+        Command::Skill => {
+            skill::run();
+            return Category::Success.status();
+        }
+        Command::Completions { shell } => {
+            generate::completions(shell);
+            return Category::Success.status();
+        }
+        Command::Man => {
+            generate::man();
+            return Category::Success.status();
+        }
+        _ => {}
     }
     match parsed.command {
-        Command::Skill => unreachable!("skill returned before the dispatch"),
+        Command::Skill | Command::Completions { .. } | Command::Man => {
+            unreachable!("the document commands returned before the dispatch")
+        }
         Command::Capabilities { json } => {
             let data = capabilities();
             let text = if json {

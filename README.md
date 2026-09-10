@@ -125,6 +125,8 @@ target/release/openkrx create             --manifest manifest.json --out ./packa
 target/release/openkrx repack             package.krx --edits edits.json --out ./edited.krx
 target/release/openkrx capabilities
 target/release/openkrx skill
+target/release/openkrx completions bash
+target/release/openkrx man
 ```
 
 ### Commands
@@ -139,12 +141,15 @@ target/release/openkrx skill
 | `create` | Writes one package from a JSON manifest, to a file that must not exist. | 0, 2, 5, 6, 8, 9 |
 | `repack` | Edits one package into a new file that must not exist, preserving every attachment no edit names. | 0, 2, 5, 6, 7, 8, 9 |
 | `skill` | Writes the agent skill document embedded in the binary to stdout. Reads no package. | 0, 2 |
+| `completions` | Writes the shell completion script for `bash`, `zsh`, `fish`, `powershell` or `elvish` to stdout. Reads no package. | 0, 2 |
+| `man` | Writes the roff manual page for the whole binary to stdout. Reads no package. | 0, 2 |
 
 Each of the four reading commands takes one package file, or `-` to read
 standard input; `create` takes `--manifest` and either `--out` or `--stdout`;
-`repack` takes a package, `--edits`, and either `--out` or `--stdout`; and
-`capabilities` and `skill` take none. Every command except `skill`
-accepts `--json`. `list` prints what the archive holds:
+`repack` takes a package, `--edits`, and either `--out` or `--stdout`;
+`completions` takes one shell name; and `capabilities`, `skill` and `man`
+take none. Every command except `skill`, `completions` and `man` accepts
+`--json`. `list` prints what the archive holds:
 
 ```text
 index  method   compressed    declared     decoded  crc32     name
@@ -294,6 +299,30 @@ envelope. Save it where your harness looks for skills:
 mkdir -p .claude/skills/openkrx
 openkrx skill > .claude/skills/openkrx/SKILL.md
 ```
+
+### Installation
+
+There is no published release yet, so there is nothing to install from a
+package manager; build the binary from a checkout and put it on `PATH`.
+
+`completions` and `man` are the two documents the binary writes about itself.
+Both are generated from its own argument definition at the moment you run
+them, so they always describe the build you have rather than a documented
+ideal — regenerate them whenever you replace the binary. The usual places,
+for a system-wide install:
+
+```sh
+openkrx completions bash       | sudo tee /etc/bash_completion.d/openkrx > /dev/null
+openkrx completions zsh        | sudo tee /usr/local/share/zsh/site-functions/_openkrx > /dev/null
+openkrx completions fish       > ~/.config/fish/completions/openkrx.fish
+openkrx completions elvish     > ~/.config/elvish/lib/openkrx.elv
+openkrx man                    | sudo tee /usr/local/share/man/man1/openkrx.1 > /dev/null
+```
+
+On Windows, `openkrx completions powershell` writes a script to dot-source
+from your PowerShell profile (`$PROFILE`). A release archive ships all five
+scripts under `completions/` and the page as `man/openkrx.1`, so an
+installation from an archive can copy them rather than regenerate them.
 
 ## Documentation
 

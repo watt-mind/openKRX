@@ -91,7 +91,14 @@ NFC normalisation the extraction planner compares destination paths with. It
 deliberately does not use a general-purpose ZIP crate, because the
 strictness rules below are exactly the decisions such a crate would make
 differently. `openkrx-cli` owns
-argument handling and presentation and carries no package semantics.
+argument handling and presentation and carries no package semantics. Its
+dependencies are `clap`, `serde` and `serde_json`, plus `clap_complete` and
+`clap_mangen` (both MIT OR Apache-2.0, both maintained by the `clap` authors
+in the same repository and released against the same MSRV). Those two are
+what let `completions` and `man` be generated from the parser the binary
+already carries, rather than hand-written and left to drift; both are used at
+run time by exactly one command each, are pulled in with default features
+off, and add one transitive dependency between them, `roff`.
 
 `openkrx-core` has one feature, `synthetic-writer`, which is off by default
 and compiles the test-only synthetic writers in `src/synthetic/`. It exists so
@@ -165,6 +172,7 @@ of which is private, so `missing_docs` alone could never fire there — denies
 | `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the core entry points, and hands the result to a renderer. |
 | `src/input.rs` | The only I/O in openKRX: opening a file exactly as named, or reading standard input as binary, bounded by the input cap. |
 | `src/skill.rs` | The agent skill document, embedded with `include_str!`, and the `skill` command that writes it to stdout outside the envelope. |
+| `src/generate.rs` | The `completions` and `man` commands: a shell completion script and the roff manual page, generated from the same `clap` definition at run time and written to stdout outside the envelope. |
 | `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*`, `manifest.invalid.*` and `repack.*` diagnostic explains itself with. |
 | `src/commands/mod.rs` | The shared check, outcome and name views every command's report is built from. |
 | `src/commands/inspect.rs` | The `inspect` report: observations, the declared document, and every check. |
@@ -987,7 +995,8 @@ A19 and any declared attachment size cites M13.
 
 The supported surface is `openkrx --help`, `openkrx --version`,
 `openkrx capabilities [--json]`, the three reader commands, the three commands
-that write — `extract`, `create` and `repack` — and `skill`:
+that write — `extract`, `create` and `repack` — and the three commands that
+describe the binary itself, `skill`, `completions` and `man`:
 
 ```text
 openkrx inspect            <FILE|-> [--json]
@@ -999,6 +1008,8 @@ openkrx create             --manifest <FILE> --stdout [--json]
 openkrx repack             <FILE|-> --edits <FILE> --out <FILE> [--json]
 openkrx repack             <FILE|-> --edits <FILE> --stdout [--json]
 openkrx skill
+openkrx completions        <bash|zsh|fish|powershell|elvish>
+openkrx man
 ```
 
 | Command | Input | Output | Envelope | Exit statuses |
@@ -1011,6 +1022,8 @@ openkrx skill
 | `create` | one manifest and the files it names | stdout and `--out <FILE>`, or the package on stdout | yes, with `--json` | 0, 2, 5, 6, 8, 9 |
 | `repack` | one package, one edits document and the files it names | stdout and `--out <FILE>`, or the package on stdout | yes, with `--json` | 0, 2, 5, 6, 7, 8, 9 |
 | `skill` | none | stdout | **no: it bypasses the envelope** | 0, 2 |
+| `completions` | none | stdout | **no: it bypasses the envelope** | 0, 2 |
+| `man` | none | stdout | **no: it bypasses the envelope** | 0, 2 |
 
 **`skill` is outside the envelope.** It writes the agent skill document
 embedded in the binary — the same bytes as
@@ -1023,6 +1036,22 @@ exits 0. It is not a package operation and does not appear in
 would only make the one thing a caller wants harder to reach, and there is no
 package for a `command`, `data` or `verified` field to be about.
 
+**`completions` and `man` are outside the envelope too, for the same
+reason.** `completions <bash|zsh|fish|powershell|elvish>` writes that shell's
+completion script to stdout; `man` writes the roff manual page for the whole
+binary, with every subcommand a section inside the one page rather than a page
+of its own. Both are generated at run time from `Args::command()` — the same
+`clap` definition the dispatch reads — so neither can describe a surface this
+build does not have, and neither reads a package, takes a `FILE` or takes
+`--json`. Passing any of those, omitting the shell name, or naming a shell
+`clap_complete` does not support is a usage error that exits 2; a successful
+run exits 0 and writes nothing on stderr. Neither is a package operation and
+neither appears in `capabilities().operations`.
+
+Their bytes depend on the `clap_complete` and `clap_mangen` versions the
+binary was built against, so neither has a golden case; see
+[the golden output contract](testing.md#golden-output-contract).
+
 The three reader commands write nothing anywhere. `extract` writes exactly
 the files the package declares, into the directory `--into` names, under the
 rules in [Extraction output](#extraction-output). `create` and `repack` each
@@ -1033,9 +1062,11 @@ write one package to a path that must not already exist, under the rules in
 Each reader command takes exactly one input: a path, opened exactly as
 written with no normalisation, globbing or extension inference on any
 platform, or `-` for standard input, read as binary on every platform. There
-are no limit-override flags, no colour or TTY detection, no configuration
-file and no shell completions; the same arguments produce the same bytes on
-every supported system. This is a reader, not a conformance checker: what
+are no limit-override flags, no colour or TTY detection and no configuration
+file; the same arguments produce the same bytes on every supported system.
+`completions` generates a script a shell reads, which changes nothing about
+how openkrx itself parses a command line. This is a reader, not a conformance
+checker: what
 its output may state follows the rules in [profile.md](profile.md) and the
 rule-to-check map in [conformance.md](conformance.md).
 

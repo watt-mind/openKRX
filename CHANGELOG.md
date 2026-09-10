@@ -16,6 +16,30 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **Shell completions and a manual page ship with the CLI.** `openkrx
+  completions <bash|zsh|fish|powershell|elvish>` writes that shell's
+  completion script to standard output, and `openkrx man` writes the roff
+  manual page for the whole binary — every subcommand is a section inside the
+  one page. Both are generated at run time from the same `clap` definition the
+  binary dispatches on, by `clap_complete` and `clap_mangen` (MIT OR
+  Apache-2.0, new dependencies of the CLI crate only), so neither can describe
+  a surface the build in front of you does not have. Both bypass the JSON
+  envelope exactly as `skill` does: nothing on stderr and exit `0` on success,
+  no `--json` and no `FILE`, and a usage error — an unknown or missing shell
+  name included — exits `2` with an empty standard output. Neither is a
+  package operation and `capabilities().operations` is unchanged. Every
+  release archive now carries `completions/openkrx.{bash,zsh,fish,ps1,elv}`
+  and `man/openkrx.1`, written by the packaged binary and checked by the smoke
+  job. Their bytes follow the `clap_complete` and `clap_mangen` versions
+  rather than openKRX's own contract, so neither has a golden case;
+  `crates/openkrx-cli/tests/completions.rs` holds what does matter, deriving
+  the subcommand list from the binary's own `--help`. The release job now also
+  marks the draft as a pre-release whenever the tag carries a hyphen — the
+  SemVer pre-release form, so `v0.1.0-alpha.1` is one and `v0.1.0` is not —
+  rather than leaving the flag to the person publishing the draft, who cannot
+  undo a stable release once tooling has fetched it. The draft is still created
+  by the workflow and still published by a human.
+
 - **Reparse-point confinement is exercised on Windows CI.** The output rules
   that keep `extract`, `create` and `repack` inside the destination the caller
   named were proven only on Linux and macOS, because their tests need a
