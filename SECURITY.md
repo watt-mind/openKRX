@@ -234,9 +234,10 @@ phase, is in [architecture.md](docs/architecture.md#extraction-output) and
 [architecture.md](docs/architecture.md#creating-a-package); the codes are
 catalogued in [codes.md](docs/codes.md#output-codes). Test names in this
 table are in `crates/openkrx-cli/tests/extract.rs`, except where noted;
-`create`'s are in `crates/openkrx-cli/tests/create.rs`. A Windows-only test
-carries the module it lives in — `junctions::` or `symbolic_links::` — because
-some of them share a bare name with the Unix test of the same rule.
+`create`'s are in `crates/openkrx-cli/tests/create.rs`. A test that lives in a
+nested module carries that module — `junctions::`, `symbolic_links::`,
+`injection::` — because some of them share a bare name with the test of the
+same rule outside it.
 
 Every failure exits 9 and leaves the destination as it was found: either the
 run was refused before the first write, or the undo pass removed everything
