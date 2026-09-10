@@ -143,11 +143,14 @@ Both layers are fuzzed, and so are the structural checks over them.
 drives `metadata::parse`, and `structure` drives `profile::check` over an
 inventory the reader accepted — the path that re-reads the marker entry and the
 metadata document out of an archive, and the one this table's no-panic rows
-cover on random input. Each runs for a bounded 30 seconds per pull request; the
+cover on random input. Each runs for a bounded 30 seconds per pull request,
+and each is one of the five targets the weekly campaign runs for a larger
+budget from a corpus it carries forward from the previous campaign; every
+crash either lane retains is replayed on every push. What the accumulation
+has actually reached is the campaign history, not the mechanism, so the
 exhaustive truncation and single-byte mutation sweeps remain the load-bearing
-compensating checks, because a short run is not a campaign. All are described
-in [testing.md](docs/testing.md#fuzzing), with what the lane still does not
-do.
+compensating checks. All are described in
+[testing.md](docs/testing.md#fuzzing), with what each lane still does not do.
 
 ## Threat-model mapping: extraction planning layer
 
@@ -189,9 +192,11 @@ rules in
   Greek and Cyrillic text these names can realistically hold, but a pair
   that only full case folding equates — a Cherokee or Deseret pair, or a
   final sigma against its non-final form in an unusual position — would pass
-  planning and could still collide on a case-insensitive filesystem. A
-  no-clobber creation rule in the filesystem half is the compensating
-  control, and it is not implemented yet.
+  planning and could still collide on a case-insensitive filesystem. The
+  compensating control is the no-clobber creation rule of the
+  [output layer](#threat-model-mapping-extraction-output-layer): a target
+  that is already there refuses the whole extraction before anything is
+  written.
 - **Normalisation form is a choice, not a fact.** A filesystem that stores
   NFD (older APFS behaviour) or normalises on lookup may equate paths this
   layer keeps apart in the other direction. The plan is refused where a
@@ -203,26 +208,31 @@ rules in
   refused as a link. Should a further host be found to store a mode there,
   an entry it wrote would classify as `Unknown` and be planned as an
   ordinary file — its declared link target written as file content, never
-  followed and never created as a link. The compensating control is that
-  nothing writes yet, and that adding such a host is a one-line mapping with
-  a test; no host is added on a guess.
+  followed and never created as a link. The compensating control is that the
+  output layer creates regular files and directories only, and never a link
+  of any kind, and that adding such a host is a one-line mapping with a test;
+  no host is added on a guess.
 - **A Unix mode of zero is treated as a special file.** Some writers set a
   Unix host system without a meaningful `st_mode`. Such an archive is
   refused rather than extracted on an assumption. If a real producer is ever
   observed doing this, it is a documented decision to revisit with evidence,
   not a bug to fix by guessing.
-- **The lane is short, not a campaign.** The `extract_plan` fuzz target runs
-  `archive::inventory` and then `extract::plan` on random bytes, and asserts
-  the planner's own invariant over every produced plan: no component is empty,
-  `.` or `..`, none holds `/` or a backslash, and the first is non-empty, so a
-  caller can join the components against its destination blindly. It runs for a
-  bounded 30 seconds per pull request
-  ([testing.md](docs/testing.md#fuzzing)); the named tests above, not the lane,
-  are what hold each individual rule.
+- **The per-push lane is short, and the campaign is weekly.** The
+  `extract_plan` fuzz target runs `archive::inventory` and then
+  `extract::plan` on random bytes, and asserts the planner's own invariant
+  over every produced plan: no component is empty, `.` or `..`, none holds
+  `/` or a backslash, and the first is non-empty, so a caller can join the
+  components against its destination blindly. It runs for a bounded 30
+  seconds per pull request and for a larger budget in the weekly campaign,
+  from a corpus carried forward from the previous one
+  ([testing.md](docs/testing.md#fuzzing)); the named tests above, not either
+  lane, are what hold each individual rule.
 - **Planning proves nothing about writing.** A produced plan says a
   destination is describable, not that it can be created: permissions, an
   existing file, a case-insensitive filesystem and a concurrent writer are
-  all invisible to a pure function. The filesystem ticket owns them.
+  all invisible to a pure function. They belong to the
+  [output layer](#threat-model-mapping-extraction-output-layer), which owns
+  them and states its own residual risks.
 
 ## Threat-model mapping: extraction output layer
 
@@ -367,7 +377,7 @@ in [codes.md](docs/codes.md#creation-codes).
   than choosing one, so such a package is detected on the way back in rather
   than read two ways; a caller that must be certain reads its own output
   back, which `create::verify_round_trip` does in one call.
-- **The writer/reader invariant is fuzzed, briefly.** The `create_round_trip`
+- **The writer/reader invariant is fuzzed briefly on every push.** The `create_round_trip`
   fuzz target builds a bounded `PackageSpec` out of random bytes — header
   strings, 0 to 4 attachments, a timestamp — and calls `create::package`. When
   bytes come back it asserts the layer's central promise: `verify_round_trip`
@@ -375,7 +385,8 @@ in [codes.md](docs/codes.md#creation-codes).
   When the request is refused it asserts that the code is one
   [docs/codes.md](docs/codes.md) catalogues, which it reads from that document,
   so no `create.*` code can reach a caller undocumented. It runs for a bounded
-  30 seconds per pull request ([testing.md](docs/testing.md#fuzzing)); the
+  30 seconds per pull request, and for a larger budget in the weekly campaign
+  from a corpus carried forward ([testing.md](docs/testing.md#fuzzing)); the
   named tests in the table above are what hold each individual rule.
 
 ## Threat-model mapping: repacking layer

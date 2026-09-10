@@ -161,8 +161,10 @@ These are the same facts the 2026-09-10 readiness assessment in
 [releasing.md](releasing.md#readiness-status) weighs, read from the other
 end: the first two risks below are why release gate 1 is not met and why a
 first release could only be a labelled pre-release, and the extraction race
-on the two platforms that still have it, the uncovered Windows symbolic link
-and the smoke-only fuzzing are why gate 2 is only partially met. The rest —
+that is still open on Windows — and on a Linux kernel too old for `openat2`,
+which every successful report says — together with a weekly fuzzing campaign
+that has not yet accumulated a history, are why gate 2 is only partially met.
+The rest —
 strictness never measured against real
 archives, inherited deflate correctness, reasoned rather than measured
 limits, the classifier keying on a code's category — are disclosed
@@ -180,14 +182,16 @@ list weakens the other; if one changes, change both in the same pull request.
   renders `Unresolved` as a pass, or that treats
   `StructureSummary::Consistent` as acceptance, would be making a claim
   openKRX explicitly does not make.
-- **Both parsers are fuzzed only as a smoke test.** The `Fuzz (build only)`
-  job runs each target for 30 seconds from an empty corpus, which is enough
-  to prove the harness
-  executes and to catch a shallow regression, and no more; it is not a
-  campaign and the lane passing is not evidence that a reader is fuzz-clean.
+- **The per-push fuzz lane is a smoke budget, and the campaign is young.**
+  The `Fuzz (build only)` job runs each of the five targets for 30 seconds
+  from a seeded corpus, which is enough to prove the harness executes and to
+  catch a shallow regression, and no more; the lane passing is not evidence
+  that a reader is fuzz-clean. The campaign is the weekly lane, which fuzzes
+  each target for a larger budget from a corpus it carries forward from the
+  previous campaign, and its accumulated depth is only what the campaigns it
+  has actually run reached — a mechanism that exists is not a history.
   Beyond that the sweeps cover truncations and one-byte mutations of valid
-  inputs, a narrow neighbourhood. Nothing has explored inputs further away,
-  and `profile::check` and `extract::plan` have no target at all.
+  inputs, a narrow neighbourhood.
 - **Strictness has never been measured against real archives.** Exact byte
   coverage, ambiguity refusal and the case-folded collision rule will
   refuse archives that a permissive reader opens. Whether real producers
@@ -200,17 +204,20 @@ list weakens the other; if one changes, change both in the same pull request.
   format description implies, not from a corpus. A real package larger than
   a ceiling would be refused as over-limit, correctly by the contract and
   unhelpfully in practice, until the ceiling is revisited with evidence.
-- **The extraction threat model is live, and one part of it is still open on
-  one platform.** `extract` writes into a directory the caller names, so
-  every row of the output threat model in [SECURITY.md](../SECURITY.md) now
-  applies to real files. On Unix every path it creates, and every path the
-  undo pass removes, is resolved beneath one destination descriptor — by the
-  kernel with `openat2` where it exists, by an `O_NOFOLLOW` component walk
-  otherwise — so a component replaced between the check and the creation is
-  refused rather than followed. On Windows, and on a Linux kernel that has no
-  `openat2`, confinement still rests on `symlink_metadata` and exclusive
-  creation, which lose to a writer who can make that replacement; that race
-  is stated, not tested, in
+- **The extraction threat model is live, and part of it is still open where
+  the portable arm runs.** `extract` writes into a directory the caller
+  names, so every row of the output threat model in
+  [SECURITY.md](../SECURITY.md) now applies to real files. On Unix every path
+  it creates, and every path the undo pass removes, is resolved beneath one
+  destination descriptor — by the kernel with `openat2` where it exists, by an
+  `O_NOFOLLOW` component walk otherwise — so a component replaced between the
+  check and the creation is refused rather than followed. The walk is not the
+  kernel's equal: unlike `RESOLVE_BENEATH` it cannot refuse a **mount**
+  planted at a component, so a principal who can mount inside the destination
+  can still place output on another filesystem. On Windows, and on a Linux
+  kernel that has no `openat2`, confinement still rests on `symlink_metadata`
+  and exclusive creation, which lose to a writer who can make that
+  replacement; that race is stated, not tested, in
   [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer). A crash
   still leaves partial output behind the `.openkrx-extract.partial` marker,
   because the undo pass runs on a returned error and not on a signal.
