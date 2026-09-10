@@ -16,6 +16,7 @@
 
 use openkrx_core::Capabilities;
 
+use crate::commands::create::CreateData;
 use crate::commands::extract::ExtractData;
 use crate::commands::inspect::{AttachmentView, InspectData, MetadataView};
 use crate::commands::list::ListData;
@@ -177,6 +178,53 @@ destination was changed or removed. Paths are relative to the destination."
     lines.join("\n")
 }
 
+/// The creation report: what was written, and what reading it back said.
+///
+/// The manifest is not echoed: no file name, no identifier and no path
+/// reaches this report, because the caller wrote them and a report that
+/// repeats them cannot be pasted into a bug report unedited. What it does say
+/// is the part a caller cannot see from the file itself — that openKRX read
+/// the package back, and which rules that reading left open, so that the
+/// `4` a later `validate-structure` exits with is expected rather than
+/// alarming.
+#[must_use]
+pub fn create(data: &CreateData, to_stdout: bool) -> String {
+    let rules = if data.unresolved_rules.is_empty() {
+        "Reading it back left no rule undecided.".to_owned()
+    } else {
+        format!(
+            "Reading it back left {} undecided, so validate-structure over this package exits 4. \
+That is the expected outcome for a package openkrx wrote, not a defect in it.",
+            data.unresolved_rules.join(", ")
+        )
+    };
+    [
+        format!(
+            "Wrote {} {} in {} {}.",
+            data.bytes_written,
+            plural_u64(data.bytes_written, "byte", "bytes"),
+            data.entries,
+            plural(data.entries, "entry", "entries"),
+        ),
+        format!(
+            "Layout: {}, which docs/profile.md documents and no real producer has been checked \
+against. Nothing was signed.",
+            data.layout
+        ),
+        rules,
+        if to_stdout {
+            "The package bytes went to standard output; no file was created and nothing on disk \
+was changed."
+        } else {
+            "Nothing was overwritten: the file was created new, and no existing file was changed \
+or removed."
+        }
+        .to_owned(),
+        BOUNDARY.to_owned(),
+    ]
+    .join("\n")
+}
+
 /// The extra line a failed extraction writes on standard error.
 ///
 /// A caller who has just been told an extraction failed needs one more fact:
@@ -201,6 +249,11 @@ there. Nothing that was already in the destination was touched",
 
 /// `one` when the count is exactly one, `many` otherwise.
 fn plural(count: u32, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
+}
+
+/// The same, for a byte count, which does not fit in a `u32`.
+fn plural_u64(count: u64, one: &'static str, many: &'static str) -> &'static str {
     if count == 1 { one } else { many }
 }
 

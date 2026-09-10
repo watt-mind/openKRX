@@ -172,7 +172,7 @@ defended and is stated as a residual risk rather than tested.
 
 ## KRX-06: Deterministic profile writer
 
-Split into a core half, which is done, and a command half, which is not.
+Split into a core half and a command half, both done.
 
 Status of the core half: **done**. `openkrx_core::create::package` writes the
 canonical documented layout deterministically; see
@@ -183,10 +183,16 @@ so the writer exists on an operator decision recorded in
 consistent with the documented layout", never conforming, with
 interoperability against real producers unverified.
 
-Status of the command half: **next**. `create` on the command line, writing
-the bytes to a file the caller names under a no-clobber policy, with its own
-`output.*` codes, its own JSON report, `capabilities().operations` gaining
-`create`, and the skill document and README updated with it.
+Status of the command half: **done**. `openkrx create --manifest <FILE>
+--out <FILE>` writes the bytes to a file the caller names under the
+[output layer](../SECURITY.md#threat-model-mapping-extraction-output-layer)'s
+no-clobber policy, from a strictly validated JSON manifest documented in
+[architecture.md](architecture.md#creating-a-package); it reuses the
+`output.*` codes, adds seven `manifest.invalid.*` codes and
+`create.internal.self_check_failed`, reports `bytes_written`, `entries`,
+`unresolved_rules[]` and `layout`, and reads the written package back through
+the structural checks before reporting success.
+`capabilities().operations` names `create` and the stage is `reader-writer`.
 
 Dependencies: KRX-01, KRX-03, and KRX-05's safe output layer. Owner: writer
 contributor; core authoring modules, CLI create, writer tests and contract.
@@ -198,19 +204,27 @@ derived and a disagreeing caller-supplied value refused; the reader's limits
 and the archive and extraction name rules enforced on the output; stable
 `create.*` codes; no signing, encryption or submission functionality.
 
-Acceptance, command half: writes to a caller-named path, refuses an existing
-output, reports what it wrote, and claims nothing about conformance.
+Acceptance, command half, met: writes to a caller-named path, refuses an
+existing output in any form and a destination directory that is missing, not
+a directory or a link, removes a half-written file on failure, reports what
+it wrote, and claims nothing about conformance — a created package passes
+`validate-structure` with exit 4 and never 3, which is the documented
+definition of success.
 
 Verification, core half, done: determinism across repeated runs and across
 independently built requests, reader round-trips with no failing check and
 exactly the expected unresolved rules, payload byte identity, every code at
-its boundary, and coverage above the workspace floor. Verification of the
-command half — no-clobber and output failure cases on all supported operating
-systems — belongs to that ticket.
+its boundary, and coverage above the workspace floor.
+
+Verification of the command half, done: the round trip through `inspect`,
+`list`, `validate-structure` and `extract`, byte identity across two runs and
+between `--out` and `--stdout`, one case per manifest defect, the no-clobber
+and output-failure cases on all three supported operating systems, and canary
+tests holding every manifest value out of both streams.
 
 ## KRX-07: Consumer contract and first release review
 
-Status: planned, after KRX-06's command half.
+Status: planned, and next: KRX-06's command half is done.
 
 Dependencies: KRX-04, KRX-05, and KRX-06. Owner: integration contributor;
 consumer examples, public contract documentation, and release checklist.

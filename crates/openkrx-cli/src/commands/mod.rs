@@ -6,11 +6,14 @@
 //! which `crate::render` then writes as JSON or as text. Nothing here can
 //! introduce a rule the core crate does not hold.
 //!
-//! `extract` is the one exception to the first sentence, and only in one
-//! direction: its report is the record of what `crate::extract` actually wrote,
-//! built while writing. It still decides no package semantics — the planner
-//! did that before a byte was written.
+//! `extract` and `create` are the exceptions to the first sentence, and only
+//! in one direction: their reports record what `crate::extract` and
+//! `crate::create` actually wrote, built while writing. They still decide no
+//! package semantics — the planner decided extraction before a byte was
+//! written, and `openkrx_core::create::package` decided every byte `create`
+//! reports on.
 
+pub mod create;
 pub mod extract;
 pub mod inspect;
 pub mod list;

@@ -1,12 +1,13 @@
 ---
 name: openkrx
 description: >-
-  Inspect, list, structurally check and extract Hungarian KRX document
-  packages (.krx, the ZIP-based OCD container used in Hungarian
+  Inspect, list, structurally check, extract and create Hungarian KRX
+  document packages (.krx, the ZIP-based OCD container used in Hungarian
   administrative correspondence) with the openkrx CLI. Use whenever a task
   involves a .krx file, a KÉR or Hivatali kapu consignment package, a
-  KULDEMENY_META.xml metadata document, or getting the attachments out of
-  one. openkrx reads locally, uploads nothing, and verifies nothing.
+  KULDEMENY_META.xml metadata document, getting the attachments out of one,
+  or building one from a manifest. openkrx works locally, uploads nothing,
+  and verifies nothing.
 license: MIT
 compatibility: Requires the openkrx CLI on PATH; run `openkrx --version`.
 metadata:
@@ -15,13 +16,19 @@ metadata:
   source: https://github.com/watt-mind/openKRX
 ---
 
-openkrx is a command-line reader for KRX document packages: the ZIP-based
+openkrx is a command-line tool for KRX document packages: the ZIP-based
 container Hungarian public bodies and Magyar Posta services move
 correspondence in. It lists the archive entries, prints what the enclosed
 `KULDEMENY_META.xml` declares about itself, runs a fixed inventory of
-structural checks, and writes the package's files into a directory you name.
-It opens no socket, keeps no cache, logs nothing, and performs no
-cryptography of any kind.
+structural checks, writes the package's files into a directory you name, and
+writes a new package from a manifest you give it. It opens no socket, keeps
+no cache, logs nothing, and performs no cryptography of any kind.
+
+Writing is as bounded as reading. `create` emits one documented layout,
+reads its own output back through the same structural checks, and produces
+byte-identical packages from the same inputs — and a package it wrote is
+"structurally consistent with the documented layout", never a conforming
+one, never accepted by any service on openkrx's word.
 
 It is deliberately not a validator. The public sources describing KRX
 contradict each other on nine essential points, so openkrx reports what it
@@ -158,11 +165,11 @@ invent an installer command.
 | `2` | `usage` | The arguments were rejected: unknown command, missing `FILE`, missing `--into`, unknown flag. Also `openkrx skill --json` or `openkrx skill FILE`. | Fix the command line. **No envelope is written**; nothing was read. |
 | `3` | `structure_inconsistent` | `validate-structure` only: at least one check failed. | Report which checks failed, by `check` and `code`. |
 | `4` | `structure_unresolved` | `validate-structure` only: nothing failed, at least one rule could not be decided. | Report the rules in `unresolved_rules`. Not a defect. |
-| `5` | `input` | The input could not be opened or read, or it reached the 64 MiB cap. | Check the path, permissions, and that it is a file. |
-| `6` | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. | Report it; a truncated transfer is worth re-fetching. |
+| `5` | `input` | The input could not be opened or read, or it reached the 64 MiB cap. For `create`, the manifest or one of its attachment files. | Check the path, permissions, and that it is a file. Read `attachment_index` to see which attachment. |
+| `6` | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. For `create`, the manifest does not describe a package that can be written (`manifest.invalid.*`, `create.invalid.*`, `create.unsafe_name.*`). | Report it; a truncated transfer is worth re-fetching. For `create`, read `error.field` and fix that field. |
 | `7` | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, multi-disk, another compression method, a refused XML feature. | Say the package is not damaged and another reader may open it. |
-| `8` | `limit` | A documented parsing or extraction limit was exceeded. | Report the `limit` and `observed` numbers. Do not retry. |
-| `9` | `output` | `extract` only: the destination could not be used, or a write failed. | Read `cleanup`; nothing incomplete was left behind. |
+| `8` | `limit` | A documented parsing, extraction or writing limit was exceeded. | Report the `limit` and `observed` numbers. Do not retry. |
+| `9` | `output` | `extract` and `create` only: the destination could not be used, or a write failed. | Read `cleanup`; nothing incomplete was left behind. |
 
 There is no status `1`. Statuses `3` and `4` are successful runs whose
 *finding* is negative: the report is complete and `ok` is `true`.
@@ -209,9 +216,14 @@ A failed one:
 
 `error` carries `code` (the stable dotted string), `category` (the word for
 the exit status), and, when the failure is scoped or numeric,
-`entry_index`, `limit` and `observed`. It never carries the input path, an
-entry name or a metadata value — deliberately, so that a diagnostic can be
-logged safely. `extract` failures carry a `cleanup` object as well. The
+`entry_index`, `limit` and `observed`. A `create` failure adds `field` — the
+JSON Pointer path of the manifest field it concerns, such as
+`/metadata/source_system` — and `attachment_index`, the position in the
+manifest's `attachments` array (array indices are left out of `field`). It
+never carries the input path, an entry name, a metadata value or anything a
+manifest author wrote, including an unknown key's own spelling —
+deliberately, so that a diagnostic can be logged safely. `extract` and
+`create` failures carry a `cleanup` object as well. The
 complete code catalogue, with what each code means and which status it maps
 to, is `docs/codes.md` in the openKRX repository; quote the code itself to
 the user and look the meaning up there rather than guessing from the name.
@@ -232,8 +244,9 @@ openkrx capabilities --json
 ```
 
 Confirms the binary and lists the implemented package operations
-(`inspect`, `list`, `validate-structure`, `extract`). Do this once per
-session, not once per file. `verified` is `false` here too.
+(`inspect`, `list`, `validate-structure`, `extract`, `create`); `data.stage`
+reads `reader-writer`. Do this once per session, not once per file.
+`verified` is `false` here too.
 
 ### 2. Inspect the package
 
@@ -380,6 +393,85 @@ nothing had been written at all, which is true of every refusal decided
 before the first write. `left_in_place` above `0` is the one case where the
 destination is not as you found it: say so.
 
+### 6. Create a package from a manifest
+
+```sh
+openkrx create --manifest manifest.json --out ./package.krx --json
+```
+
+Use this when the task is to *build* a package, not to read one. The
+manifest is one JSON object and openkrx has no clock, so the same manifest
+and the same attachment files always produce byte-identical bytes:
+
+```json
+{
+  "schema_version": 1,
+  "timestamp": "2026-01-02T03:04:06",
+  "metadata": {
+    "version": "0.9",
+    "source_system": "KER",
+    "consignment_id": "SYNTHETIC-CONSIGNMENT-1",
+    "created_at": "2026-01-02T03:04:06",
+    "consignment_kind": "KULDEMENY",
+    "test": true
+  },
+  "attachments": [
+    {"path": "invoice.pdf", "description": "the invoice"}
+  ]
+}
+```
+
+- `schema_version` is `1`, `timestamp` is required and reads
+  `YYYY-MM-DDTHH:MM:SS` (1980 to 2107, odd seconds rounded down). There is
+  no "now": openkrx never reads a clock.
+- `metadata` mirrors the document's own fields: `version`
+  (`KRX_VERZIOSZAM`), `source_system` (`NOVA`, `KIR3`, `KER`, `POSTA`,
+  `IMAP`), `consignment_id`, `created_at` (written verbatim, never
+  interpreted), `consignment_kind` (`KULDEMENY`, `NYUGTA`, `EXPEDIALAS`,
+  `TERTIVEVENY`, `HIBAJELZES`), `test`, and the optional `barcode`,
+  `reference_id`, `error_code` and `note`. An optional `dispatches` array
+  exists only to assert `declared_attachment_count`; leave it out and
+  openkrx derives everything.
+- `attachments[]` takes `path` — a local file, resolved against the
+  *manifest's own directory* and read exactly as written — plus the optional
+  `file_name` (the name inside the package; the path's last component by
+  default) and `description` (`MELLEKLET_LEIRASA`; omitting it is what makes
+  check `schema_optional_fields` cite `M11`).
+- **Every key is checked.** A key the schema does not define is refused with
+  `manifest.invalid.unknown_field` and exit `6`, not ignored — a misspelled
+  `attachments` would otherwise produce an empty package and a success
+  report. The refusal names the *object* in `error.field`, as a JSON Pointer
+  such as `/metadata`, and never the key you wrote.
+- `--out` must not exist in any form and its parent must be an existing real
+  directory. Nothing is overwritten (`output.exists`, exit `9`), and a
+  failure after the file was created removes it again. Use `--stdout` to
+  write the package bytes to stdout instead; the report then goes to stderr,
+  including the JSON object under `--json`. **In `--stdout` mode stdout
+  carries the package or nothing**: a failure leaves it empty and puts the
+  whole report on stderr, so read the exit status first and parse stderr, not
+  stdout, when you piped the package somewhere.
+
+On success `data` carries `bytes_written`, `entries` (the marker, the
+metadata document and one per attachment), `unresolved_rules[]` and
+`layout`, which is always `canonical-documented`.
+
+**The definition of success is `validate-structure` exiting `4`.** openkrx
+reads every package it writes back through the structural checks before
+reporting anything, so a written package never fails one. It is never
+`consistent` either: the marker sits under the `KRX/OCD/` prefix, which is
+what `A19` leaves open, and any declared attachment size cites `M13`. Tell
+the user that exit `4` over a package they just made is the expected
+outcome; an exit `3` would be a defect in openkrx itself, and so is
+`create.internal.self_check_failed` (exit `6`), which means openkrx removed
+what it had written rather than hand back a package its own reader rejects.
+
+**Say what this is not.** A package openkrx wrote is layout-consistent with
+the documented shape and is **not** a conforming KRX package, not signed,
+not something any receiving service has agreed to accept. The layout is
+unverified against every real producer, because `A19`–`A22` and `M11`–`M15`
+remain unresolved. Never tell a user their package is valid, conforming or
+ready to submit.
+
 ### What to do on each failure category
 
 | Exit | Read as | Action |
@@ -391,7 +483,7 @@ destination is not as you found it: say so.
 | `6` | The package is malformed, truncated or ambiguous. | Report the code. `archive.malformed.eocd_missing` covers both a truncated archive and bytes that were never a ZIP at all, and the stderr sentence suggests re-fetching for both: check the file size and type before telling a user their download was corrupted. Nothing else here is retryable. |
 | `7` | An unimplemented feature. | Say the package is not damaged and that another reader may open it. Never present this as the package being broken. |
 | `8` | A documented limit was reached. | Report `limit` and `observed`. There is no flag to raise it; do not retry. |
-| `9` | The destination could not be used, or a write failed. | Read `cleanup`; use a fresh empty directory, or clear a leftover marker. |
+| `9` | The destination could not be used, or a write failed. | Read `cleanup`; use a fresh empty directory, a `--out` file that does not exist, or clear a leftover marker. |
 
 Never loop over variations of a package to see what changes. openkrx is a
 reader, not an oracle, and a package is someone's correspondence.
@@ -407,7 +499,9 @@ Say what was **observed**, in this order:
    code, which were undecided and which rules they cite, and how many did
    not apply and why. Give the summary word and the exit status.
 3. What was extracted: file and directory counts, byte total, where it went,
-   and, on a failure, what `cleanup` reported.
+   and, on a failure, what `cleanup` reported. What was created: the byte
+   count, the entry count, and that `validate-structure` over it exits `4`
+   citing `unresolved_rules[]` — by design, not as a defect.
 4. Anything a human should look at: a `missing` attachment reference, a
    `prefix_variant` resolution, a `count_mismatch`, a name that had to be
    reported as hex, or a leftover marker.
@@ -438,6 +532,8 @@ openkrx inspect            <FILE|-> [--json]
 openkrx list               <FILE|-> [--json]
 openkrx validate-structure <FILE|-> [--json]
 openkrx extract            <FILE|-> --into <DIR> [--json]
+openkrx create             --manifest <FILE> --out <FILE> [--json]
+openkrx create             --manifest <FILE> --stdout [--json]
 openkrx skill
 ```
 
@@ -448,6 +544,7 @@ openkrx skill
 | `list` | one package | stdout | `0`, `2`, `5`, `6`, `7`, `8` |
 | `validate-structure` | one package | stdout | `0`, `2`, `3`, `4`, `5`, `6`, `7`, `8` |
 | `extract` | one package | stdout and `--into DIR` | `0`, `2`, `5`, `6`, `7`, `8`, `9` |
+| `create` | a manifest and its attachment files | stdout and `--out FILE`, or the package on stdout | `0`, `2`, `5`, `6`, `8`, `9` |
 | `skill` | nothing | stdout, no envelope | `0`, `2` |
 
 Every command that reads a package takes exactly one input: a path, opened

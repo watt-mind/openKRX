@@ -23,7 +23,7 @@ CATALOGUE = ROOT / "docs" / "codes.md"
 # crates/openkrx-cli/src/exit.rs parses this exact line — one flat tuple of
 # double-quoted names on one line — to learn the head set, so a head added here
 # alone, or there alone, fails one of the two gates.
-HEADS = ("archive", "create", "extract", "input", "metadata", "output")
+HEADS = ("archive", "create", "extract", "input", "manifest", "metadata", "output")
 
 SEGMENT = r"[a-z0-9_]+"
 HEAD = "|".join(HEADS)

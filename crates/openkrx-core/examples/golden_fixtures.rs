@@ -62,13 +62,71 @@ fn main() {
 /// Every golden fixture, as `(file name, bytes)`, in a fixed order.
 fn fixtures() -> Vec<(&'static str, Vec<u8>)> {
     let consistent = consistent();
-    vec![
+    let mut fixtures = vec![
         ("consistent.krx", consistent.clone()),
         ("no-prefix.krx", no_prefix()),
         ("missing-attachment.krx", missing_attachment()),
         ("malformed.krx", truncated(&consistent)),
         ("over-limit.krx", over_limit()),
+    ];
+    fixtures.extend(manifests());
+    fixtures
+}
+
+/// The inputs of the `create` golden cases.
+///
+/// These are not archives: they are the manifest documents and the two small
+/// attachment files the creation cases point `--out` at a temporary directory
+/// with. They are committed for the same reason the packages are — the golden
+/// contract needs the same input bytes on every machine — and an attachment
+/// path inside a manifest is resolved against the manifest's own directory,
+/// which is this one.
+fn manifests() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
+        ("create-attachment-a.txt", ATTACHMENT_A.to_vec()),
+        ("create-attachment-b.txt", ATTACHMENT_B.to_vec()),
+        ("create-manifest.json", manifest(ATTACHMENTS).into_bytes()),
+        (
+            "create-invalid-manifest.json",
+            // `describtion` is a key the schema does not define, and the whole
+            // manifest is refused rather than the value quietly dropped.
+            manifest(
+                "{\"path\": \"create-attachment-a.txt\", \
+\"describtion\": \"a misspelled key\"}",
+            )
+            .into_bytes(),
+        ),
+        (
+            "create-missing-attachment.json",
+            manifest("{\"path\": \"no-such-attachment.txt\"}").into_bytes(),
+        ),
     ]
+}
+
+/// The bytes of the first golden attachment.
+const ATTACHMENT_A: &[u8] = b"synthetic attachment a\n";
+/// The bytes of the second golden attachment.
+const ATTACHMENT_B: &[u8] = b"synthetic attachment b\n";
+/// The `attachments` array of the manifest that is meant to succeed.
+const ATTACHMENTS: &str = "{\"path\": \"create-attachment-a.txt\", \
+\"description\": \"the first synthetic attachment\"},\n    \
+{\"path\": \"create-attachment-b.txt\", \"file_name\": \"renamed-b.txt\", \
+\"description\": \"the second synthetic attachment\"}";
+
+/// One manifest carrying `attachments`, with every other value fixed.
+///
+/// The timestamp is written out rather than read from a clock, here as
+/// everywhere else: `create` has no clock, and the golden bytes must be the
+/// same in every run.
+fn manifest(attachments: &str) -> String {
+    format!(
+        "{{\n  \"schema_version\": 1,\n  \"timestamp\": \"2026-01-02T03:04:06\",\n  \
+\"metadata\": {{\n    \"version\": \"0.9\",\n    \"source_system\": \"KER\",\n    \
+\"consignment_id\": \"SYNTHETIC-CONSIGNMENT-1\",\n    \
+\"created_at\": \"2026-01-02T03:04:06\",\n    \
+\"consignment_kind\": \"KULDEMENY\",\n    \"test\": true\n  }},\n  \
+\"attachments\": [\n    {attachments}\n  ]\n}}\n"
+    )
 }
 
 /// A document declaring `count` attachments under `location_prefix`.

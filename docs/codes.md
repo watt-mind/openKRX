@@ -11,13 +11,15 @@ enum is `#[non_exhaustive]`; a consumer matches on the code string and must
 treat an unknown code as a failure rather than as a success.
 
 `scripts/check-codes.py` keeps this catalogue honest. It extracts every
-`"archive.…"`, `"create.…"`, `"extract.…"`, `"input.…"`, `"metadata.…"` and
-`"output.…"` string literal from `crates/*/src/**` and fails when a code
-exists in the sources but not here, or here but not in the sources. It runs
+`"archive.…"`, `"create.…"`, `"extract.…"`, `"input.…"`, `"manifest.…"`,
+`"metadata.…"` and `"output.…"` string literal from `crates/*/src/**` and
+fails when a code exists in the sources but not here, or here but not in the
+sources. It runs
 as part of `bash scripts/check.sh`.
 
 Test names below are functions in `crates/openkrx-core/tests/`, except in the
-input and output sections, whose tests are in `crates/openkrx-cli/tests/`.
+input, output and manifest sections, whose tests are in
+`crates/openkrx-cli/tests/`.
 Where a code has several asserting tests, the most specific one is named.
 
 Each code also classifies to one exit status, listed in
@@ -30,10 +32,14 @@ its own: `validate-structure` reports 3 when any check failed. The `extract.*`
 codes follow the same segment rule as the archive ones — `extract.unsafe_path.*`
 and `extract.ambiguous.*` to 6, `extract.unsupported.*` to 7,
 `extract.over_limit.*` to 8 — and every `output.*` code classifies to 9, the
-status `extract` alone can exit with. The `create.*` codes follow it too:
-`create.over_limit.*` to 8, and `create.invalid.*` and
-`create.unsafe_name.*` to 6, the status for a package that contradicts itself
-— here, a request describing one that would.
+status the two commands that write, `extract` and `create`, alone exit with.
+The `create.*` codes follow it too: `create.over_limit.*` to 8, and
+`create.invalid.*`, `create.unsafe_name.*` and
+`create.internal.self_check_failed` to 6, the status for a package that
+contradicts itself — here, a request describing one that would, or a written
+package openKRX could not read back. Every `manifest.invalid.*` code
+classifies to 6 for the same reason: a manifest that cannot become a package
+is that same reading, one step earlier.
 
 ## Reading a diagnostic
 
@@ -70,8 +76,9 @@ the shape of a filesystem.
 ## Output codes
 
 `openkrx-cli`, defined in `crates/openkrx-cli/src/exit.rs` and produced by
-`crates/openkrx-cli/src/extract/`. These are the failures of the one command
-that writes. Every one of them classifies to exit status 9, and every one of
+`crates/openkrx-cli/src/extract/` and `crates/openkrx-cli/src/create.rs`.
+These are the failures of the two commands that write. Every one of them
+classifies to exit status 9, and every one of
 them means **nothing incomplete was left behind**: before the first write,
 because the run was refused during preflight; after it, because the undo pass
 removed every path this run had created. A failed run never removes anything
@@ -81,18 +88,27 @@ No code carries a path. The destination is the caller's own argument and a
 diagnostic that repeated it could not be logged safely; the entry index says
 which planned file the failure concerns, wherever the failure belongs to one.
 
+The four codes both commands reach — `output.destination_missing`,
+`output.destination_not_a_directory`, `output.destination_symlink` and
+`output.exists` — carry a different sentence for each of them in human mode,
+because they are fixed by different actions: telling a caller who ran
+`create` to extract into an empty directory is advice about a command they
+did not run. The code and the exit status are the same either way.
+
 The **fields** column is `entry` alone: an output failure carries no limit
-value, because none of these conditions is a ceiling. Tests are in
-`crates/openkrx-cli/tests/extract.rs`, except the classifier rows, which are
+value, because none of these conditions is a ceiling. A `create` refusal
+carries no entry index either — nothing has been written when it is decided.
+Tests are in `crates/openkrx-cli/tests/extract.rs` and
+`crates/openkrx-cli/tests/create.rs`, except the classifier rows, which are
 the `#[cfg(test)]` module in `crates/openkrx-cli/src/exit.rs`.
 
 | Code | Meaning | Fields | Asserted by |
 | --- | --- | --- | --- |
-| `output.destination_missing` | The `--into` directory does not exist. `extract` never creates its destination: a typo would otherwise produce a new tree instead of a refusal. | — | `a_destination_that_does_not_exist_is_refused_rather_than_created` |
-| `output.destination_not_a_directory` | The `--into` argument names something that exists but is not a directory. | — | `a_destination_that_is_a_file_is_refused` |
-| `output.destination_symlink` | The `--into` argument names a symbolic link or a Windows reparse point. Extraction writes only into a real directory, so that the destination the caller sees is the destination that is written. | — | `a_destination_that_is_itself_a_symlink_is_refused` |
+| `output.destination_missing` | The `--into` directory, or the parent directory of the `--out` file, does not exist. Neither command creates its destination: a typo would otherwise produce a new tree instead of a refusal. | — | `a_destination_that_does_not_exist_is_refused_rather_than_created`, `an_output_directory_that_is_missing_or_not_a_directory_is_refused` |
+| `output.destination_not_a_directory` | The `--into` argument, or the parent of the `--out` argument, names something that exists but is not a directory. | — | `a_destination_that_is_a_file_is_refused` |
+| `output.destination_symlink` | The `--into` argument, or the parent of the `--out` argument, names a symbolic link or a Windows reparse point. Both commands write only into a real directory, so that the destination the caller sees is the destination that is written. | — | `a_destination_that_is_itself_a_symlink_is_refused`, `an_output_directory_that_is_a_symbolic_link_is_refused` |
 | `output.partial_marker_present` | The destination already holds `.openkrx-extract.partial`, so an earlier run into it did not finish and its output may be incomplete. Refused rather than added to. | — | `a_marker_left_by_an_interrupted_run_refuses_the_next_one` |
-| `output.exists` | A path the package would create already exists, in any form — file, directory, symbolic link or a dangling link — or is the `.openkrx-extract.partial` marker this run creates first. Nothing is ever overwritten, and the whole extraction is refused before anything is written. | `entry` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code`, `a_directory_named_like_the_marker_is_refused_under_the_no_clobber_code` |
+| `output.exists` | The `--out` file exists, in any form — a dangling symbolic link included — or a path an extraction would create already exists, in any form — file, directory, symbolic link or a dangling link — or is the `.openkrx-extract.partial` marker this run creates first. Nothing is ever overwritten, and the whole extraction is refused before anything is written. | `entry` | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `a_leaf_target_that_is_a_pre_existing_symlink_is_refused`, `an_entry_named_like_the_marker_is_refused_under_the_no_clobber_code`, `a_directory_named_like_the_marker_is_refused_under_the_no_clobber_code` |
 | `output.symlink_in_path` | An existing directory inside the destination that the package would write through is a symbolic link or a reparse point, which could place output outside the destination. Checked in preflight and again after each directory this run creates. | `entry` | `an_ancestor_symlink_inside_the_destination_is_refused` |
 | `output.not_a_directory` | A path inside the destination that the package needs as a directory exists as something else. | `entry` | `a_destination_or_write_problem_is_nine` |
 | `output.io` | A create, write or remove failed. The underlying reason is deliberately not reported: an operating-system message can name a path, and the distinction is not part of the contract. | `entry`, when a file was being written | `a_failed_write_removes_this_runs_files_and_leaves_everything_else` |
@@ -422,6 +438,41 @@ reported. Every class below is asserted by
 | `create.unsafe_name.reserved_device_name` | A component is a Windows reserved device name, with or without an extension. |
 | `create.unsafe_name.colon` | A component holds `:`, which names an alternate data stream on NTFS. |
 | `create.unsafe_name.reserved_character` | A component holds one of `*`, `?`, `<`, `>`, `\|` or `"`. |
+
+### `create.internal.*`
+
+Defined in `crates/openkrx-cli/src/exit.rs` and produced by `create` alone.
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `create.internal.self_check_failed` | openKRX wrote a package and its own reader did not accept it: a structural check over the written bytes failed, or the bytes could not be read as an archive at all. This is a defect in openKRX, never in the manifest; the file is removed again and the run exits 6. | — | `the_self_check_code_is_a_package_problem` |
+
+## Manifest codes
+
+`openkrx-cli`, defined in `crates/openkrx-cli/src/exit.rs` and produced by
+`crates/openkrx-cli/src/manifest.rs`. These are the failures of reading the
+one JSON document `create` takes, and every one of them classifies to exit
+status 6: a manifest that does not describe a package this build can write is
+the same reading as a package that contradicts itself, one step earlier.
+Nothing has been written when one is reported.
+
+The **fields** column is `field` and `attachment`. `field` is a JSON Pointer
+into the manifest — `/metadata/source_system`, `/attachments/path` — drawn
+from the fixed set of schema paths in the manifest module, with array indices left
+out; `attachment` is the position in the manifest's `attachments` array.
+Neither is content: a value the manifest carries, and the spelling of a key
+the schema does not define, are never reported. Tests are in
+`crates/openkrx-cli/tests/create.rs`.
+
+| Code | Meaning | Fields | Asserted by |
+| --- | --- | --- | --- |
+| `manifest.invalid.syntax` | The bytes are not one JSON object: not UTF-8, not parseable, an array or a scalar rather than an object, or carrying content after the object. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
+| `manifest.invalid.schema_version` | The manifest declares a `schema_version` this build does not implement. Version 1 is the only one it writes from. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
+| `manifest.invalid.unknown_field` | The manifest, or an object inside it, carries a key the schema does not define. Refused rather than ignored: a misspelled `attachments` would otherwise write a package with no attachment and report success. `field` names the *object*, never the key. | `field`, `attachment` | `an_unknown_key_is_refused_rather_than_ignored`, `a_defect_inside_an_attachment_names_its_position` |
+| `manifest.invalid.missing_field` | A required field is absent or `null`. | `field`, `attachment` | `each_manifest_defect_names_the_field_it_concerns` |
+| `manifest.invalid.type` | A field carries a JSON value of the wrong kind — a string where a boolean belongs, a scalar where an array does. | `field`, `attachment` | `each_manifest_defect_names_the_field_it_concerns` |
+| `manifest.invalid.enumeration` | `source_system` or `consignment_kind` carries a token outside the fixed set rule M4 defines. The tokens are byte-exact. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
+| `manifest.invalid.timestamp` | `timestamp` is not of the form `YYYY-MM-DDTHH:MM:SS`, or names a time outside 1980-01-01T00:00:00 to 2107-12-31T23:59:58, which the MS-DOS fields of a ZIP record cannot express. | `field` | `each_manifest_defect_names_the_field_it_concerns` |
 
 ## What is deliberately absent
 

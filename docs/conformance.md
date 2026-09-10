@@ -95,8 +95,11 @@ and [SECURITY.md](../SECURITY.md#threat-model-mapping-extraction-output-layer).
 
 ## Creation
 
-Creation is implemented in the library only: `openkrx_core::create::package`
-writes the bytes of one package, and no command exposes it. The writer emits
+Creation is implemented in the library and exposed by one command:
+`openkrx_core::create::package` writes the bytes of one package, and
+`openkrx create --manifest <FILE> --out <FILE>` places them in a file that
+must not already exist, reading the result back through the structural checks
+before reporting success. The writer emits
 the canonical documented layout. Interoperability with real producers is
 unverified because rules A19–A22 and M11–M15 remain unresolved; the reader's
 structural checks are the only gate, and a written package is "structurally
@@ -126,6 +129,13 @@ either.
 | M11: elements one official example omits | Writes `TESZT` and `MELLEKLET_LEIRASA` when the request carries them, and omits them when it does not | Reading one back reports check 6 as `Pass` or as `Unresolved(M11)`, exactly as for a package read from elsewhere | `an_absent_teszt_element_stays_absent`, `a_package_written_without_descriptions_reports_m11_instead` | Unresolved |
 | M12: metadata file-name casing | Writes the canonical spelling | Reading one back reports check 2 as `Pass`; the other spelling is still unresolved for a package written elsewhere | `the_entries_are_the_documented_layout_in_a_fixed_order` | Unresolved |
 | M15: what a receiving service requires | Nothing. No package openKRX writes may be described as acceptable to any service | No outcome | — | Unresolved |
+
+The command half adds two rows of its own, and no rule status:
+
+| Rule | What the command does | Outcome semantics | Test | Status |
+| --- | --- | --- | --- | --- |
+| A19, M13 read back over what was written | Runs `archive::inventory`, `metadata::parse` and `profile::check` over the bytes it just wrote, before reporting success | `validate-structure` over a created package exits 4 and never 3: nothing fails, `marker_entry` cites A19, and any declared size cites M13. A failing check is a defect in openKRX, reported as `create.internal.self_check_failed`, and the file is removed | `a_created_package_reads_back_as_unresolved_and_never_as_inconsistent` (`crates/openkrx-cli/tests/create.rs`) | Unresolved |
+| M11: elements one official example omits | Passes `MELLEKLET_LEIRASA` through from the manifest, and writes `TESZT` always | An attachment described in the manifest keeps check 6 at `Pass`; omitting `description` reports `Unresolved(M11)`, exactly as for a package read from elsewhere | `a_manifest_with_no_attachment_writes_the_two_fixed_entries` (`crates/openkrx-cli/tests/create.rs`) | Unresolved |
 
 ## Known gaps
 

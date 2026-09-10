@@ -31,14 +31,17 @@ rules that no primary source settles, so that claim is not available.
 
 The three reading layers are reachable from the command line: `inspect`,
 `list` and `validate-structure` render them, `extract` writes what
-[Extraction planning](#extraction-planning) decided, and
-`capabilities().operations` names exactly those four. Everything below is
+[Extraction planning](#extraction-planning) decided, `create` writes what
+[Deterministic creation](#deterministic-creation) produced, and
+`capabilities().operations` names exactly those five. Everything below is
 still absent.
 
-- A command that creates a package. The library writes one —
-  [Deterministic creation](#deterministic-creation) — but no command exposes
-  it, nothing writes a file, and `capabilities().operations` does not name it.
-  Interoperability of what it writes with a real producer is unverified.
+- Any verified interoperability of what `create` writes. It emits the
+  canonical documented layout and reads it back through its own structural
+  checks, which is the only gate available; no real producer or receiving
+  service has been checked against, and no output says otherwise.
+- Editing or repacking an existing package. `create` writes a new package
+  from a manifest and local files; it never reads one in.
 - Atomic whole-tree extraction. Files are created directly in the
   destination, not staged elsewhere and renamed into place, so an interrupted
   run is detected rather than prevented; see
@@ -138,15 +141,18 @@ as a failure rather than as a success.
 
 | File | Responsibility |
 | --- | --- |
-| `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the two core entry points, and hands the result to a renderer. |
+| `src/main.rs` | The `clap` parser and dispatch, and nothing else: it reads the input, calls the core entry points, and hands the result to a renderer. |
 | `src/input.rs` | The only I/O in openKRX: opening a file exactly as named, or reading standard input as binary, bounded by the input cap. |
 | `src/skill.rs` | The agent skill document, embedded with `include_str!`, and the `skill` command that writes it to stdout outside the envelope. |
-| `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*` diagnostic explains itself with. |
+| `src/exit.rs` | `Category`, the nine exit statuses, the single classifier from a stable dotted code to one of them, and the per-code sentence each `output.*` and `manifest.invalid.*` diagnostic explains itself with. |
 | `src/commands/mod.rs` | The shared check, outcome and name views every command's report is built from. |
 | `src/commands/inspect.rs` | The `inspect` report: observations, the declared document, and every check. |
 | `src/commands/list.rs` | The `list` report: one row per archive entry, in central-directory order. |
 | `src/commands/validate.rs` | The `validate-structure` report: the summary word, the checks, and the undecided rules. |
 | `src/commands/extract.rs` | The `extract` report: the counts, one record per file written, and whether the run removed its marker. |
+| `src/commands/create.rs` | The `create` report: the byte and entry counts, the layout, and the rules the written package's own self-check left undecided. |
+| `src/manifest.rs` | The manifest schema and its strict validation: the fixed key sets, the schema paths a diagnostic may name, and the conversion to the typed metadata and timestamp the writer takes. |
+| `src/create.rs` | The four phases of a creation — read, build, place, self-check — the no-clobber output rule, and the removal of a half-written file. |
 | `src/extract/mod.rs` | The four phases of a protected extraction — plan, preflight, write, commit — the marker name, and the failure policy that undoes this run's work. |
 | `src/extract/preflight.rs` | What is decided before a byte is written: the destination, the marker, and every planned path against what is already there. Holds the link and reparse-point test. |
 | `src/extract/writer.rs` | Exclusive creation of the marker, the directories and the files, each recorded as this run created it. |
@@ -506,9 +512,10 @@ with nothing beneath it produces nothing at all.
 
 ## Extraction output
 
-`extract` is the only command that writes, and
-`crates/openkrx-cli/src/extract/` is the only code in openKRX that touches a
-filesystem for output. It adds no rule about names, entry kinds, collisions
+`extract` is one of the two commands that write — `create` is the other, and
+its output rule is [Creating a package](#creating-a-package) — and
+`crates/openkrx-cli/src/extract/` is the code that owns an extraction's
+destination. It adds no rule about names, entry kinds, collisions
 or ceilings: those belong to the planner above, and are enforced before this
 layer runs. What it owns is the destination.
 
@@ -616,8 +623,9 @@ filesystem equates cannot both be created with `create_new`.
 attachment bytes, a caller-supplied timestamp and a layout — into the bytes
 of one package. It is a pure function: no filesystem, clock, process or
 network access, no randomness, no environment, and equal inputs produce
-byte-identical output. No command exposes it: `capabilities().operations`
-still names the four reader and extraction operations only.
+byte-identical output. The `create` command exposes it over a manifest file,
+and `capabilities().operations` names it beside the four reading and
+extraction operations, with `stage` reading `reader-writer`.
 
 The writer emits the canonical documented layout. Interoperability with real
 producers is unverified because rules A19–A22 and M11–M15 remain unresolved;
@@ -730,17 +738,109 @@ written by this crate fails no check. It does not pass every check either:
 belongs, and `declared_size` reports `Unresolved(M13)`. Those two outcomes
 are the honest report of two unresolved rules, and no writer can remove them.
 
+### Creating a package
+
+`openkrx create --manifest <FILE> --out <FILE.krx>` is the command half. The
+core crate performs no I/O, so everything a filesystem is involved in happens
+in `crates/openkrx-cli/src/create.rs`, in four phases: read the manifest and
+each attachment under the [input cap](#limits); build the package bytes in
+memory, whole or not at all; create the output file exclusively; and read the
+bytes back through the structural checks before reporting anything.
+
+**The manifest** is one JSON object, validated strictly in both directions: a
+required field that is absent is refused, and a key the schema does not define
+is refused rather than ignored, because a misspelled `attachments` would
+otherwise produce a package with no attachment and a success report.
+
+```json
+{
+  "schema_version": 1,
+  "timestamp": "2026-01-02T03:04:06",
+  "metadata": {
+    "version": "0.9",
+    "source_system": "KER",
+    "consignment_id": "SYNTHETIC-CONSIGNMENT-1",
+    "created_at": "2026-01-02T03:04:06",
+    "consignment_kind": "KULDEMENY",
+    "test": true,
+    "barcode": null,
+    "reference_id": null,
+    "error_code": null,
+    "note": null
+  },
+  "attachments": [
+    {"path": "invoice.pdf", "description": "the invoice"},
+    {"path": "../scans/annex.pdf", "file_name": "annex.pdf", "description": "the annex"}
+  ]
+}
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `schema_version` | yes | `1`, the only manifest schema this build writes from. |
+| `timestamp` | yes | `YYYY-MM-DDTHH:MM:SS`, converted to the MS-DOS date and time every record carries. openKRX has no clock, so there is no default: 1980-01-01T00:00:00 to 2107-12-31T23:59:58, an odd second rounded down. |
+| `metadata.version` | yes | `KRX_VERZIOSZAM`. |
+| `metadata.source_system` | yes | `FORRASRENDSZER_AZONOSITO` (M4): `NOVA`, `KIR3`, `KER`, `POSTA` or `IMAP`, byte-exact. |
+| `metadata.consignment_id` | yes | `KULDEMENY_AZONOSITO`. |
+| `metadata.created_at` | yes | `KULDEMENY_LETREHOZASANAK_IDEJE`, written verbatim and never interpreted. |
+| `metadata.consignment_kind` | yes | `KULDEMENY_TIPUS` (M4): `KULDEMENY`, `NYUGTA`, `EXPEDIALAS`, `TERTIVEVENY` or `HIBAJELZES`. |
+| `metadata.test` | yes | `TESZT`, always written; a package openKRX writes never omits it. |
+| `metadata.barcode`, `.reference_id`, `.error_code`, `.note` | no | The optional header elements. `null` and absent are the same thing. |
+| `metadata.dispatches` | no | Present only to assert `declared_attachment_count`, which is then checked against the attachments and refused with `create.invalid.reference_mismatch` when it disagrees. Absent means one `EXPEDIALAS` block when there is an attachment, and none when there is not. |
+| `attachments[].path` | yes | A local file, resolved against the **manifest's own directory** and opened exactly as written. Nothing is normalised, matched or globbed; `..` and an absolute path are allowed, because the file is the caller's own. |
+| `attachments[].file_name` | no | The name inside the package. Defaults to the path's last component, and goes through the writer's name rules either way. |
+| `attachments[].description` | no | `MELLEKLET_LEIRASA`. Omitting it is what makes the `schema_optional_fields` check cite M11. |
+
+Everything else in the document is derived, never taken: the `MELLEKLET`
+references, `MELLEKLETEK_SZAMA`, the payload locations and the declared sizes
+all describe the package that was actually written, as
+[What is derived](#what-is-derived) sets out.
+
+**The output rule is `extract`'s.** `--out` must not exist in any form —
+`symlink_metadata` answers that without following a link, so a dangling
+symbolic link counts as occupied — and its parent must already be a real
+directory, which `create` never creates. The file is created with
+`create_new`, and a failure after that removes it again and reports the
+removal in `cleanup`: a run that did not report success never leaves a
+half-written package behind for someone to send. `--stdout` writes the
+package bytes to standard output instead and puts the report, JSON object
+included, on standard error.
+
+**In `--stdout` mode stdout carries the package or nothing.** A failure puts
+its whole report on standard error too — one JSON object and nothing else in
+JSON mode, so a caller can parse that stream whole — and leaves stdout empty.
+A caller reading the pipe is entitled to find a package there or nothing at
+all: an envelope written into it would hand the next process in the pipeline
+a diagnostic as if it were bytes of a package.
+
+**The self-check is the gate.** After writing, openKRX reads the file back
+and runs `archive::inventory`, `metadata::parse` and `profile::check` over
+it. A single failing check is a defect in openKRX rather than in the
+manifest: the file is removed and the run exits 6 with
+`create.internal.self_check_failed`. The report therefore states a fact about
+a package that exists, not a prediction.
+
+**The definition of success is exit 4.** `validate-structure` over a package
+`create` wrote exits 4 and never 3: nothing fails, and `marker_entry` cites
+A19 while any declared attachment size cites M13. That is the honest report
+of two unresolved rules, and it is what a caller should expect to see. A
+package openKRX wrote is structurally consistent with the documented layout,
+which is unverified against every real producer; it is not conforming, not
+signed, and not something any receiving service has agreed to accept.
+
 ## Command contract and JSON envelope
 
 The supported surface is `openkrx --help`, `openkrx --version`,
-`openkrx capabilities [--json]`, the three reader commands, `extract`, and
-`skill`:
+`openkrx capabilities [--json]`, the three reader commands, the two commands
+that write — `extract` and `create` — and `skill`:
 
 ```text
 openkrx inspect            <FILE|-> [--json]
 openkrx list               <FILE|-> [--json]
 openkrx validate-structure <FILE|-> [--json]
 openkrx extract            <FILE|-> --into <DIR> [--json]
+openkrx create             --manifest <FILE> --out <FILE> [--json]
+openkrx create             --manifest <FILE> --stdout [--json]
 openkrx skill
 ```
 
@@ -751,6 +851,7 @@ openkrx skill
 | `list` | one package | stdout | yes, with `--json` | 0, 2, 5, 6, 7, 8 |
 | `validate-structure` | one package | stdout | yes, with `--json` | 0, 2, 3, 4, 5, 6, 7, 8 |
 | `extract` | one package | stdout and `--into <DIR>` | yes, with `--json` | 0, 2, 5, 6, 7, 8, 9 |
+| `create` | one manifest and the files it names | stdout and `--out <FILE>`, or the package on stdout | yes, with `--json` | 0, 2, 5, 6, 8, 9 |
 | `skill` | none | stdout | **no: it bypasses the envelope** | 0, 2 |
 
 **`skill` is outside the envelope.** It writes the agent skill document
@@ -1022,11 +1123,59 @@ failed `extract` carries the ordinary failed envelope plus one extra object:
 }
 ```
 
-`cleanup` is present for `extract` alone. It counts paths this run had
-created and then removed, and paths it created and could not remove; both
+`cleanup` is present for the two commands that write. It counts paths the run
+had created and then removed, and paths it created and could not remove; both
 zero means nothing had been written when the run was refused. Human mode
 prints the same fact as a second line on standard error. Neither carries a
 path, an entry name or an operating-system message.
+
+### `create`
+
+`bytes_written` is the length of the package, `entries` counts the marker,
+the metadata document and one entry per attachment, `layout` names the layout
+that was written, and `unresolved_rules[]` is what openKRX's own reading of
+the package it just wrote left undecided. Nothing from the manifest appears:
+no path, no file name, no declared value.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "create",
+  "data": {
+    "bytes_written": 1117,
+    "entries": 4,
+    "unresolved_rules": ["A19", "M13"],
+    "layout": "canonical-documented"
+  },
+  "verified": false
+}
+```
+
+A failed `create` carries the ordinary failed envelope, `cleanup`, and up to
+two fields the other commands never set: `field`, the JSON Pointer of the
+manifest field the refusal concerns, and `attachment_index`, the position in
+the manifest's `attachments` array.
+
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "command": "create",
+  "error": {
+    "code": "manifest.invalid.unknown_field",
+    "category": "package",
+    "field": "/attachments",
+    "attachment_index": 0
+  },
+  "cleanup": {"removed": 0, "left_in_place": 0},
+  "verified": false
+}
+```
+
+`field` is drawn from a fixed set of schema paths and `attachment_index` is a
+position, so neither is content: the manifest's values, and the spelling of a
+key the schema does not define, are never reported.
 
 There is deliberately no field named `valid`, `conforming` or `is_krx` in any
 response, and no command prints such a word as a claim.
@@ -1051,11 +1200,11 @@ category holds each row.
 | 2 | `usage` | The arguments were rejected: an unknown or missing command, a missing file argument, or an invalid flag. |
 | 3 | `structure_inconsistent` | `validate-structure` only: at least one check failed. |
 | 4 | `structure_unresolved` | `validate-structure` only: no check failed, and at least one rule could not be decided. |
-| 5 | `input` | The input could not be opened or read, or it reached the input cap. |
-| 6 | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. |
+| 5 | `input` | The input could not be opened or read, or it reached the input cap. For `create`, the manifest or one of the attachment files it names. |
+| 6 | `package` | The package is malformed, truncated or ambiguous, or an entry name is unsafe. For `create`, the manifest does not describe a package that can be written, or the package openKRX wrote did not read back cleanly. |
 | 7 | `unsupported` | The package uses a feature this reader does not implement: ZIP64, encryption, a multi-disk archive, another compression method, or an XML feature the parser refuses. |
-| 8 | `limit` | A documented parsing or extraction limit was exceeded. |
-| 9 | `output` | `extract` only: the destination could not be used, or a write failed. Nothing incomplete was left behind. |
+| 8 | `limit` | A documented parsing, extraction or writing limit was exceeded. |
+| 9 | `output` | `extract` and `create` only: the destination could not be used, or a write failed. Nothing incomplete was left behind. |
 
 `inspect` and `list` never exit 3 or 4: a failing or undecided check is part
 of their report, not their status. A structural failure is therefore visible
@@ -1079,14 +1228,17 @@ segment: `input.*` to 5; `*.over_limit.*` to 8, except
 `input.over_limit.archive_bytes`, which is an input problem because nothing
 was parsed at all; `*.unsupported.*` to 7; `*.truncated.*`, `*.malformed.*`,
 `*.ambiguous.*`, `archive.unsafe_name.*`, `extract.unsafe_path.*` and
-`archive.no_such_entry` to 6; and every `output.*` code to 9. The remaining
+`archive.no_such_entry`, `create.invalid.*`, `create.unsafe_name.*`,
+`create.internal.self_check_failed` and `manifest.invalid.*` to 6; and every
+`output.*` code to 9. The remaining
 `metadata.*` codes are structural-check failures, which reach a status only
 through `validate-structure`'s summary, as 3.
 
-Statuses 3, 4 and 9 each belong to one command. 9 is `extract`'s alone, and
-it says something the other statuses do not: the destination was left as it
-was found, either because the run was refused before writing or because the
-undo pass removed everything it had created. In human mode the second line on
+Statuses 3 and 4 belong to `validate-structure` alone, and 9 to the two
+commands that write. 9 says something the other statuses do not: the
+destination was left as it was found, either because the run was refused
+before writing or because the undo pass removed everything it had created —
+for `create`, the half-written package file. In human mode the second line on
 standard error states which of the two happened.
 
 The core error enums are `#[non_exhaustive]`, so no downstream `match` on

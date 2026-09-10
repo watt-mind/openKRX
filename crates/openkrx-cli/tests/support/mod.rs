@@ -38,6 +38,21 @@ pub fn run(args: &[&str]) -> Output {
         .expect("run the openkrx executable")
 }
 
+/// Run the executable with `args` from inside `directory`.
+///
+/// The working directory matters for exactly one argument shape: a `--out`
+/// that names a bare file name, whose parent is the directory the process is
+/// already in.
+#[must_use]
+pub fn run_in(directory: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_openkrx"))
+        .args(args)
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the openkrx executable")
+}
+
 /// Run the executable with `bytes` on standard input.
 #[must_use]
 pub fn run_stdin(args: &[&str], bytes: &[u8]) -> Output {
@@ -155,6 +170,31 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
+}
+
+/// The timestamp every creation test writes, so that its bytes are fixed.
+pub const MANIFEST_TIMESTAMP: &str = "2026-01-02T03:04:06";
+
+/// A manifest carrying the header every creation test shares, and
+/// `attachments` verbatim as the elements of its `attachments` array.
+///
+/// It is written as text rather than serialised from a struct, because what is
+/// under test is how the executable reads a document a person typed — including
+/// the keys it has to refuse.
+#[must_use]
+pub fn manifest(attachments: &str) -> String {
+    format!(
+        "{{\"schema_version\":1,\
+\"timestamp\":\"{MANIFEST_TIMESTAMP}\",\
+\"metadata\":{{\
+\"version\":\"0.9\",\
+\"source_system\":\"KER\",\
+\"consignment_id\":\"SYNTHETIC-CONSIGNMENT-1\",\
+\"created_at\":\"2026-01-02T03:04:06\",\
+\"consignment_kind\":\"KULDEMENY\",\
+\"test\":true}},\
+\"attachments\":[{attachments}]}}"
+    )
 }
 
 /// A package whose every check either passes or does not apply.

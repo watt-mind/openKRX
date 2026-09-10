@@ -1,0 +1,2 @@
+openkrx: manifest.invalid.unknown_field at field /attachments (attachment 0) — the manifest carries a key the schema does not define; the diagnostic names the object it was in and never the key itself, so compare that object against the schema in docs/architecture.md (exit 6)
+openkrx: nothing had been written, so the destination is as it was found

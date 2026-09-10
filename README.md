@@ -7,9 +7,12 @@ administrative correspondence.
 **It reads packages, and it writes only where you point it.**
 `openkrx inspect`, `openkrx list` and `openkrx validate-structure` read a
 package locally and report what is in it; `openkrx extract` writes its files
-into a directory you name, and nothing else in the project writes anywhere.
-No package is ever created, nothing is uploaded, and nothing is verified.
-There are no releases or published Cargo packages yet.
+into a directory you name, and `openkrx create` writes one package from a
+manifest you give it, to a file that must not already exist. Nothing else in
+the project writes anywhere, nothing is uploaded, and nothing is verified. A
+package openKRX wrote is structurally consistent with the documented layout
+and is never a conforming one. There are no releases or published Cargo
+packages yet.
 
 ## Who it is for
 
@@ -36,12 +39,13 @@ what it observed and reports an undecidable rule as undecided. See
 | Reader commands: `inspect`, `list`, `validate-structure` | Implemented |
 | Extraction planning (`openkrx_core::extract::plan`) and the `extract` command | Implemented |
 | `capabilities`, reporting the stage and the implemented operations | Implemented |
-| `create` | Not implemented |
+| Deterministic writing (`openkrx_core::create::package`) and the `create` command | Implemented for the documented layout; interoperability with real producers is unverified |
 | Signature handling of any kind | Not implemented, and not planned |
 
 The three reader commands render the three library layers and add no rule of
-their own; `extract` writes what the planner decided, and adds no rule of its
-own either. The implementation sequence is in the
+their own; `extract` writes what the planner decided and `create` writes what
+the writer produced, and neither adds a rule of its own either. The
+implementation sequence is in the
 [roadmap](docs/roadmap.md).
 
 ## What exists today
@@ -68,14 +72,24 @@ nothing external.
   Unicode or case collision or an exceeded output ceiling refuses the whole
   package. It is a pure function and touches no filesystem.
 
-`openkrx-cli` adds the only filesystem writing in the project, in `extract`,
-and it is deliberately narrow: the destination must already exist and be a
-real directory, nothing is ever overwritten, no symbolic link or reparse
-point is followed out of the destination, no permission bit or timestamp is
-copied, and a run that fails part-way removes everything it created and
-nothing that was already there.
+- **The deterministic writer** turns typed metadata and attachment bytes
+  into the bytes of one package in the layout `docs/profile.md` documents.
+  Equal inputs produce byte-identical output; the document describes the
+  package that was actually written; and the reader's own ceilings and name
+  rules apply to the output, so a package openKRX writes is one it reads
+  back. That layout is **unverified against every real producer**, because
+  rules A19–A22 and M11–M15 are unresolved.
 
-Every failure carries a stable dotted code — 102 of them — and a diagnostic
+`openkrx-cli` adds the only filesystem writing in the project, in `extract`
+and `create`, and it is deliberately narrow: an extraction destination must
+already exist and be a real directory, a `create --out` file must not exist
+at all, nothing is ever overwritten, no symbolic link or reparse point is
+followed out of the destination, no permission bit or timestamp is copied,
+and a run that fails part-way removes everything it created and nothing that
+was already there.
+
+Every failure carries a stable dotted code — the catalogue lists 133 — and a
+diagnostic
 prints the code, an entry index and numeric limit values only, never an
 entry name, document text, attribute value or filesystem path.
 
@@ -95,6 +109,7 @@ target/release/openkrx list               package.krx
 target/release/openkrx inspect            package.krx
 target/release/openkrx validate-structure package.krx
 target/release/openkrx extract            package.krx --into ./out
+target/release/openkrx create             --manifest manifest.json --out ./package.krx
 target/release/openkrx capabilities
 target/release/openkrx skill
 ```
@@ -108,10 +123,12 @@ target/release/openkrx skill
 | `list` | Prints every archive entry in central-directory order; runs no structural check. | 0, 2, 5, 6, 7, 8 |
 | `validate-structure` | Prints the check inventory and puts the structural reading in the exit status. | 0, 2, 3, 4, 5, 6, 7, 8 |
 | `extract` | Writes the package's files into a directory that already exists. | 0, 2, 5, 6, 7, 8, 9 |
+| `create` | Writes one package from a JSON manifest, to a file that must not exist. | 0, 2, 5, 6, 8, 9 |
 | `skill` | Writes the agent skill document embedded in the binary to stdout. Reads no package. | 0, 2 |
 
-Each of the four package commands takes one file, or `-` to read standard
-input; `capabilities` and `skill` take none. Every command except `skill`
+Each of the four reading commands takes one package file, or `-` to read
+standard input; `create` takes `--manifest` and either `--out` or `--stdout`,
+and `capabilities` and `skill` take none. Every command except `skill`
 accepts `--json`. `list` prints what the archive holds:
 
 ```text
@@ -159,6 +176,43 @@ timestamps are copied from the package, and no symbolic link, special file or
 nested archive is ever created or unpacked. Extracting a file is not a
 statement that it is authentic or safe to open.
 
+`create` goes the other way: it writes one package from a JSON manifest that
+names the metadata values and the local files to carry as attachments.
+
+```json
+{
+  "schema_version": 1,
+  "timestamp": "2026-01-02T03:04:06",
+  "metadata": {
+    "version": "0.9",
+    "source_system": "KER",
+    "consignment_id": "SYNTHETIC-CONSIGNMENT-1",
+    "created_at": "2026-01-02T03:04:06",
+    "consignment_kind": "KULDEMENY",
+    "test": true
+  },
+  "attachments": [
+    {"path": "invoice.pdf", "description": "the invoice"}
+  ]
+}
+```
+
+An attachment path is resolved against the manifest's own directory. A key
+the schema does not define is refused rather than ignored, and the diagnostic
+names the field. `--out` must not exist in any form and its parent must
+already be a real directory; a failure after the file was created removes it
+again, so a run that did not report success leaves no half-written package
+behind. `--stdout` writes the package to standard output instead. openKRX has
+no clock, so `timestamp` is required and the same manifest and files always
+produce byte-identical bytes. The full schema is in
+[the architecture reference](docs/architecture.md#creating-a-package).
+
+**A package `create` wrote passes `validate-structure` with exit 4, and never
+3.** Nothing fails; the marker's place cites unresolved rule A19 and any
+declared attachment size cites M13. That is the definition of success here,
+not a defect — and it is not a conformance claim, not a signature, and not a
+statement that any receiving service would accept the package.
+
 `--json` writes exactly one object on stdout and leaves stderr empty on
 success. `cargo run -p openkrx-cli -- capabilities --json` prints this
 object, on a single line; it is indented here for reading:
@@ -170,8 +224,8 @@ object, on a single line; it is indented here for reading:
   "command": "capabilities",
   "data": {
     "project": "openKRX",
-    "stage": "reader",
-    "operations": ["inspect", "list", "validate-structure", "extract"]
+    "stage": "reader-writer",
+    "operations": ["inspect", "list", "validate-structure", "extract", "create"]
   },
   "verified": false
 }

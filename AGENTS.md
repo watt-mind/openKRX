@@ -5,19 +5,23 @@ Read [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 before changing code. The CLI offers help, version, capabilities, the three
 reader commands `inspect`, `list` and `validate-structure`, which render the
 core crate's bounded archive inventory, bounded metadata parsing and
-structural check inventory over one bounded input, and `extract`, which
+structural check inventory over one bounded input; `extract`, which
 writes a package's files into a directory the caller names under a
-no-clobber, no-link, undo-on-failure policy, and `skill`, which writes the
-embedded agent skill document to stdout outside the JSON envelope. Nothing
-creates a package, and structural validation is not signature verification:
-openKRX performs no cryptography, so no output means that anything was
-verified. Never describe
+no-clobber, no-link, undo-on-failure policy; `create`, which writes one
+package from a strictly validated JSON manifest to a file that must not
+already exist, and reads it back through the structural checks before
+reporting success; and `skill`, which writes the
+embedded agent skill document to stdout outside the JSON envelope. A package
+openKRX writes is structurally consistent with the documented layout and is
+never a conforming one, and structural validation is not signature
+verification: openKRX performs no cryptography, so no output means that
+anything was verified. Never describe
 planned operations as implemented.
 
 ## Scope and ownership
 
 - `crates/openkrx-core/`: bounded ZIP and XML processing, the profile rules,
-  extraction planning, and the deterministic writing that KRX-06 will add. No
+  extraction planning, and deterministic writing. No
   implicit filesystem, network, process, or clock access; inject I/O where
   needed.
 - `crates/openkrx-cli/`: arguments, human/JSON output, bounded input and safe
@@ -101,7 +105,8 @@ afterwards. The full table is the maintenance map in
 | The release process | `docs/releasing.md`, `CHANGELOG.md` |
 
 `scripts/check-codes.py` enforces the code row automatically: it extracts
-every `archive.*`, `extract.*`, `input.*`, `metadata.*` and `output.*`
+every `archive.*`, `create.*`, `extract.*`, `input.*`, `manifest.*`,
+`metadata.*` and `output.*`
 literal from `crates/*/src/**`
 and fails when one is missing from `docs/codes.md`, or when that document
 lists a code no source defines. It runs inside `bash scripts/check.sh`. The
