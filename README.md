@@ -297,6 +297,10 @@ a judgement of the package, and it stays `true` when a check failed. Read
 Every diagnostic carries a stable code; it carries the code, an entry index
 and numbers, and never the input path, an entry name or a metadata value.
 
+The envelope is published as a JSON Schema (draft 2020-12) to validate or
+generate types against:
+[docs/schema/openkrx-envelope.v1.schema.json](docs/schema/openkrx-envelope.v1.schema.json).
+
 `openkrx skill` writes the [agent
 skill](crates/openkrx-cli/skills/openkrx/SKILL.md) the binary carries — the
 workflow, the envelope, every exit status, the boundary and the reporting
@@ -341,6 +345,7 @@ installation from an archive can copy them rather than regenerate them.
 | [docs/profile.md](docs/profile.md) | The format rules extracted from primary sources, with citations, evidence classes, and the rules that remain unresolved. |
 | [docs/conformance.md](docs/conformance.md) | Every rule mapped to its implementation, outcome, test and status, ending with the gaps that block a conformance claim. |
 | [docs/codes.md](docs/codes.md) | Every stable error code with its meaning, numeric fields and asserting test. |
+| [docs/schema/openkrx-envelope.v1.schema.json](docs/schema/openkrx-envelope.v1.schema.json) | The `--json` envelope for `schema_version` 1 as a JSON Schema: the failure shape and every command's success `data`. |
 | [docs/research.md](docs/research.md) | What was searched for, what was found and what was not, and why the design is what it is. |
 | [docs/testing.md](docs/testing.md) | Test layout, how to run the suite and coverage, the sweeps, and the fixture policy. |
 | [docs/roadmap.md](docs/roadmap.md) | Milestones with status, engineering items, and the residual risks in the current state. |

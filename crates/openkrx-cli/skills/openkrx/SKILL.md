@@ -252,6 +252,15 @@ the user and look the meaning up there rather than guessing from the name.
 you do not recognise; if you ever read a `schema_version` you do not know,
 stop rather than guess.
 
+The whole envelope — the failure shape and each command's success `data` — is
+published as a JSON Schema (draft 2020-12) at
+`docs/schema/openkrx-envelope.v1.schema.json` in the openKRX repository. Read
+it when you need to know whether a field is always present or only sometimes,
+instead of inferring that from one run's output. Every report object is open
+to additions; the `error` and `cleanup` objects are closed on purpose,
+because a diagnostic carries a code, a category, an entry index, a manifest
+pointer and counts, and nothing else, ever.
+
 ## Workflow
 
 Run the steps in order. Each is cheap, each reads the file afresh, and none

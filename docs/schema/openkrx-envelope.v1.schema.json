@@ -1,0 +1,473 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/watt-mind/openKRX/develop/docs/schema/openkrx-envelope.v1.schema.json",
+  "title": "openKRX --json envelope, schema_version 1",
+  "description": "The single JSON object openkrx writes on stdout in --json mode. It describes what the executable in this repository emits and is not a statement about any external format, profile or service: `verified` is always false, because openKRX performs no cryptography, and `ok` is about the command rather than about the package. Adding a field to the envelope does not raise `schema_version`, so a consumer must ignore fields it does not recognise; every object a command's report is built from therefore leaves `additionalProperties` open. The two closed objects are `diagnostic` and `cleanup`: a diagnostic may carry only a stable code, its category, an entry index, a manifest pointer and counts, never a path, an entry name or a value an author wrote, and closing them makes that privacy rule checkable rather than merely documented. The commands `skill`, `completions` and `man` bypass the envelope and are described by nothing here.",
+  "type": "object",
+  "required": ["schema_version", "ok", "command", "verified"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "description": "The envelope version. A consumer that reads a version it does not know must stop rather than guess.",
+      "const": 1
+    },
+    "ok": {
+      "description": "Whether stdout carries a report rather than a diagnostic. It says nothing about the package: a failed structural check is part of a successful command's report. Read `data.summary` or the exit status to decide about a package.",
+      "type": "boolean"
+    },
+    "command": { "$ref": "#/$defs/command" },
+    "verified": {
+      "description": "Always false. openKRX performs no cryptography, so no run of it can report that anything was verified.",
+      "const": false
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "ok": { "const": true } }, "required": ["ok"] },
+      "then": {
+        "required": ["data"],
+        "not": { "required": ["error"] },
+        "properties": { "data": { "type": "object" } }
+      }
+    },
+    {
+      "if": { "properties": { "ok": { "const": false } }, "required": ["ok"] },
+      "then": {
+        "required": ["error"],
+        "not": { "required": ["data"] },
+        "properties": {
+          "error": { "$ref": "#/$defs/diagnostic" },
+          "cleanup": { "$ref": "#/$defs/cleanup" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "capabilities" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/capabilitiesData" } } }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "inspect" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/inspectData" } } }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "list" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/listData" } } }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "validate-structure" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/validateStructureData" } } }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "extract" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/extractData" } } }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "create" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/createData" } } }
+    },
+    {
+      "if": {
+        "properties": { "ok": { "const": true }, "command": { "const": "repack" } },
+        "required": ["ok", "command"]
+      },
+      "then": { "properties": { "data": { "$ref": "#/$defs/repackData" } } }
+    }
+  ],
+  "$defs": {
+    "command": {
+      "description": "The stable name of the command that produced the envelope. `skill`, `completions` and `man` never appear: they write their bytes outside the envelope.",
+      "type": "string",
+      "enum": [
+        "capabilities",
+        "inspect",
+        "list",
+        "validate-structure",
+        "extract",
+        "create",
+        "repack"
+      ]
+    },
+    "code": {
+      "description": "A stable dotted code, catalogued in docs/codes.md. The head is one of the eight `scripts/check-codes.py` extracts; the remaining segments are lower-case letters, digits and underscores. An unrecognised code is a failure, never a success.",
+      "type": "string",
+      "pattern": "^(archive|create|extract|input|manifest|metadata|output|repack)(\\.[a-z0-9_]+)+$"
+    },
+    "category": {
+      "description": "The coarse family the code belongs to. It is the same category that decided the process exit status, so a consumer that groups rather than branches can read either. `success` is not among them: a diagnostic is never a success.",
+      "type": "string",
+      "enum": [
+        "usage",
+        "structure_inconsistent",
+        "structure_unresolved",
+        "input",
+        "package",
+        "unsupported",
+        "limit",
+        "output"
+      ]
+    },
+    "rule": {
+      "description": "A rule of docs/profile.md that no primary source settles, such as `A19` or `M13`.",
+      "type": "string",
+      "pattern": "^[AM][0-9]+$"
+    },
+    "hex": {
+      "description": "Lower-case hexadecimal of raw bytes, reported when the bytes are not valid UTF-8 and no faithful string form exists.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{2})*$"
+    },
+    "count": {
+      "description": "A measured non-negative count of bytes, entries or files.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "diagnostic": {
+      "description": "The single content-free diagnostic of a failed run. Closed on purpose: no field beyond these may appear, because a diagnostic may never carry an input path, an entry name or a value an author wrote. Every field but `code` and `category` is present only when the refusal carries it.",
+      "type": "object",
+      "required": ["code", "category"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/$defs/code" },
+        "category": { "$ref": "#/$defs/category" },
+        "entry_index": {
+          "description": "The archive entry the refusal is about, counted in central-directory order.",
+          "$ref": "#/$defs/count"
+        },
+        "field": {
+          "description": "A JSON Pointer into the manifest, or into the edits document, naming a location the caller wrote and never a value from it. `create` and `repack` only.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "attachment_index": {
+          "description": "Position in the manifest's or the edits document's attachment array, counted from 0. `create` and `repack` only.",
+          "$ref": "#/$defs/count"
+        },
+        "attachment_number": {
+          "description": "An attachment's number inside the package being edited, counted from 1, which is a different thing from a position in an array. `repack` alone sets it.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "limit": {
+          "description": "The ceiling that was exceeded, for a limit refusal.",
+          "$ref": "#/$defs/count"
+        },
+        "observed": {
+          "description": "What was actually produced against that ceiling: a measured count of bytes or entries, never a size a header declared.",
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "cleanup": {
+      "description": "What the undo pass removed, present on a failed run of the three commands that write. Counts, never a path; closed for the same privacy reason as `diagnostic`. `left_in_place` above 0 means the destination is not as it was found.",
+      "type": "object",
+      "required": ["removed", "left_in_place"],
+      "additionalProperties": false,
+      "properties": {
+        "removed": { "$ref": "#/$defs/count" },
+        "left_in_place": { "$ref": "#/$defs/count" }
+      }
+    },
+    "outcome": {
+      "description": "What one check concluded, without naming the check. `code` is present only on a failure and `rule` only when a rule of docs/profile.md is undecided; an undecided rule is never shown as a pass and never as a failure.",
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": true,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["pass", "fail", "unresolved", "not_applicable"]
+        },
+        "code": { "$ref": "#/$defs/code" },
+        "rule": { "$ref": "#/$defs/rule" }
+      }
+    },
+    "check": {
+      "description": "One named structural check and what it concluded, in the documented order of the check inventory.",
+      "type": "object",
+      "required": ["check", "outcome"],
+      "additionalProperties": true,
+      "properties": {
+        "check": {
+          "description": "The check's stable snake-case identifier.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["pass", "fail", "unresolved", "not_applicable"]
+        },
+        "code": { "$ref": "#/$defs/code" },
+        "rule": { "$ref": "#/$defs/rule" }
+      }
+    },
+    "unresolvedRules": {
+      "description": "Each rule the checks left undecided, once, in the order they first cite it.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    },
+    "layout": {
+      "description": "The one layout openKRX writes. It is documented and unverified against any real producer, and naming it is not a conformance claim.",
+      "type": "string",
+      "enum": ["canonical-documented"]
+    },
+    "capabilitiesData": {
+      "description": "`capabilities`: machine-readable implementation status, never a verification verdict.",
+      "type": "object",
+      "required": ["project", "stage", "operations"],
+      "additionalProperties": true,
+      "properties": {
+        "project": { "type": "string" },
+        "stage": { "type": "string" },
+        "operations": {
+          "description": "The package operations a command actually performs. `skill`, `completions` and `man` are not package operations and never appear.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "inspectData": {
+      "description": "`inspect`: what the package declares about itself, and every check. Nothing here is interpreted.",
+      "type": "object",
+      "required": ["observations", "metadata", "checks"],
+      "additionalProperties": true,
+      "properties": {
+        "observations": { "$ref": "#/$defs/observations" },
+        "metadata": {
+          "description": "The declared document when one was located and parsed, and null otherwise.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/metadata" }]
+        },
+        "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } }
+      }
+    },
+    "observations": {
+      "description": "Facts about the archive's shape, independent of the document. A `_hex` field is present only when the corresponding bytes are not valid UTF-8, and then the text field is absent.",
+      "type": "object",
+      "required": ["entry_count", "marker"],
+      "additionalProperties": true,
+      "properties": {
+        "entry_count": { "$ref": "#/$defs/count" },
+        "root_prefix": { "type": "string" },
+        "root_prefix_hex": { "$ref": "#/$defs/hex" },
+        "metadata_entry_name": { "type": "string" },
+        "metadata_entry_name_hex": { "$ref": "#/$defs/hex" },
+        "metadata_entry_index": { "$ref": "#/$defs/count" },
+        "marker": { "$ref": "#/$defs/outcome" }
+      }
+    },
+    "metadata": {
+      "description": "The declared fields of a parsed document, exactly as it wrote them. `created_at` keeps its lexical form because the crate has no clock.",
+      "type": "object",
+      "required": [
+        "version",
+        "source_system",
+        "consignment_type",
+        "consignment_id",
+        "created_at",
+        "test",
+        "test_present",
+        "attachments"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "version": { "type": "string" },
+        "source_system": { "type": "string" },
+        "consignment_type": { "type": "string" },
+        "consignment_id": { "type": "string" },
+        "reference_id": { "type": "string" },
+        "barcode": { "type": "string" },
+        "error_code": { "type": "string" },
+        "created_at": { "type": "string" },
+        "test": { "type": "boolean" },
+        "test_present": {
+          "description": "Whether the element was actually present; its absence is rule M11.",
+          "type": "boolean"
+        },
+        "declared_attachment_count": { "type": "integer" },
+        "attachments": { "type": "array", "items": { "$ref": "#/$defs/attachment" } }
+      }
+    },
+    "attachment": {
+      "description": "One declared attachment reference and the entry it resolved to. The declared size keeps its verbatim text because rule M13 leaves its unit and rounding open; a declared and an observed size are reported side by side and never compared.",
+      "type": "object",
+      "required": ["number", "declared_path", "resolution", "declared_size_text"],
+      "additionalProperties": true,
+      "properties": {
+        "number": { "type": "integer" },
+        "declared_path": { "type": "string" },
+        "resolution": {
+          "type": "string",
+          "enum": ["resolved", "prefix_variant", "missing"]
+        },
+        "entry_index": { "$ref": "#/$defs/count" },
+        "declared_size_text": { "type": "string" },
+        "declared_size_value": {
+          "description": "The declared size read as a number, present only when it reads as a finite one.",
+          "type": "number"
+        },
+        "observed_size": { "$ref": "#/$defs/count" }
+      }
+    },
+    "listData": {
+      "description": "`list`: every archive entry, in central-directory order. Profile-agnostic: it says what the ZIP image contains and nothing about KRX.",
+      "type": "object",
+      "required": ["entries"],
+      "additionalProperties": true,
+      "properties": {
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+      }
+    },
+    "entry": {
+      "description": "One archive entry as the inventory observed it. `name` is present when the name bytes are valid UTF-8 and `name_hex` only when they are not; a declared size and the size the decoder produced are reported side by side.",
+      "type": "object",
+      "required": [
+        "index",
+        "name_utf8_flag",
+        "method",
+        "compressed_size",
+        "declared_size",
+        "decoded_size",
+        "crc32"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "index": { "$ref": "#/$defs/count" },
+        "name": { "type": "string" },
+        "name_utf8_flag": {
+          "description": "General-purpose bit 11, reported independently of whether the bytes decode.",
+          "type": "boolean"
+        },
+        "name_hex": { "$ref": "#/$defs/hex" },
+        "method": { "type": "string", "enum": ["stored", "deflate"] },
+        "compressed_size": { "$ref": "#/$defs/count" },
+        "declared_size": { "$ref": "#/$defs/count" },
+        "decoded_size": { "$ref": "#/$defs/count" },
+        "crc32": {
+          "description": "The declared CRC-32 as eight lower-case hexadecimal digits. A CRC detects corruption and says nothing about authenticity.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$"
+        }
+      }
+    },
+    "validateStructureData": {
+      "description": "`validate-structure`: the check inventory, outcome by outcome. The summary word says only whether anything failed and whether anything was left open; it is never a verdict on a package.",
+      "type": "object",
+      "required": ["summary", "checks", "unresolved_rules"],
+      "additionalProperties": true,
+      "properties": {
+        "summary": {
+          "type": "string",
+          "enum": ["consistent", "inconsistent", "unresolved"]
+        },
+        "checks": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+        "unresolved_rules": { "$ref": "#/$defs/unresolvedRules" }
+      }
+    },
+    "extractData": {
+      "description": "`extract`: the record of what was written, built as each file was created. Paths are relative to the destination and joined with `/` on every platform; the destination itself is never reported.",
+      "type": "object",
+      "required": [
+        "files_written",
+        "directories_created",
+        "bytes_written",
+        "items",
+        "marker_removed",
+        "path_resolution_fallback"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "files_written": { "$ref": "#/$defs/count" },
+        "directories_created": {
+          "description": "Directories this run created. One that already existed is not counted.",
+          "$ref": "#/$defs/count"
+        },
+        "bytes_written": { "$ref": "#/$defs/count" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/written" } },
+        "marker_removed": {
+          "description": "Whether the partial marker was removed, which ends a complete run.",
+          "type": "boolean"
+        },
+        "path_resolution_fallback": {
+          "description": "Whether this run asked the kernel to resolve every path beneath one directory descriptor, could not have it, and used the portable check-then-create path instead. False where there was no stronger mode to ask for.",
+          "type": "boolean"
+        }
+      }
+    },
+    "written": {
+      "description": "One file that exists on disk because this run created it.",
+      "type": "object",
+      "required": ["entry_index", "path", "bytes"],
+      "additionalProperties": true,
+      "properties": {
+        "entry_index": { "$ref": "#/$defs/count" },
+        "path": { "type": "string" },
+        "bytes": { "$ref": "#/$defs/count" }
+      }
+    },
+    "createData": {
+      "description": "`create`: what was written, and what reading it straight back reported. `unresolved_rules` comes from openKRX reading the package back with its own structural check before the command reported anything.",
+      "type": "object",
+      "required": ["bytes_written", "entries", "unresolved_rules", "layout"],
+      "additionalProperties": true,
+      "properties": {
+        "bytes_written": { "$ref": "#/$defs/count" },
+        "entries": { "$ref": "#/$defs/count" },
+        "unresolved_rules": { "$ref": "#/$defs/unresolvedRules" },
+        "layout": { "$ref": "#/$defs/layout" }
+      }
+    },
+    "repackData": {
+      "description": "`repack`: what changed, what did not, and what reading the result said. The four attachment lists carry numbers, never names: `preserved`, `changed` and `removed` by their number in the package that was read, `added` by the number the new attachment took in the package that was written.",
+      "type": "object",
+      "required": [
+        "bytes_written",
+        "entries",
+        "preserved",
+        "changed",
+        "added",
+        "removed",
+        "header_fields",
+        "unresolved_rules",
+        "layout"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "bytes_written": { "$ref": "#/$defs/count" },
+        "entries": { "$ref": "#/$defs/count" },
+        "preserved": { "$ref": "#/$defs/attachmentNumbers" },
+        "changed": { "$ref": "#/$defs/attachmentNumbers" },
+        "added": { "$ref": "#/$defs/attachmentNumbers" },
+        "removed": { "$ref": "#/$defs/attachmentNumbers" },
+        "header_fields": {
+          "description": "The header fields the edits set, by their manifest spelling. Field names only: no value an edits document carried is reported.",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "unresolved_rules": { "$ref": "#/$defs/unresolvedRules" },
+        "layout": { "$ref": "#/$defs/layout" }
+      }
+    },
+    "attachmentNumbers": {
+      "description": "Attachment numbers, counted from 1.",
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 }
+    }
+  }
+}

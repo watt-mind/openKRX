@@ -16,6 +16,30 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **A JSON Schema for the `--json` envelope, checked against the goldens.**
+  `docs/schema/openkrx-envelope.v1.schema.json` is the machine-readable form
+  of the command contract for `schema_version` 1: one draft 2020-12 schema
+  with a `$defs` entry for the failure envelope and for each of the seven
+  commands' success `data`, a pattern over the eight stable-code heads, and
+  the diagnostic categories. Every documented field is typed and `required`
+  where the contract says so, and every report object keeps
+  `additionalProperties` open, because adding a field does not raise
+  `schema_version`; `error` and `cleanup` are closed instead, so that the
+  privacy rule — a diagnostic carries a code, a category, an entry index, a
+  manifest pointer and counts, and never a path, an entry name or a value an
+  author wrote — is something a validator can check. `scripts/check-schema.py`
+  validates all 26 JSON goldens plus six failure envelopes it renders by
+  running the executable over synthetic inputs, and reports the first
+  violation with the case name and a JSON pointer; CI runs it in the
+  `Golden output contract` job with `jsonschema==4.23.0`, and
+  `scripts/check.sh` runs it when that package is importable and prints a
+  skip line otherwise. Four unit tests in
+  `crates/openkrx-cli/src/render/json.rs` read the schema back and assert that
+  the `schema_version`, the commands, the code heads and the categories it
+  names are the ones this build has, so the schema cannot drift silently. No
+  envelope, golden or stable code changed, and no Rust dependency was added.
+  The schema describes this executable; it is not a conformance claim about
+  any external format or service.
 - **Windows *symbolic* links are exercised by CI, not just junctions.** The
   Windows lane already put a directory junction in every position the output
   layer refuses; a symbolic link is a different reparse-point tag behind the
