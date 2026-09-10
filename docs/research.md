@@ -132,6 +132,26 @@ means shipping the Unicode tables. `unicode-normalization` is
 MIT OR Apache-2.0, has no transitive dependency of consequence, and is used
 for NFC alone; nothing else in openKRX normalises anything.
 
+### `clap_complete` and `clap_mangen`, so no second description exists
+
+`completions` and `man` write documents that describe the command surface.
+The alternative to generating them is committing a completion script and a
+roff page and editing both whenever a subcommand, a flag or an exit status
+changes — a second and a third description of the surface, each able to fall
+behind the parser without anything failing. `clap_complete` and `clap_mangen`
+remove that possibility: both render from `Args::command()`, the same `clap`
+definition the binary dispatches on, at run time, so the documents belong to
+the build that produced them.
+
+Both are MIT OR Apache-2.0, maintained by the `clap` authors in the `clap`
+repository against the same MSRV, and pulled in with default features off.
+They add one transitive dependency between them, `roff`. Each is used by
+exactly one command, in `crates/openkrx-cli/src/generate.rs`, and neither is
+reachable from the core crate: no package semantics, no reading, no writing of
+a package depends on either. The cost of that choice is that the bytes follow
+the dependency version, which is why neither command has a golden case; see
+[the golden output contract](testing.md#golden-output-contract).
+
 ### No vendored XSD
 
 `KER_META_V0_9.xsd` is embedded in a posta.hu document that states only
