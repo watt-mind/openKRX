@@ -16,6 +16,43 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **A deterministic package writer, in the library only (KRX-06, core half).**
+  `openkrx_core::create::package` turns a `PackageSpec` — typed metadata,
+  attachment bytes, a caller-supplied `FixedTimestamp` and a `Layout` — into
+  the bytes of one package. It is a pure function: no filesystem, clock,
+  process or network access, no randomness, and equal inputs produce
+  byte-identical output. The entries are `KRX/OCD/mimetype` first and stored,
+  `KRX/OCD/Metalayer/KULDEMENY_META.xml`, then
+  `KRX/OCD/Payload/ID-<n>/<file>` in request order, deflated at one fixed
+  level, with bit 11 set on every name, host 3 and mode `0o100644`, and no
+  directory entry, extra field, data descriptor, comment or ZIP64 record.
+  The `MELLEKLET` references and `MELLEKLETEK_SZAMA` are derived from the
+  attachments actually written — `MERET` in kilobytes rounded up, the unit
+  M6 documents — and a caller-supplied value that disagrees is refused. The
+  reader's `Limits` — entry count, name length, per-entry and total decoded
+  bytes, compression ratio and image length — and both the archive and
+  extraction name rules are enforced on the output, so whatever `package`
+  returns is a package the reader accepts; `create::verify_round_trip` reads
+  a written one back through `archive::inventory`, `metadata::parse` and
+  `profile::check`. No command exposes any of this: nothing writes a file,
+  and `capabilities().operations` is unchanged.
+
+  **The writer emits the canonical documented layout. Interoperability with
+  real producers is unverified because rules A19–A22 and M11–M15 remain
+  unresolved; the reader's structural checks are the only gate, and a
+  written package is "structurally consistent with the documented layout",
+  never "conforming".** Reading one back still reports `Unresolved(A19)` for
+  the marker's location and `Unresolved(M13)` for the declared size.
+- **Twenty-three stable `create.*` codes**, catalogued in
+  [docs/codes.md](docs/codes.md#creation-codes) and extracted by
+  `scripts/check-codes.py`, whose head list gains `create`:
+  `create.invalid.*` for a request that contradicts itself,
+  `create.over_limit.*` for a ceiling the output would exceed — including the
+  compression ratio the reader refuses a decompression bomb by — and
+  `create.unsafe_name.*` for a name the reader or the extraction planner
+  would refuse. `Category::of_code` classifies the first and third as a
+  package problem (exit 6) and the second as a limit (exit 8).
+
 - **An opt-in private-corpus harness that reports only aggregate counts.**
   `scripts/private-corpus.py --bin <path> --dir <directory>` runs the built
   executable's `inspect`, `list` and `validate-structure` over a

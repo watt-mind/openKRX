@@ -9,7 +9,7 @@ rules for fixtures and for any private corpus.
 
 Almost every test is an integration test, because the contract worth testing
 is the public one: a byte slice goes in, a typed value or a stable code comes
-out. The exceptions are the doctests in the public API documentation and four
+out. The exceptions are the doctests in the public API documentation and five
 `#[cfg(test)]` modules. The one in
 `crates/openkrx-core/src/archive/inflate.rs` pins the CRC-32 implementation
 against its published check value, the empty input, and chunk ordering — an
@@ -20,9 +20,13 @@ internal helper with no public surface to exercise it through. The ones in
 mapping, the path-component classes and the path folding directly: two
 component classes — `..` and a C0 control — are already impossible in an
 accepted inventory, so the only way to hold the planner's own defence in
-depth is to call it. The one in `crates/openkrx-cli/src/exit.rs` holds one
-test per exit-status category and reads every code out of `docs/codes.md` to
-assert that each classifies, with no head list of its own: a subprocess can
+depth is to call it. The one in `crates/openkrx-core/src/create/mod.rs`
+holds the entry-count ceiling a non-ZIP64 end record imposes: writing 65 536
+entries through the public writer would cost seconds of compression to prove
+a `u16`, so the ceiling check is called directly. The one in
+`crates/openkrx-cli/src/exit.rs` holds one test per exit-status category and
+reads every code out of `docs/codes.md` to assert that each classifies, with
+no head list of its own: a subprocess can
 reach only the codes an archive can be built to produce, and
 the contract covers every code the crates define.
 
@@ -36,6 +40,8 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/metadata_parse.rs` | Documents the parser accepts and the facts it reports: prefixed and default namespace bindings, every enumeration token the schema lists, optional header and attachment elements present and absent, the joined attachment path and its edge cases, and the values the sources leave open — an absent `TESZT`, an absent `MELLEKLET_LEIRASA`, a non-numeric or infinite `MERET` — which are recorded rather than rejected. Also pins `MetadataLimits::DEFAULT` and the target-namespace constant. |
 | `crates/openkrx-core/tests/metadata_rejects.rs` | Every refused XML feature (DTD, undeclared entity, forbidden character reference, stray processing instruction, non-UTF-8 declaration and non-UTF-8 bytes, unbound prefix, repeated attribute), every grammar violation (wrong root, wrong namespace, missing, repeated and misordered elements, unexpected child, enumeration, integer and boolean values), and every metadata limit at its boundary. Holds its own truncation and mutation sweeps, and the content-free `Display` assertion. |
 | `crates/openkrx-core/tests/profile_structure.rs` | The check inventory over synthetic KRX-shaped archives: the canonical layout, all three observed root prefixes, both metadata file-name spellings, a lower-case `Metalayer`, missing and ambiguous metadata, a missing, misplaced, mismatched and prefixed marker, a deflated marker producing no finding, missing, prefix-variant and duplicate references, a shared file name in different payload directories, count agreement and its absence, an omitted schema-required element, a document that does not parse, caller-tightened limits, and that every check is reported exactly once in the documented order. |
+| `crates/openkrx-core/tests/create_package.rs` | What the deterministic writer produces: the documented layout and its fixed entry order for zero, one and three attachments, the stored marker beside deflated entries, the UTF-8 flag, host system and file mode on every entry, the document's declaration, prefix, element order and unqualified `KEZELESI_UTASITASOK`, the derived references and count, byte-identical output across runs and its sensitivity to one attachment byte, the caller's timestamp in both headers of every entry, attachment bytes read back unchanged, a document that survives parse and re-write unchanged, and the report a written package produces — no failing check, and exactly A19 and M13 left undecided. |
+| `crates/openkrx-core/tests/create_rejects.rs` | Everything the writer refuses, each by its stable code: every unsafe file-name class including the ones only the extraction planner would catch, a reference or a declared count that disagrees with the attachments, attachments with no dispatch block and a document with two, elements the grammar does not define, text XML 1.0 cannot carry and text the reader would trim, every timestamp field out of range, an attachment that compresses far enough for the reader to call it a bomb, and every output ceiling at its boundary with the package still readable under the tightened limits — including the invariant those ceilings exist for, that whatever `package` returns passes the inventory, the structural checks and `entry_bytes` on every attachment. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
 | `crates/openkrx-core/examples/golden_fixtures.rs` | The generator behind the five committed packages under `tests/fixtures/golden/`, not a test: a canonical two-attachment package, the same package without the `KRX/OCD/` prefix, one declaring an attachment the archive does not hold, a truncated image and an over-limit one. Deterministic by construction; see [the golden output contract](#golden-output-contract). |
@@ -75,8 +81,12 @@ and the injection test skips itself, loudly, when the process can write into
 a read-only directory anyway. Everything else in `extract.rs` runs on all
 three operating systems.
 
-What the suite does **not** provide evidence about: package creation, which
-does not exist; extraction under a concurrent writer at the destination,
+What the suite does **not** provide evidence about: that a package openKRX
+writes is accepted by any real producer or service — the writer's round-trip
+tests prove only that openKRX agrees with its own reading of the documents,
+and A19–A22 and M11–M15 stay unresolved over a package it wrote itself;
+writing a package to a file, which no command does; extraction under a
+concurrent writer at the destination,
 which is outside the threat model and stated as a residual risk in
 [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer);
 conformance, which cannot be claimed while

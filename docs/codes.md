@@ -11,10 +11,10 @@ enum is `#[non_exhaustive]`; a consumer matches on the code string and must
 treat an unknown code as a failure rather than as a success.
 
 `scripts/check-codes.py` keeps this catalogue honest. It extracts every
-`"archive.…"`, `"extract.…"`, `"input.…"`, `"metadata.…"` and `"output.…"`
-string literal from `crates/*/src/**` and fails when a code exists in the
-sources but not here, or here but not in the sources. It runs as part of
-`bash scripts/check.sh`.
+`"archive.…"`, `"create.…"`, `"extract.…"`, `"input.…"`, `"metadata.…"` and
+`"output.…"` string literal from `crates/*/src/**` and fails when a code
+exists in the sources but not here, or here but not in the sources. It runs
+as part of `bash scripts/check.sh`.
 
 Test names below are functions in `crates/openkrx-core/tests/`, except in the
 input and output sections, whose tests are in `crates/openkrx-cli/tests/`.
@@ -30,7 +30,10 @@ its own: `validate-structure` reports 3 when any check failed. The `extract.*`
 codes follow the same segment rule as the archive ones — `extract.unsafe_path.*`
 and `extract.ambiguous.*` to 6, `extract.unsupported.*` to 7,
 `extract.over_limit.*` to 8 — and every `output.*` code classifies to 9, the
-status `extract` alone can exit with.
+status `extract` alone can exit with. The `create.*` codes follow it too:
+`create.over_limit.*` to 8, and `create.invalid.*` and
+`create.unsafe_name.*` to 6, the status for a package that contradicts itself
+— here, a request describing one that would.
 
 ## Reading a diagnostic
 
@@ -347,6 +350,78 @@ A documented extraction ceiling was exceeded. Fields: `limit_value`,
 | `extract.over_limit.path_bytes` | One destination path is longer than `max_path_bytes`, separators included. | `the_path_length_limit_holds_at_its_boundary` |
 | `extract.over_limit.component_bytes` | One path component is longer than `max_component_bytes`. | `the_component_length_limit_holds_at_its_boundary` |
 | `extract.over_limit.depth` | A destination path has more components than `max_depth`. | `the_depth_limit_holds_at_its_boundary` |
+
+## Creation codes
+
+`CreateError`, defined in `crates/openkrx-core/src/create/error.rs`. These
+are the codes `openkrx_core::create::package` produces when a request cannot
+be written as the canonical documented layout. Every one of them refuses the
+**whole** package: nothing is written partially, renamed or dropped. Fields:
+`index`, the position of the attachment the failure concerns — a position in
+the request, not a central-directory index, because nothing has been written
+— plus `limit_value` and `observed` on a limit.
+
+No code here describes a file, a path or a destination: the writer returns
+bytes and touches no filesystem. Writing those bytes out is the command-line
+half of KRX-06 and will add codes of its own.
+
+Tests are in `crates/openkrx-core/tests/create_rejects.rs`, except the entry
+count a non-ZIP64 end record cannot express, whose test is the `#[cfg(test)]`
+module in `crates/openkrx-core/src/create/mod.rs`: writing 65 536 entries to
+prove a `u16` would cost seconds of compression.
+
+### `create.invalid.*`
+
+A request that contradicts itself, or carries something the documented
+layout cannot express.
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `create.invalid.reference_mismatch` | A caller-supplied `MELLEKLET` reference, or `MELLEKLETEK_SZAMA`, disagrees with the attachments the request carries. The writer derives both from what it actually writes and never writes a document that describes a different package. | `a_supplied_reference_that_disagrees_with_the_attachments_is_refused`, `a_declared_count_that_disagrees_with_the_attachments_is_refused` |
+| `create.invalid.dispatch_count` | Attachments were supplied with no `EXPEDIALAS` block to list them in, or the document carries more than one block, so there is no single place for the derived references. | `attachments_with_nowhere_to_list_them_are_refused`, `a_document_with_two_dispatch_blocks_is_refused` |
+| `create.invalid.text` | A text value holds a character XML 1.0 cannot carry: a C0 control other than tab and line feed, a carriage return, which a parser would rewrite, or a non-character code point. | `a_character_xml_cannot_carry_is_refused_rather_than_dropped` |
+| `create.invalid.untrimmed_text` | A text value starts or ends with whitespace. The reader trims leaf text, so the document would parse back to a different value than the one written. | `text_the_reader_would_trim_is_refused_rather_than_silently_changed` |
+| `create.invalid.unknown_elements` | The document counted elements the grammar does not define (A9). The writer emits the grammar alone, so it refuses rather than dropping content silently. | `a_document_carrying_elements_the_grammar_does_not_define_is_refused` |
+| `create.invalid.timestamp` | A calendar time falls outside what the MS-DOS date and time fields express: 1980-01-01 00:00:00 to 2107-12-31 23:59:59, with the month, day, hour, minute and second in range. | `a_timestamp_the_dos_fields_cannot_express_is_refused` |
+
+### `create.over_limit.*`
+
+A documented ceiling the output would exceed. The values are the reader's
+own `Limits`, so a package this crate writes is one it reads back under the
+same configuration. Fields: `limit_value`, `observed`, and `index` where the
+attachment is known. The defaults are in
+[architecture.md](architecture.md#archive-inventory-limits).
+
+| Code | Meaning | Asserted by |
+| --- | --- | --- |
+| `create.over_limit.archive_bytes` | The assembled image would exceed `max_archive_bytes`, or the 4 GiB the non-ZIP64 records can address, whichever is smaller. The exact length is known before a byte is assembled, so no size or offset is ever truncated into a header. | `the_archive_size_limit_holds_at_its_boundary` |
+| `create.over_limit.entries` | More entries than `max_entries`, counting the marker and the metadata document, or more than the 65 535 a non-ZIP64 end record can count, whichever is smaller. A relaxed `max_entries` refuses the package rather than truncating the count. | `the_entry_count_limit_holds_at_its_boundary`, `the_entry_count_ceiling_is_what_the_end_record_can_count` |
+| `create.over_limit.name_bytes` | One entry name is longer than `max_name_bytes`. The two fixed names are checked on the same path as an attachment's. | `the_name_length_limit_holds_at_its_boundary` |
+| `create.over_limit.entry_bytes` | One entry's bytes exceed `max_entry_decoded_bytes`, or the 4 GiB a non-ZIP64 size field holds. | `the_entry_size_limit_holds_at_its_boundary` |
+| `create.over_limit.total_bytes` | Every entry together exceeds `max_total_decoded_bytes`. | `the_total_size_limit_holds_at_its_boundary` |
+| `create.over_limit.compression_ratio` | One entry's decoded-to-stored ratio exceeds `max_compression_ratio`, once it has produced more than `Limits::RATIO_GRACE_BYTES` decoded bytes. It is the reader's own rule on the reader's own numbers: an entry the writer let through here is one `archive::inventory` would refuse while inflating it. | `an_attachment_the_reader_would_call_a_bomb_is_refused` |
+
+### `create.unsafe_name.*`
+
+An entry name this crate refuses to write, so that what openKRX writes it can
+read back and extract on all three target platforms. The classes mirror
+`archive.unsafe_name.*` and `extract.unsafe_path.*`; the name itself is never
+reported. Every class below is asserted by
+`every_unsafe_file_name_class_is_refused_with_its_own_code`.
+
+| Code | Meaning |
+| --- | --- |
+| `create.unsafe_name.empty` | A file name, or a component of one, is empty. |
+| `create.unsafe_name.separator` | A file name holds `/` or a backslash. An attachment file name is one component: the writer places it, and a caller never builds a path. |
+| `create.unsafe_name.current_component` | A component is `.`. |
+| `create.unsafe_name.parent_component` | A component is `..`. |
+| `create.unsafe_name.control_character` | A component holds a C0 or C1 control character. |
+| `create.unsafe_name.trailing_dot` | A component ends with `.`, which several filesystems silently strip. |
+| `create.unsafe_name.trailing_space` | A component ends with a space, stripped the same way. |
+| `create.unsafe_name.leading_space` | A component starts with a space, stripped the same way. |
+| `create.unsafe_name.reserved_device_name` | A component is a Windows reserved device name, with or without an extension. |
+| `create.unsafe_name.colon` | A component holds `:`, which names an alternate data stream on NTFS. |
+| `create.unsafe_name.reserved_character` | A component holds one of `*`, `?`, `<`, `>`, `\|` or `"`. |
 
 ## What is deliberately absent
 

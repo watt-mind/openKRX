@@ -93,6 +93,40 @@ and [SECURITY.md](../SECURITY.md#threat-model-mapping-extraction-output-layer).
 | Confinement to a caller-selected destination, no overwrite, no link escape | `cli::extract::preflight`, through `extract` | `output.destination_*`, `output.exists`, `output.symlink_in_path`, `output.not_a_directory`; exit status 9, and nothing written | `a_target_file_that_already_exists_refuses_the_whole_extraction`, `an_ancestor_symlink_inside_the_destination_is_refused`, `a_destination_that_is_itself_a_symlink_is_refused` | Asserted |
 | Interrupted-write detection and cleanup that never deletes pre-existing data | `cli::extract::writer`, `cli::extract::cleanup` | `output.partial_marker_present`; a failed run removes only what it created and reports the counts | `a_marker_left_by_an_interrupted_run_refuses_the_next_one`, `a_failed_write_removes_this_runs_files_and_leaves_everything_else` | Asserted; a crash still leaves the marker, by design |
 
+## Creation
+
+Creation is implemented in the library only: `openkrx_core::create::package`
+writes the bytes of one package, and no command exposes it. The writer emits
+the canonical documented layout. Interoperability with real producers is
+unverified because rules A19–A22 and M11–M15 remain unresolved; the reader's
+structural checks are the only gate, and a written package is "structurally
+consistent with the documented layout", never "conforming". What is written
+and what is fixed is in
+[architecture.md](architecture.md#deterministic-creation).
+
+The rows below say what the writer does with the rules it touches. None of
+them is a conformance claim, and none of them moves a rule's status: a rule
+this project cannot decide when reading is one it cannot decide when writing
+either.
+
+| Rule | What the writer does | Outcome semantics | Test | Status |
+| --- | --- | --- | --- | --- |
+| A2: first entry `mimetype` holding `application/OCD+ZIP` | Writes it first, stored, holding exactly those bytes | Reading one back reports check 4 as `Unresolved(A19)`, because the entry is written under the `KRX/OCD/` prefix | `the_marker_is_the_first_entry_stored_verbatim`, `exactly_two_rules_stay_unresolved_over_a_written_package` | Observed |
+| A4: metadata in `Metalayer`, one `KULDEMENY_META.xml` | Writes exactly one, at `KRX/OCD/Metalayer/KULDEMENY_META.xml` | Reading one back reports checks 1 and 2 as `Pass` | `the_entries_are_the_documented_layout_in_a_fixed_order` | Observed |
+| A5, A22: attachments under `Payload/`, one subdirectory each | Writes `KRX/OCD/Payload/ID-<n>/<file>`, `n` 1-based, in request order | No outcome. The `ID-<n>` spelling is one of the three A22 leaves open, and choosing it resolves nothing | `the_entries_are_the_documented_layout_in_a_fixed_order` | Unresolved (A22 unchanged) |
+| A7: optional `signatures.xml` | Never writes one | No outcome; openKRX performs no cryptography | — | Not implemented |
+| A8: `/` separators, no root-directory marker | Builds every name itself from `/`-joined components, and refuses a file name holding a separator | `create.unsafe_name.separator`, and the other `create.unsafe_name.*` classes for the shapes the reader or the extraction planner would refuse | `every_unsafe_file_name_class_is_refused_with_its_own_code` | Asserted |
+| A19: directory nesting and the location of `mimetype` | Writes the `KRX/OCD/` prefix, marker included, and says so | Reading one back reports check 4 as `Unresolved(A19)` and check 3 as `Pass` | `exactly_two_rules_stay_unresolved_over_a_written_package` | Unresolved |
+| A20: the marker's compression method and byte-exactness | Stores the marker, because that is the convention the container family follows | No outcome. Nothing states the rule, so writing stored asserts nothing | `the_marker_is_the_first_entry_stored_verbatim` | Not asserted |
+| A21: entry-name encoding and case | Writes UTF-8 names with general-purpose bit 11 set on every entry | No outcome. The flag is a fact about what was written, not a reading of the rule | `every_entry_declares_a_utf8_name_and_a_regular_file` | Not asserted |
+| M1 to M5, M8, M9: the document grammar, order and prefix | Serialises the typed model in the M2, M3 and M5 order, in the target namespace under the `ns2` prefix, with `KEZELESI_UTASITASOK` unqualified | A document the reader parses back to the value that was written; a character XML 1.0 cannot carry is `create.invalid.text` | `the_document_is_the_shape_the_examples_show`, `every_optional_element_survives_the_round_trip` | Asserted |
+| M6, M13: `MERET` and `ELHELYEZKEDES` | Derives `ELHELYEZKEDES` from where the attachment went, and writes `MERET` as kilobytes rounded up, the unit M6 documents | Reading one back still reports check 11 as `Unresolved(M13)`: writing a unit does not settle which one a service expects | `the_derived_references_describe_where_each_attachment_went`, `exactly_two_rules_stay_unresolved_over_a_written_package` | Unresolved |
+| M7: `MELLEKLETEK_SZAMA` beside the list | Derives both from the attachments, and refuses a caller-supplied value that disagrees | `create.invalid.reference_mismatch`; reading one back reports check 9 as `Pass` | `a_declared_count_that_disagrees_with_the_attachments_is_refused` | Asserted |
+| M10: a reference is `ELHELYEZKEDES` joined to `FAJL_NEV` | Writes references that resolve byte-exactly against the entry names it wrote | Reading one back reports check 8 as `Pass` with `ReferenceResolution::Resolved` | `exactly_two_rules_stay_unresolved_over_a_written_package` | Asserted |
+| M11: elements one official example omits | Writes `TESZT` and `MELLEKLET_LEIRASA` when the request carries them, and omits them when it does not | Reading one back reports check 6 as `Pass` or as `Unresolved(M11)`, exactly as for a package read from elsewhere | `an_absent_teszt_element_stays_absent`, `a_package_written_without_descriptions_reports_m11_instead` | Unresolved |
+| M12: metadata file-name casing | Writes the canonical spelling | Reading one back reports check 2 as `Pass`; the other spelling is still unresolved for a package written elsewhere | `the_entries_are_the_documented_layout_in_a_fixed_order` | Unresolved |
+| M15: what a receiving service requires | Nothing. No package openKRX writes may be described as acceptable to any service | No outcome | — | Unresolved |
+
 ## Known gaps
 
 Nine of the thirty-seven rules cannot be decided from the retrieved sources:
@@ -113,7 +147,8 @@ What is missing, and what each would unblock:
   its own reading of the documents.
 - **An independent reference implementation or conformance suite.** None
   was found, so a reader/writer round-trip would only prove that our own
-  components agree with each other.
+  components agree with each other — which is exactly what the writer's own
+  round-trip test proves, and all it proves.
 - **The upstream SPOCS OCD specification.** The catalogue entry
   `MKR-2.27` cites returns HTTP 404, so the conflicts above cannot be
   resolved against the container family's own definition.
@@ -127,7 +162,8 @@ What is missing, and what each would unblock:
   accepted".
 
 Until those exist, openKRX reports observations. It does not, and must not,
-state that an archive is a conforming package, and no output field carries
-such a verdict. The evidence itself, with citations, is in
+state that an archive is a conforming package, or that a package it wrote is
+one, and no output field carries such a verdict. The evidence itself, with
+citations, is in
 [profile.md](profile.md#conformance-evidence) and
 [references.md](references.md).

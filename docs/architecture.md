@@ -24,18 +24,21 @@ rules that no primary source settles, so that claim is not available.
   or network access, and resolves nothing external. Byte slices go in,
   typed values or typed errors come out.
 - **Determinism.** The same bytes and the same limits produce the same
-  inventory, the same parse and the same check outcomes.
+  inventory, the same parse and the same check outcomes; and the same
+  creation request produces the same package bytes.
 
 ## Not yet implemented
 
-The three library layers are reachable from the command line: `inspect`,
+The three reading layers are reachable from the command line: `inspect`,
 `list` and `validate-structure` render them, `extract` writes what
 [Extraction planning](#extraction-planning) decided, and
 `capabilities().operations` names exactly those four. Everything below is
 still absent.
 
-- Package creation, deterministic writing and any writer limits. `extract`
-  writes files out of a package; nothing writes a package.
+- A command that creates a package. The library writes one —
+  [Deterministic creation](#deterministic-creation) — but no command exposes
+  it, nothing writes a file, and `capabilities().operations` does not name it.
+  Interoperability of what it writes with a real producer is unverified.
 - Atomic whole-tree extraction. Files are created directly in the
   destination, not staged elsewhere and renamed into place, so an interrupted
   run is detected rather than prevented; see
@@ -107,6 +110,12 @@ as a failure rather than as a success.
 | `src/archive/names.rs` | Entry-name safety classes and collision rules, applied to raw bytes before any encoding decision. |
 | `src/archive/kind.rs` | `EntryKind` and the host-system mapping from `version made by` and `external file attributes` onto regular file, directory, symlink, special file or unknown. |
 | `src/archive/raw.rs` | Checked little-endian reads over the borrowed image; every read reports truncation at a named structure. |
+| `src/create/mod.rs` | `package()`, the writer's entry point, the layout constants, the ceiling checks over the output, and `verify_round_trip()`. |
+| `src/create/error.rs` | `CreateError` and its three category enums, each mapping to a stable dotted code; `Display` prints code, attachment index and numbers only. |
+| `src/create/spec.rs` | `PackageSpec`, `AttachmentInput`, `FixedTimestamp`, `Layout`, and the derivation of the `MELLEKLET` references from the attachments actually written. |
+| `src/create/names.rs` | Entry names checked before they are written, against the archive layer's name rules and the extraction planner's component rules alike. |
+| `src/create/xml.rs` | The `KER_META_V0_9`-shaped serialiser: the M2, M3 and M5 element order, the `ns2` prefix, deterministic escaping, and the text XML 1.0 cannot carry. |
+| `src/create/zip.rs` | The deterministic ZIP image: every record field fixed, compressed first so the exact image length is known before a byte is assembled. |
 | `src/extract/mod.rs` | `plan()`, the extraction-planning entry point: `ExtractLimits`, `ExtractionPlan` and `PlanItem`, and the per-entry walk that produces them. |
 | `src/extract/error.rs` | `PlanError` and its four category enums, each mapping to a stable dotted code; `Display` prints code, entry index and numbers only. |
 | `src/extract/paths.rs` | Destination path components and the shapes that must never become one, checked against the union of the three target platforms' rules. |
@@ -601,6 +610,126 @@ APFS normalisation are covered by the planner's NFC and case-folded collision
 rejection, and by the no-clobber rule as the second line: two paths a
 filesystem equates cannot both be created with `create_new`.
 
+## Deterministic creation
+
+`openkrx_core::create::package` turns a `PackageSpec` — typed metadata,
+attachment bytes, a caller-supplied timestamp and a layout — into the bytes
+of one package. It is a pure function: no filesystem, clock, process or
+network access, no randomness, no environment, and equal inputs produce
+byte-identical output. No command exposes it: `capabilities().operations`
+still names the four reader and extraction operations only.
+
+The writer emits the canonical documented layout. Interoperability with real
+producers is unverified because rules A19–A22 and M11–M15 remain unresolved;
+the reader's structural checks are the only gate, and a written package is
+"structurally consistent with the documented layout", never "conforming".
+
+### What is written
+
+| Entry | Content | Method |
+| --- | --- | --- |
+| `KRX/OCD/mimetype` | `application/OCD+ZIP` (A2) | stored |
+| `KRX/OCD/Metalayer/KULDEMENY_META.xml` | the serialised document (A4) | deflate |
+| `KRX/OCD/Payload/ID-<n>/<file>` | one attachment, verbatim (A5, A22) | deflate |
+
+Nothing else is written: no directory entry, no `signatures.xml` (A7), no
+`DeliveryInstruction.xml` or other service-specific document (A11–A16), and
+no signature or encryption of any kind — the
+[cryptographic boundary](#boundaries) is unchanged by the writer.
+
+### What is fixed, and why
+
+Every field a ZIP writer may choose is fixed, because a difference in any of
+them makes two runs over the same input produce different bytes.
+
+| Field | Value |
+| --- | --- |
+| Entry order | marker, metadata document, attachments in index order |
+| Marker method | stored |
+| Every other method | deflate, at one fixed level |
+| Modification date and time | the caller's `FixedTimestamp`, in both headers |
+| General-purpose flags | bit 11 only: the name is UTF-8 |
+| `version made by` | host 3 (Unix), version 20 |
+| `version needed` | 20 |
+| External attributes | `0o100644 << 16`: a regular file, `rw-r--r--` |
+| Extra fields, comments, data descriptors | none |
+| Directory entries | none |
+| ZIP64 | never; the image, every entry and every offset fit in 32 bits, and the entry count in 16 |
+| XML declaration | `version="1.0" encoding="UTF-8" standalone="yes"` |
+| Namespace prefix | `ns2`, bound to the target namespace (M1, M9) |
+| Element order | M2 for `KULDEMENY`, M3 for `FEJRESZ`, M5 for `MELLEKLET` |
+| `KEZELESI_UTASITASOK` | unqualified, as the schema declares it (M8) |
+| Escaping | `&`, `<` and `>`, always; no other character is escaped |
+| Insignificant whitespace | none, anywhere in the document |
+
+The core crate has no clock, so the modification time is the caller's:
+`FixedTimestamp::EPOCH` is 1980-01-01 00:00:00, and `from_parts` builds the
+two MS-DOS fields from a calendar time the caller decided, rounding an odd
+second down to the two-second resolution the field holds.
+
+### What is derived
+
+The document describes the package that was actually written, never the one
+a caller believed it was writing. For the attachment at index `n - 1`:
+
+| Element | Value |
+| --- | --- |
+| `CSATOLMANY_SZAMA` | `n`, the 1-based index |
+| `ELHELYEZKEDES` | `KRX/OCD/Payload/ID-<n>` |
+| `FAJL_NEV` | the file name, one component |
+| `MERET` | the size in kilobytes, rounded up, as a numeric string |
+| `MELLEKLETEK_SZAMA` | the number of attachments |
+
+`MERET` in kilobytes is the decision M6 documents — the schema calls the
+element kilobytes — and rounding up is this project's choice, because no
+source states the rounding. What a receiving service actually expects there
+is unresolved rule M13, and stays unresolved: the `declared_size` check keeps
+reporting `Unresolved(M13)` over a package openKRX itself wrote, and the
+declared and observed sizes are still reported side by side and never
+compared.
+
+A caller may supply the references and the count; they are then checked
+against the derived ones and refused with `create.invalid.reference_mismatch`
+when they disagree, rather than written in place of them. Elements the
+grammar does not define are counted by the reader (A9) but cannot be
+reproduced by the writer, so a document carrying them is refused with
+`create.invalid.unknown_elements` instead of being written without them.
+
+### What is checked on the way out
+
+The reader's ceilings apply to the output, so a package this crate writes is
+one it can read back under the same `Limits`: the entry count, each entry
+name's length, each entry's decoded size, the total decoded size, each
+entry's decoded-to-stored compression ratio, and the image length. Two of
+them are bounded twice, by the configuration and by what a non-ZIP64 record
+can express: the image by 4 GiB, and the entry count by the 65 535 the end
+record counts in 16 bits, so a relaxed `max_entries` refuses the package
+rather than truncating the count. The ratio is checked after compression,
+against the same numbers and the same
+[`Limits::RATIO_GRACE_BYTES`](#archive-inventory-limits) window the reader
+applies while inflating, because an attachment that compresses far enough —
+a long run of one byte — is one the reader refuses as a decompression bomb
+whoever wrote it. Entry names are checked twice — against the archive
+layer's name rules and against the extraction planner's component rules — so
+that what openKRX writes it can also extract, on Linux, macOS and Windows
+alike. Text is refused when XML 1.0 cannot carry it, and refused when it
+starts or ends with whitespace, which the reader trims: a value that would
+not read back as it was written is an error, never a silent change.
+
+Every refusal refuses the whole package, and every code is catalogued in
+[codes.md](codes.md#creation-codes) under `create.invalid.*`,
+`create.over_limit.*` and `create.unsafe_name.*`.
+
+### What reading one back reports
+
+`create::verify_round_trip` runs `archive::inventory`, `metadata::parse` and
+`profile::check` over written bytes and returns the whole report. A package
+written by this crate fails no check. It does not pass every check either:
+`marker_entry` reports `Unresolved(A19)`, because the marker sits under the
+`KRX/OCD/` prefix and the three primary sources disagree about where it
+belongs, and `declared_size` reports `Unresolved(M13)`. Those two outcomes
+are the honest report of two unresolved rules, and no writer can remove them.
+
 ## Command contract and JSON envelope
 
 The supported surface is `openkrx --help`, `openkrx --version`,
@@ -974,6 +1103,7 @@ added code cannot reach a release unclassified.
 Every failure openKRX produces carries a stable dotted code. The archive
 layer produces `archive.*`, the metadata layer and the profile layer both
 produce `metadata.*`, and the two `metadata.*` sets are disjoint. The
+extraction planner produces `extract.*` and the writer `create.*`. The
 command-line crate adds `input.*` for the one thing the core crate cannot
 fail at, because it performs no I/O: reading the input. A consumer can
 bucket every diagnostic by its dotted code alone.

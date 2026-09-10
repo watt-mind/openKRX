@@ -15,8 +15,11 @@ undo-on-failure policy mapped
 performs no I/O of any kind.
 
 Reading the one input a command takes is bounded before parsing begins, and
-writing happens only where `extract` was explicitly pointed. Nothing creates
-a package, uses keys, or accesses government services. The requirements below
+writing happens only where `extract` was explicitly pointed. No command
+creates a package: the library writes one — `openkrx_core::create::package`,
+mapped [below](#threat-model-mapping-creation-layer) — but it returns bytes,
+touches no filesystem, and no command exposes it. Nothing uses keys or
+accesses government services. The requirements below
 remain implementation gates for the package operations that do not exist
 yet, not claims that a complete secure KRX parser exists. A successful
 inventory, parse, structural report or extraction is an observation, never a
@@ -255,6 +258,62 @@ this run had created. A partial result is never reported as a success.
   authentic, that its contents are what they claim to be, or that a document
   inside it is safe to open. Attachments are opaque bytes and are never
   interpreted.
+
+## Threat-model mapping: creation layer
+
+`openkrx_core::create::package` writes the bytes of one package. It is a pure
+function of the request: no filesystem, clock, process or network access, no
+randomness, and no environment, so the same request always produces the same
+bytes. **Nothing here writes a file.** Placing the bytes somewhere is the
+command half of KRX-06 and does not exist; when it does, the no-clobber and
+destination rules of the
+[output layer](#threat-model-mapping-extraction-output-layer) apply to it.
+
+The layer's premise is that a caller's request is as untrusted as an archive:
+a file name, a description or a metadata value may come from anywhere, so
+each is checked before it becomes part of a package, and a refusal refuses
+the whole package. Tests are in
+`crates/openkrx-core/tests/create_rejects.rs` and
+`crates/openkrx-core/tests/create_package.rs`; the rules are in
+[architecture.md](docs/architecture.md#deterministic-creation) and the codes
+in [codes.md](docs/codes.md#creation-codes).
+
+| Required check | Status | Error code prefix | Test |
+| --- | --- | --- | --- |
+| Documented limits enforced on the output, so a written package is readable under the same `Limits`: entry count, name length, per-entry and total decoded bytes, compression ratio, and the image length | Implemented | `create.over_limit.entries`, `.name_bytes`, `.entry_bytes`, `.total_bytes`, `.compression_ratio`, `.archive_bytes` | `the_entry_count_limit_holds_at_its_boundary`, `the_name_length_limit_holds_at_its_boundary`, `the_entry_size_limit_holds_at_its_boundary`, `the_total_size_limit_holds_at_its_boundary`, `the_archive_size_limit_holds_at_its_boundary`, `an_attachment_the_reader_would_call_a_bomb_is_refused`, `a_package_written_at_a_tightened_ceiling_reads_back_at_the_same_one`, `every_accepted_package_reads_back_entry_by_entry` |
+| No package is written that the reader would refuse: what `package` returns passes `inventory`, the structural checks and `entry_bytes` on every entry under the same limits | Implemented | none; a property of the output, held by every ceiling above | `every_accepted_package_reads_back_entry_by_entry`, `a_written_package_fails_no_structural_check` |
+| A record field is never silently truncated: a value a non-ZIP64 record cannot hold refuses the package | Implemented | `create.over_limit.archive_bytes`, `.entries` | `the_archive_size_limit_holds_at_its_boundary`, `the_entry_count_ceiling_is_what_the_end_record_can_count` |
+| No unsafe entry name is ever written: the archive layer's name rules and the extraction planner's component rules both apply, so what openKRX writes it can read and extract on Linux, macOS and Windows alike | Implemented | `create.unsafe_name.*`, eleven classes | `every_unsafe_file_name_class_is_refused_with_its_own_code`, `a_name_the_extraction_planner_would_refuse_is_refused_at_creation` |
+| A caller never builds a path: an attachment file name is one component, and the writer places it | Implemented | `create.unsafe_name.separator`, `.empty` | `every_unsafe_file_name_class_is_refused_with_its_own_code` |
+| Attachment bytes are preserved exactly, never interpreted, converted or unpacked | Implemented | none; a property of the output | `every_attachment_reads_back_byte_identically`, `an_incompressible_attachment_still_reads_back_unchanged` |
+| The document describes the package that was written: references and `MELLEKLETEK_SZAMA` are derived, and a disagreeing caller-supplied value is refused rather than written | Implemented | `create.invalid.reference_mismatch`, `.dispatch_count` | `a_supplied_reference_that_disagrees_with_the_attachments_is_refused`, `a_declared_count_that_disagrees_with_the_attachments_is_refused`, `attachments_with_nowhere_to_list_them_are_refused` |
+| No XML injection and no silent rewriting: text is escaped deterministically, a character XML 1.0 cannot carry is refused, and text the reader would trim is refused rather than changed | Implemented | `create.invalid.text`, `.untrimmed_text` | `a_character_xml_cannot_carry_is_refused_rather_than_dropped`, `text_the_reader_would_trim_is_refused_rather_than_silently_changed`, `text_xml_can_carry_is_written_and_read_back_unchanged` |
+| No content is dropped silently: a document carrying elements the grammar does not define is refused, because the writer cannot reproduce them | Implemented | `create.invalid.unknown_elements` | `a_document_carrying_elements_the_grammar_does_not_define_is_refused` |
+| No clock, no environment and no ambient state: the modification time is the caller's, and identical requests produce identical bytes | Implemented | `create.invalid.timestamp` for a time the fields cannot express | `the_same_request_writes_the_same_bytes`, `the_timestamp_is_the_callers_and_reaches_every_record` |
+| A failure prevents the operation reporting success: a refusal refuses the whole package, never a reduced one | Implemented | every `create.*` code | every rejection test above; each asserts that no bytes were produced |
+| Diagnostics free of personal content and private paths | Implemented | every code; `Display` prints code, attachment index and limit numbers only | `every_unsafe_file_name_class_is_refused_with_its_own_code`, `a_declared_count_that_disagrees_with_the_attachments_is_refused` |
+| No signing, encryption, `signatures.xml` or submission of any kind | By construction; openKRX performs no cryptography | none | — |
+
+### Residual risks of this layer
+
+- **Interoperability is unverified.** The writer emits the canonical
+  documented layout. Interoperability with real producers is unverified
+  because rules A19–A22 and M11–M15 remain unresolved; the reader's
+  structural checks are the only gate, and a written package is
+  "structurally consistent with the documented layout", never "conforming".
+  No output of this project may say otherwise, and a package it writes still
+  reports `Unresolved(A19)` and `Unresolved(M13)` when it reads it back.
+- **The request is trusted for its content, not for its shape.** A caller
+  decides what goes into a package; openKRX checks the shape — names, text,
+  sizes, references — and never the meaning. A package can carry an
+  attachment the caller should not have sent, and nothing here would know.
+- **A payload can hold ZIP structure.** Attachment bytes are written
+  verbatim, so a payload may contain byte sequences that look like ZIP
+  records, including an end-of-central-directory signature. The reader
+  refuses an image with two terminating candidates as an ambiguity rather
+  than choosing one, so such a package is detected on the way back in rather
+  than read two ways; a caller that must be certain reads its own output
+  back, which `create::verify_round_trip` does in one call.
 
 ## Threat-model mapping: command-line input layer
 
