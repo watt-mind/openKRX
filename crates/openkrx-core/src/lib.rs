@@ -9,7 +9,11 @@
 //! deterministically, in the layout `docs/profile.md` documents — a layout that
 //! is unverified against every real producer, so what it produces is
 //! "structurally consistent with the documented layout" and never "conforming".
-//! None of the four performs filesystem, clock, process or network access, and
+//! A fifth composes them: [`repack::plan`] and [`repack::apply`] edit a package
+//! that already exists, preserving every attachment no edit names byte for
+//! byte and refusing any package the writer cannot re-emit rather than one
+//! that silently lost part of it.
+//! None of the five performs filesystem, clock, process or network access, and
 //! none resolves anything external.
 //!
 //! The three reader commands `inspect`, `list` and `validate-structure` expose
@@ -65,14 +69,15 @@ pub struct Capabilities {
 /// Return the current implementation status without I/O or side effects.
 ///
 /// The list names the package operations a command actually performs. Reading,
-/// protected extraction and deterministic creation are implemented, so the
-/// stage is `reader-writer`; a structural report is not a conformance verdict
+/// protected extraction, deterministic creation and deterministic repacking
+/// are implemented, so the stage is `reader-writer`; a structural report is not a conformance verdict
 /// whichever command produced it, and `create` writing a package is not a
 /// statement that a receiving service would accept it.
 /// `extract` appears here only because every filesystem property
 /// `SECURITY.md` requires of it is held by a test on each supported platform,
-/// and `create` only because every package it writes is read back by the
-/// writer's own structural check before the command reports success.
+/// and `create` and `repack` only because every package they write is read
+/// back by the writer's own structural check before the command reports
+/// success.
 pub const fn capabilities() -> Capabilities {
     Capabilities {
         project: "openKRX",
