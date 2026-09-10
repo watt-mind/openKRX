@@ -43,6 +43,7 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/create_package.rs` | What the deterministic writer produces: the documented layout and its fixed entry order for zero, one and three attachments, the stored marker beside deflated entries, the UTF-8 flag, host system and file mode on every entry, the document's declaration, prefix, element order and unqualified `KEZELESI_UTASITASOK`, the derived references and count, byte-identical output across runs and its sensitivity to one attachment byte, the caller's timestamp in both headers of every entry, attachment bytes read back unchanged, a document that survives parse and re-write unchanged, and the report a written package produces — no failing check, and exactly A19 and M13 left undecided. |
 | `crates/openkrx-core/tests/create_rejects.rs` | Everything the writer refuses, each by its stable code: every unsafe file-name class including the ones only the extraction planner would catch, a reference or a declared count that disagrees with the attachments, attachments with no dispatch block and a document with two, elements the grammar does not define, text XML 1.0 cannot carry and text the reader would trim, every timestamp field out of range, an attachment that compresses far enough for the reader to call it a bomb, and every output ceiling at its boundary with the package still readable under the tightened limits — including the invariant those ceilings exist for, that whatever `package` returns passes the inventory, the structural checks and `entry_bytes` on every attachment. |
 | `crates/openkrx-core/tests/property_round_trip.rs` | The five [property-based tests](#property-based-tests) over generated requests: a written package read back with byte-identical attachments, the documented normalised document and no failing check; byte-identical output across two writes; a single-byte mutation refused or read back inside every ceiling; a request over one documented ceiling refused with that ceiling's code; and every written name accepted by the extraction planner. Its strategies live in `crates/openkrx-core/tests/support/strategies.rs`. |
+| `crates/openkrx-core/tests/scaling_guard.rs` | The [scaling guard](#the-scaling-guard): `archive::inventory` at 4 MiB and 64 MiB of stored entries, `extract::plan` at 32 and 256 entries with long Unicode names, and `profile::check` at 32 and 254 referenced attachments, each asserted to cost no more than 32 times as much at the ceiling as at the small size. It measures wall time, so it holds a shape rather than a number. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
 | `crates/openkrx-core/examples/golden_fixtures.rs` | The generator behind the ten committed files under `tests/fixtures/golden/`, not a test: five packages — a canonical two-attachment package, the same package without the `KRX/OCD/` prefix, one declaring an attachment the archive does not hold, a truncated image and an over-limit one — and the inputs of the `create` cases: two small attachment files and three manifests, one that writes a package, one carrying a key the schema does not define, and one naming an attachment that is not there. Deterministic by construction; see [the golden output contract](#golden-output-contract). |
@@ -664,6 +665,120 @@ Outstanding, and none of it exists yet:
 Until those exist, the sweeps above remain the load-bearing compensating
 control, and the residual risk stays recorded in
 [roadmap.md](roadmap.md#residual-risks-in-the-current-state).
+
+## Benchmarks
+
+Every value in `Limits::DEFAULT` is a ceiling, so a maximal-but-valid package
+is something a caller can be handed at any time: 64 MiB of image, 256 entries,
+32 MiB in one entry, 128 MiB decoded in total. The benchmarks measure the cost
+of that package, and the scaling guard below turns "the cost grew the wrong
+shape" into a failing test.
+
+```sh
+cargo bench -p openkrx-core          # the whole set
+cargo bench -p openkrx-core --no-run # compile only; part of the PR gate
+cargo bench -p openkrx-core -- inventory   # one group
+```
+
+The harness is [`criterion`](https://crates.io/crates/criterion), a
+dev-dependency of `openkrx-core` alone, with `default-features = false` and
+only `cargo_bench_support` enabled — without that one feature criterion
+refuses to run under `cargo bench` at all, and the two it replaces (`rayon`
+and `plotters`) are a thread pool and a plotting stack for reports nothing
+here reads. Its declared minimum Rust is 1.86, inside the workspace's 1.88.
+There is no runtime dependency: no binary contains any of this.
+
+**Every package a benchmark reads is generated in its own setup**, by the
+test-only writer behind the `synthetic-writer` feature or by
+`create::package`, and nothing is committed. A benchmark corpus is not an
+exception to the [fixture policy](#fixture-policy): `docs/profile.md` records
+that no redistribution licence exists for the primary sources.
+
+| Target | Group | What it measures |
+| --- | --- | --- |
+| `benches/reader.rs` | `inventory` | One inventory pass over an image of 1, 16 and 64 MiB, split over eight entries, **stored** and **deflated** separately so the cost of inflate is visible beside the cost of walking the structure; and over a 256-entry package, which is `max_entries`. |
+| `benches/reader.rs` | `entry_bytes` | Re-decoding all 256 entries of that package one at a time, over an inventory built in the setup: the work `extract` and `profile::check` do on top of a reading pass already paid for. |
+| `benches/reader.rs` | `metadata_parse` | `metadata::parse` on a 10 KiB document and on one whose text nodes come within a few per cent of `max_text_bytes` (1 MiB), spread over 200 attachment descriptions. |
+| `benches/planner.rs` | `extract_plan` | `extract::plan` over 32 and 256 entries whose names are long and multi-byte, because the planner folds each component to NFC and then case-folds it to find a collision. |
+| `benches/planner.rs` | `profile_check` | `profile::check` over 32 and 254 attachments, each referenced by the document. 254 is `max_entries` less the format marker and the metadata document, so it is a full package. |
+| `benches/writer.rs` | `create_package` | `create::package` over a request carrying 1 MiB and 16 MiB of incompressible attachment bytes in 16 attachments: reference derivation, deflate and assembly in one number. |
+
+The deflated and the incompressible cases both use a deterministic xorshift
+stream, which deflate cannot shrink. That is deliberate: it keeps the image
+the size the label says, keeps the decoded total under
+`max_total_decoded_bytes`, and keeps the compression-ratio ceiling out of a
+measurement that is about throughput rather than about a refusal.
+
+### The scaling guard
+
+`crates/openkrx-core/tests/scaling_guard.rs` is an ordinary integration test,
+so it runs in `cargo test --workspace` and fails CI. It measures the same
+operation at a small size and at the ceiling with `Instant`, and asserts a
+wall-time ratio:
+
+| Guarded | Sizes | Size ratio | Threshold | Linear would be |
+| --- | --- | --- | --- | --- |
+| `archive::inventory`, stored entries | 4 MiB, 64 MiB | 16 | < 32 | 16 |
+| `extract::plan`, long Unicode names | 32, 256 entries | 8 | < 32 | 8 |
+| `profile::check`, referenced attachments | 32, 254 attachments | 8 | < 32 | 8 |
+
+The inventory guard reads **stored** entries so that inflate is excluded and
+what is left is the structural walk, the CRC and the exact-coverage check.
+
+The thresholds are loose on purpose. Each sits at about twice linear and far
+below quadratic — which would be 256 and 64 — so the guard catches a change of
+*shape* and is deliberately blind to a change of constant factor: a shared CI
+runner, a debug build and a cold cache all move the constant and none of them
+moves the exponent. A guard that flakes gets disabled, and a disabled guard
+catches nothing. Two further things keep it honest: every size is measured
+twice and the **minimum** is taken, because noise only ever adds time; and the
+counted operations are repeated twenty times inside one measurement, at both
+sizes, so the repetition cancels out of the ratio and only buys a measurement
+long enough for the clock to resolve.
+
+The test is sized to run in a **debug** build inside CI's budget — about 3.5
+seconds on the host below, against a ceiling of 30. Run it alone, with the
+observed ratios printed, with:
+
+```sh
+cargo test -p openkrx-core --locked --test scaling_guard -- --nocapture
+```
+
+Tests are not mutated by `cargo mutants`, so no entry in `.cargo/mutants.toml`
+is needed for either the guard or the benchmarks.
+
+### Baseline
+
+**These numbers are host-specific and informational.** They are one local run,
+not a budget and not a threshold; nothing fails because a number here moved.
+They exist so a reader knows the order of magnitude and can see the shape.
+
+Measured on a 13th Gen Intel Core i9-13900, Linux, rustc 1.98.1, release
+profile, median of criterion's estimate:
+
+| Benchmark | Median | Throughput |
+| --- | --- | --- |
+| `inventory/stored/1MiB` | 1.93 ms | 519 MiB/s |
+| `inventory/stored/16MiB` | 31.2 ms | 513 MiB/s |
+| `inventory/stored/64MiB` | 131 ms | 489 MiB/s |
+| `inventory/deflated/1MiB` | 1.89 ms | 496 MiB/s |
+| `inventory/deflated/16MiB` | 38.0 ms | 420 MiB/s |
+| `inventory/deflated/64MiB` | 136 ms | 469 MiB/s |
+| `inventory/stored/256_entries` | 2.37 ms | 108 Kentry/s |
+| `entry_bytes/256_entries` | 1.66 ms | 154 Kentry/s |
+| `metadata_parse/10KiB` | 8.62 µs | 1.24 GiB/s |
+| `metadata_parse/near_max_text_bytes` | 436 µs | 2.24 GiB/s |
+| `extract_plan/unicode_names/32` | 200 µs | 160 Kentry/s |
+| `extract_plan/unicode_names/256` | 1.32 ms | 193 Kentry/s |
+| `profile_check/attachments/32` | 87.4 µs | 366 Kelem/s |
+| `profile_check/attachments/254` | 629 µs | 404 Kelem/s |
+| `create_package/1MiB` | 16.8 ms | 59.6 MiB/s |
+| `create_package/16MiB` | 351 ms | 45.6 MiB/s |
+
+The whole set takes about three minutes on that host. The guard on the same
+host reported ratios of 16.6, 6.4 and 7.3 in a debug build and 15.1, 8.0 and
+7.4 in a release one, against a threshold of 32 — every path linear, and none
+of the three has a superlinear ceiling to report.
 
 ## Compatibility testing later
 

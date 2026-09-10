@@ -411,6 +411,28 @@ and such a change is recorded here explicitly.
   seeds persist under `crates/openkrx-core/proptest-regressions/` and are
   committed. No library or command behaviour changed.
 
+- **Benchmarks at the input caps, and a scaling guard that fails CI.** Three
+  `criterion` targets under `crates/openkrx-core/benches/` measure the reader
+  (`archive::inventory` over 1, 16 and 64 MiB of stored and of deflated
+  entries and over a 256-entry package, `entry_bytes` over all 256, and
+  `metadata::parse` at 10 KiB and near `max_text_bytes`), the planner
+  (`extract::plan` over 32 and 256 long Unicode names, `profile::check` over
+  32 and 254 referenced attachments) and the writer (`create::package` over
+  1 MiB and 16 MiB of attachment bytes). Every package is generated in the
+  benchmark's own setup and none is committed.
+  `crates/openkrx-core/tests/scaling_guard.rs` is the part that fails CI: it
+  measures wall time at a small size and at the ceiling and asserts a ratio
+  below 32 for `archive::inventory` (4 MiB against 64 MiB, stored, so inflate
+  is excluded), `extract::plan` (32 against 256 entries) and `profile::check`
+  (32 against 254 attachments) — about twice linear, far below quadratic, so
+  it catches a change of shape and not a change of constant factor. It runs
+  in about 3.5 seconds in a debug build. `criterion` is a dev-dependency of
+  `openkrx-core` alone, with default features off and only
+  `cargo_bench_support` enabled, so no shipped binary carries it. Baseline
+  numbers, the thresholds and what each target measures are in
+  [docs/testing.md](docs/testing.md#benchmarks). No library or command
+  behaviour changed.
+
 ### Changed
 
 - **`capabilities` reports `stage: "reader-writer"` and names `create`.**
