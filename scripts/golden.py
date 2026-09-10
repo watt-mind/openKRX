@@ -6,6 +6,11 @@ it must produce. A case directory holds:
 
     cmd     one line: the arguments to pass to the executable
     setup   optional; one line of arguments run first, output discarded
+
+`cmd` and `setup` are split with `shlex`, so an argument containing spaces is
+written quoted, exactly as it would be in a POSIX shell. No other shell
+behaviour applies: nothing is expanded, globbed or interpolated, and the
+executable is run directly rather than through a shell.
     stdout  the exact bytes expected on standard output
     stderr  the exact bytes expected on standard error
     status  the expected exit status, followed by a newline
@@ -16,6 +21,10 @@ Two placeholders may appear in `cmd` and `setup`:
                written as a repository-relative path so no machine-local
                path can reach a golden
     {outdir}   a fresh, empty directory this case owns, for `extract`
+
+A directory under `tests/golden/` without a `cmd` file is an error, not a
+case that is quietly skipped: a case with no command pins nothing, and a
+typo in the name would otherwise silently drop coverage.
 
 Subcommands:
 
@@ -44,6 +53,7 @@ import argparse
 import difflib
 import filecmp
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -64,22 +74,44 @@ SETUP = "setup"
 
 
 def cases():
-    """Every case directory, in a fixed order."""
+    """Every case directory, in a fixed order.
+
+    A directory without a `cmd` file is a broken case, not one to skip: it
+    would silently pin nothing.
+    """
     if not GOLDEN.is_dir():
         return []
-    return sorted(
-        (path for path in GOLDEN.iterdir() if (path / COMMAND).is_file()),
+    found = sorted(
+        (path for path in GOLDEN.iterdir() if path.is_dir()),
         key=lambda path: path.name,
     )
+    missing = [path.name for path in found if not (path / COMMAND).is_file()]
+    if missing:
+        raise SystemExit(
+            "contract failure: case director"
+            + ("ies" if len(missing) > 1 else "y")
+            + " without a "
+            f"{COMMAND} file: {', '.join(missing)}. Every directory under "
+            "tests/golden/ is one command run; add the missing file or "
+            "remove the directory."
+        )
+    return found
 
 
 def arguments_of(path, outdir):
-    """The argument list one `cmd` or `setup` file describes."""
+    """The argument list one `cmd` or `setup` file describes.
+
+    Split with `shlex`, so an argument that contains spaces can be written
+    quoted. Placeholders are substituted first and then split, so a
+    `{outdir}` whose path contains a space still becomes one argument only
+    if the placeholder itself is quoted in the file — the same rule a shell
+    would apply, made explicit here.
+    """
     line = path.read_text(encoding="utf-8").strip()
-    return [
-        word.replace("{fixture}", FIXTURE_RELATIVE).replace("{outdir}", str(outdir))
-        for word in line.split()
-    ]
+    substituted = line.replace("{fixture}", FIXTURE_RELATIVE).replace(
+        "{outdir}", str(outdir)
+    )
+    return shlex.split(substituted)
 
 
 def environment():
@@ -106,13 +138,22 @@ def run(binary, case, temp):
     outdir.mkdir()
     setup = case / SETUP
     if setup.is_file():
-        subprocess.run(
+        prepared = subprocess.run(
             [str(binary)] + arguments_of(setup, outdir),
             cwd=REPO,
             env=environment(),
             capture_output=True,
             check=False,
         )
+        if prepared.returncode != 0:
+            raise SystemExit(
+                f"contract failure: the setup step of case {case.name} "
+                f"exited {prepared.returncode}. The case pins what the "
+                "command does to the state that step leaves behind, so a "
+                "failed setup makes its goldens meaningless.\n"
+                f"setup stderr:\n"
+                + prepared.stderr.decode("utf-8", "replace")
+            )
     completed = subprocess.run(
         [str(binary)] + arguments_of(case / COMMAND, outdir),
         cwd=REPO,
@@ -223,10 +264,21 @@ def verify_fixtures(temp):
     if completed.returncode != 0:
         print("the fixture generator failed; nothing was compared")
         return 1
-    expected = sorted(path.name for path in FIXTURES.glob("*.krx"))
-    actual = sorted(path.name for path in produced.glob("*.krx"))
+    # The whole directory listing, not just `*.krx`: a stray file under
+    # tests/fixtures/golden/ is neither compared nor reported otherwise, and
+    # a fixture the generator stops emitting must be noticed.
+    expected = sorted(path.name for path in FIXTURES.iterdir())
+    actual = sorted(path.name for path in produced.iterdir())
     if expected != actual:
         print(f"fixture set differs: committed {expected}, generated {actual}")
+        print(
+            "tests/fixtures/golden/ holds exactly what the generator emits; "
+            "remove any stray file or regenerate the directory."
+        )
+        return 1
+    nested = [name for name in expected if not (FIXTURES / name).is_file()]
+    if nested:
+        print(f"tests/fixtures/golden/ holds a non-file entry: {nested}")
         return 1
     differing = [
         name

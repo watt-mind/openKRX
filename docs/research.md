@@ -70,7 +70,7 @@ differently. Adopting one would have meant fighting its permissiveness at
 every call site, and inheriting a dependency tree for a container format
 whose entire supported surface is stored and deflate.
 
-The reader is about 1 600 lines across eight modules, forbids `unsafe`,
+The reader is just under 1 600 lines across eight modules, forbids `unsafe`,
 performs no I/O, and its rules are stated as tests. That is a size worth
 owning. The trade is real and is written down here: openKRX will refuse
 archives that a permissive reader opens, and a compatibility report against

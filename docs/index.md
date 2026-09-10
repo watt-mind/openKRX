@@ -28,6 +28,7 @@ Repository policies live at the root:
 | [AGENTS.md](../AGENTS.md) | Scope and ownership per crate, the non-negotiables, the quality gates, and the documentation maintenance map. |
 | [CHANGELOG.md](../CHANGELOG.md) | Keep a Changelog history; every behaviour-changing pull request adds an entry under `[Unreleased]`. |
 | [crates/openkrx-cli/skills/openkrx/SKILL.md](../crates/openkrx-cli/skills/openkrx/SKILL.md) | Agent skill, embedded in the binary and written out by `openkrx skill`: the rules that always apply, the conformance and cryptography boundary, the JSON envelope and every exit status, the capabilities-to-extract workflow, and the reporting rules an AI agent follows when using the CLI on a package. |
+| [fuzz/README.md](../fuzz/README.md) | The separate `cargo-fuzz` package: why it is not a workspace member, the two targets and their entry points, how to run them and reproduce an artifact, and the committed lockfile rule. |
 | [tests/fixtures/README.md](../tests/fixtures/README.md) | Why no binary fixture is committed, and what a future one would have to record. |
 
 Factory operation, which is not part of the public documentation set:

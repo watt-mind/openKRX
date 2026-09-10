@@ -73,8 +73,8 @@ source or an authoritative statement settles the layout: nine of the
 thirty-seven profile rules are unresolved, and a writer would have to invent
 an answer to A19 to A22 to emit a single archive. The two requests that would
 settle them — one to the format owner, one for the SPOCS OCD deliverable —
-are written out in [profile.md](profile.md#what-the-2026-09-09-search-added),
-and both are for a person to make.
+are recorded in [research.md](research.md#open-evidence-gaps), and both are
+for a person to make.
 
 ## Engineering items
 

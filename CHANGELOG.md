@@ -218,8 +218,8 @@ and such a change is recorded here explicitly.
   `openkrx_core::metadata::parse` with `MetadataLimits::DEFAULT`. Neither
   asserts anything about the result: the property is that the call returns on
   any byte string. The `Fuzz (build only)` job builds both on nightly and runs
-  each for 30 seconds per pull request, a 60-second budget chosen to catch a
-  shallow regression without turning every pull request into a campaign; a
+  each for 30 seconds per CI run, a 60-second budget chosen to catch a
+  shallow regression without turning every CI run into a campaign; a
   passing lane is explicitly not evidence that a reader is fuzz-clean. No
   corpus is committed, `fuzz/regressions/<target>/` is reserved for minimised
   fuzzer-generated artifacts, and the truncation and single-byte mutation

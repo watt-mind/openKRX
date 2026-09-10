@@ -176,8 +176,7 @@ Status: blocked on evidence, not on engineering. Nine of the thirty-seven
 profile rules are unresolved, and A19 to A22 decide the layout a writer would
 have to emit, so building one now would mean inventing a specification. The
 two requests that would settle them are recorded in
-[profile.md](profile.md#what-the-2026-09-09-search-added) and are for a
-person to make.
+[research.md](research.md#open-evidence-gaps) and are for a person to make.
 
 Dependencies: KRX-01, KRX-03, and KRX-05's safe output layer. Owner: writer
 contributor; core authoring modules, CLI create, writer tests and contract.
