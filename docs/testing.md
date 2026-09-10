@@ -46,6 +46,7 @@ the contract covers every code the crates define.
 | `crates/openkrx-core/tests/repack_plan.rs` | What repacking preserves and what it writes: an empty edit reproducing the package `create` wrote byte for byte, repacking a repacked package changing nothing, every preserved attachment's bytes equal to the input's after a removal renumbered it, a repacked package failing no structural check, header fields set and optional elements set and cleared, an added attachment appended with its reference derived, a replacement changing the bytes and the declared size while keeping the name and description, removal down to a document declaring none, the three edit kinds together renumbering the result, a plan applied twice writing the same bytes, and a repacked package equal to creating the same package from scratch. |
 | `crates/openkrx-core/tests/repack_rejects.rs` | Everything repacking refuses, each by its stable code, over packages that differ from a canonical control in exactly one respect: another root prefix, another metadata file-name spelling, no metadata document and two of them, a marker that is missing, displaced or holding something else, an entry the layout has no place for, elements outside the grammar, each block the reader records only the presence of, an unqualified handling-instruction element, two dispatch blocks, a reference or a declared count the writer would derive differently, a reference naming another entry, a payload entry no reference declares, a document that does not parse reporting the parser's own code, an edit naming an attachment number the package does not carry or naming one twice, a plan applied to another package, and a result above the entry ceiling refused while planning. |
 | `crates/openkrx-core/tests/property_round_trip.rs` | The five [property-based tests](#property-based-tests) over generated requests: a written package read back with byte-identical attachments, the documented normalised document and no failing check; byte-identical output across two writes; a single-byte mutation refused or read back inside every ceiling; a request over one documented ceiling refused with that ceiling's code; and every written name accepted by the extraction planner. Its strategies live in `crates/openkrx-core/tests/support/strategies.rs`. |
+| `crates/openkrx-core/tests/property_repack.rs` | The six [property-based tests](#property-based-tests) over repacking: an empty edit reproducing the package byte for byte, an add and the removal of exactly those numbers restoring it, the one documented asymmetry where a dispatch that carried no `MELLEKLETEK` container gains an empty one and nothing else, every attachment a valid edit did not name reading back byte-identical with no failing structural check, an edit naming an attachment the package does not carry refused with its `repack.invalid.*` code, and planning the same package twice deciding the same thing. Shares `crates/openkrx-core/tests/support/strategies.rs` with the writer properties. |
 | `crates/openkrx-core/tests/scaling_guard.rs` | The [scaling guard](#the-scaling-guard): `archive::inventory` at 4 MiB and 64 MiB of stored entries, `extract::plan` at 32 and 256 entries with long Unicode names, and `profile::check` at 32 and 254 referenced attachments, each asserted to cost no more than 32 times as much at the ceiling as at the small size. It measures wall time, so it holds a shape rather than a number. |
 | `crates/openkrx-core/tests/metadata_evidence.rs` | The independent-evidence layer: a synthetic re-expression of the *structure* of the two official sample documents (rules M9 and M10), parsed into the documented shape and resolved inside the documented layout. |
 | `crates/openkrx-core/src/synthetic/` | Test-only synthetic writers, not tests, behind the non-default `synthetic-writer` feature so that the command-line tests can build the same archives. `mod.rs` builds ZIP images and can emit contradictory headers on purpose; `meta.rs` builds metadata documents from values written from scratch for this repository. `crates/openkrx-core/tests/support/mod.rs` re-exports them under the name the core tests use. |
@@ -423,8 +424,9 @@ targets](#fuzzing) are for.
 The sweeps above are exhaustive over one dimension of one fixed input. The
 property tests are the other half: they generate the *input* and assert the
 contract over whatever comes out. They live in
-`crates/openkrx-core/tests/property_round_trip.rs`, with every strategy in
-`crates/openkrx-core/tests/support/strategies.rs`, and they use
+`crates/openkrx-core/tests/property_round_trip.rs` and
+`crates/openkrx-core/tests/property_repack.rs`, with every strategy in the
+`crates/openkrx-core/tests/support/strategies.rs` both include, and they use
 [`proptest`](https://crates.io/crates/proptest) — a dev-dependency of
 `openkrx-core` alone, with default features off, so no shipped binary and no
 other crate carries it.
@@ -442,7 +444,14 @@ is a finding rather than a generator accident:
 | Attachment bytes | Nothing, small incompressible noise, a run of zero bytes up to and including `Limits::RATIO_GRACE_BYTES`, and incompressible bytes just past that grace. The compressible arm stops *at* the grace deliberately: one byte more and the writer would apply the reader's compression-ratio ceiling to it and refuse the package. |
 | `FixedTimestamp` | The MS-DOS epoch, or any date and time inside the representable 1980–2107 range. |
 
-### The five properties
+The repacking properties draw from the same generators, with two additions:
+
+| Part | Range |
+| --- | --- |
+| A request repacking accepts | The same `PackageSpec`, with the four things repacking refuses in an *input* held off — the `ERKEZTETES`, `BONTASOK` and `TERTIVEVENY` marker blocks and the unqualified `KEZELESI_UTASITASOK` element, whose presence is all the reader retains — and with the one `EXPEDIALAS` block always present, so that the container-less empty dispatch is generated at all. Zero to four attachments rather than eight, because a repacking case writes a package, reads it and writes it again. The two properties that need one container form or the other draw a document built with it rather than filtering for it: one drawn document in ten has no attachment and no container, and a filter for that exhausts proptest's local reject budget on a long run. |
+| `Edits` | Any subset of the ten `FEJRESZ` fields, each optional element kept, set or cleared; zero to three additions with the file names and bytes the writer properties use; and each of the package's own attachment numbers independently left alone, removed or replaced — which makes “no target named twice” true by construction rather than by a filter. The invalid arm draws a number the package does not carry, zero included, or one number named twice. |
+
+### The writer and reader properties
 
 1. **Round trip.** `package` → `archive::inventory` → `metadata::parse` of the
    metadata entry → `profile::check` reports no `Fail`, and the summary is
@@ -472,6 +481,66 @@ is a finding rather than a generator accident:
    package, plans exactly one item per entry, and each item's components join
    back to the entry name.
 
+### The repacking properties
+
+Repacking composes the reader, the parser and the writer, so its corner cases
+are the products of three surfaces rather than one. The six properties in
+`property_repack.rs` are:
+
+1. **Identity.** `plan` with an empty `Edits`, then `apply`, is byte-identical
+   to the input for every package the writer produces that repacking accepts —
+   both `MELLEKLETEK` container forms included, now that the reader retains
+   which one a dispatch carried. This is the rule every `repack.unsupported.*`
+   refusal exists to keep true. The plan reports nothing preserved but the
+   attachments, nothing changed, removed or added, and no header field.
+2. **Add and remove.** Adding one to three attachments and then removing
+   exactly the numbers the plan gave them restores the input byte for byte, for
+   every package whose document already lists an attachment or already carries
+   the `MELLEKLETEK` container. The numbers removed are the plan's own
+   `added()`, not numbers the test computed: an addition takes the number the
+   *result* gives it.
+3. **The one asymmetry.** For the one remaining shape — an empty dispatch
+   carrying no `MELLEKLETEK` container — the same round trip differs by exactly
+   that empty container and by nothing else, and is an exact identity from then
+   on. See [the container asymmetry](#the-container-asymmetry) below for why,
+   and for what the property pins.
+4. **Preservation.** After any valid edit list, every attachment no edit named
+   reads back byte-identical to the input's bytes *at the number the edit
+   spared*, not at its output position: removing an attachment renumbers
+   everything after it. The replaced attachments carry the supplied bytes, the
+   additions land after them in order, the plan's preserved, changed, removed,
+   added and header-field lists are exactly the edits it was given, and the
+   result fails no structural check and is `Unresolved` — no more and no less
+   than a package the writer produced.
+5. **Refusal.** An edit naming an attachment number the package does not carry,
+   zero included, is refused with `repack.invalid.no_such_attachment`, and one
+   naming a number twice with `repack.invalid.duplicate_target`. Nothing in the
+   test is unwrapped, so a panic can only come from the crate under test.
+6. **Determinism.** Planning the same package twice decides the same thing,
+   whether that is the same plan or the same refusal with the same entry index
+   and attachment number. The request comes from the unrestricted strategy, so
+   most cases carry a block the reader records only the presence of and are
+   refused with `repack.unsupported.opaque_block`: a refusal a caller cannot
+   reproduce is one they cannot act on.
+
+### The container asymmetry
+
+Adding an attachment to a dispatch that carried no `MELLEKLETEK` container and
+then removing it again does **not** restore the original bytes: the result
+carries an empty container the input never had. That is documented behaviour
+rather than a defect, and it is inherent to the composition. Rule M7 makes
+`MELLEKLETEK` and `MELLEKLETEK_SZAMA` separate elements, so an empty container
+and no container at all are different documents; the writer must emit the
+container to hold the added reference, so the intermediate package genuinely
+carries one; the reader retains that fact rather than normalising it away; and
+the later removal cannot know the original had none, because nothing in the
+package it is given says so. Property 3 pins where the difference stops: the
+marker and every attachment stay byte-identical, the document differs by
+exactly one empty `MELLEKLETEK` element, the parsed documents agree on
+everything but `attachments_present`, the result still fails no structural
+check, and a second add-and-remove over it is an exact identity — the shift
+happens once and never drifts further.
+
 ### Case counts and regressions
 
 Each property runs **64 cases**, which keeps the whole file well under a
@@ -479,14 +548,16 @@ second locally. `PROPTEST_CASES` overrides that for a deliberate long run:
 
 ```sh
 PROPTEST_CASES=4096 cargo test -p openkrx-core --locked --test property_round_trip
+PROPTEST_CASES=4096 cargo test -p openkrx-core --locked --test property_repack
 ```
 
 A failing case is shrunk and its seed persisted under
-`crates/openkrx-core/proptest-regressions/`, one file per property. Those
-files are **committed**: the seeds are synthetic by construction — every byte
-they reproduce comes from the strategies above, and no real package can reach
-them — so a case found once is re-run first by everyone thereafter. The
-directory is deliberately not ignored by Git.
+`crates/openkrx-core/proptest-regressions/`, one file per property. Those files
+are **committed**: the seeds are synthetic by construction — every byte they
+reproduce comes from the strategies above, and no real package can reach them —
+so a case found once is re-run first by everyone thereafter. The directory is
+deliberately not ignored by Git, and is empty today because every property
+passes.
 
 Property tests are not a mutation-testing target: `cargo mutants` mutates
 `crates/*/src/**` only, and everything here lives under `tests/`. See
