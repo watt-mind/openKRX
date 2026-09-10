@@ -180,6 +180,34 @@ fn the_json_report_names_every_file_and_the_marker_it_removed() {
 }
 
 #[test]
+fn the_report_says_the_run_resolved_paths_the_way_it_asked_to() {
+    let scratch = Scratch::new("extract-resolution");
+    let destination = scratch.dir("out");
+    let output = extract(&attachment_package(), &destination, true);
+    assert_eq!(status(&output), 0, "{}", stderr(&output));
+
+    // The field is in every successful report, on every platform, and its
+    // value here is the same on all three: a run that got the resolution it
+    // asked for gave nothing up, and a platform with no stronger mode to ask
+    // for gave nothing up either. It is `true` only where openKRX asked the
+    // kernel for `openat2` resolution and could not have it, which is why the
+    // golden output contract can pin it byte for byte on three runners.
+    let data = &one_object(&output)["data"];
+    assert_eq!(
+        data["path_resolution_fallback"], false,
+        "no supported runner reports a fallback"
+    );
+
+    let human = extract(&attachment_package(), &scratch.dir("human"), false);
+    assert_eq!(status(&human), 0, "{}", stderr(&human));
+    assert!(
+        !stdout(&human).contains("openat2"),
+        "the human report stays silent about path resolution unless the run \
+had to give something up"
+    );
+}
+
+#[test]
 fn a_target_file_that_already_exists_refuses_the_whole_extraction() {
     let scratch = Scratch::new("extract-clobber");
     let destination = scratch.dir("out");

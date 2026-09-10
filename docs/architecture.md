@@ -52,10 +52,12 @@ below is still absent.
   destination, not staged elsewhere and renamed into place, so an interrupted
   run is detected rather than prevented; see
   [Extraction output](#extraction-output).
-- `openat2`-style path resolution. Confinement is enforced with
-  `symlink_metadata` and exclusive creation, which defend against what is
-  already at the destination and not against a concurrent writer with access
-  to it. The assumption is stated under
+- Race-resistant path resolution on macOS and Windows. `extract` resolves
+  every destination path beneath one directory descriptor on Linux kernels
+  with `openat2`; elsewhere confinement rests on `symlink_metadata` and
+  exclusive creation, which defend against what is already at the destination
+  and not against a concurrent writer with access to it. What each platform
+  does and does not cover is under
   [Race assumptions](#race-assumptions-and-what-they-do-not-cover).
 - Signature handling of any kind, including `signatures.xml` (rule A7).
   `signatures.xml` is an ordinary entry to the inventory and nothing else.
@@ -98,7 +100,14 @@ in the same repository and released against the same MSRV). Those two are
 what let `completions` and `man` be generated from the parser the binary
 already carries, rather than hand-written and left to drift; both are used at
 run time by exactly one command each, are pulled in with default features
-off, and add one transitive dependency between them, `roff`.
+off, and add one transitive dependency between them, `roff`. On Linux, and
+only there, it also depends on `rustix` (Apache-2.0 WITH LLVM-exception OR
+Apache-2.0 OR MIT), with default features off and the `fs` and `std` features
+on: it is the `openat2` and `*at` call surface the extraction writer resolves
+paths through, its `linux_raw` backend links no C library, and `bitflags` and
+`linux-raw-sys` are the two crates it brings with it. The reason it is there
+rather than hand-written bindings is that the workspace forbids `unsafe`; see
+[docs/research.md](research.md).
 
 `openkrx-core` has one feature, `synthetic-writer`, which is off by default
 and compiles the test-only synthetic writers in `src/synthetic/`. It exists so
@@ -190,6 +199,8 @@ of which is private, so `missing_docs` alone could never fire there — denies
 | `src/extract/mod.rs` | The four phases of a protected extraction — plan, preflight, write, commit — the marker name, and the failure policy that undoes this run's work. |
 | `src/extract/preflight.rs` | What is decided before a byte is written: the destination, the marker, and every planned path against what is already there. Holds the link and reparse-point test. |
 | `src/extract/writer.rs` | Exclusive creation of the marker, the directories and the files, each recorded as this run created it. |
+| `src/extract/resolver.rs` | The one place that decides how a destination path is resolved: beneath a directory descriptor on Linux, and by path everywhere else, both answering with the same `output.*` codes. |
+| `src/extract/linux_fd.rs` | Linux only: the `openat2`, `mkdirat`, `openat` and `unlinkat` calls, and the three resolve flags every resolution asks for. |
 | `src/extract/cleanup.rs` | The ledger of what this run created and the reverse-order undo, which never removes anything pre-existing. |
 | `src/render/json.rs` | The one-object JSON envelope, in both its successful and its failed shape. |
 | `src/render/human.rs` | Terminal-safe text: control, invisible and undecodable bytes are escaped and a long name is cut. |
@@ -587,16 +598,18 @@ effect that a later `extract --into <dest>/x` is refused with
 `output.partial_marker_present`: the marker name is fixed, so any package may
 place one where a future run would read it as its own.
 
-**3. Write.** A `.openkrx-extract.partial` marker is created in the
-destination with `create_new`, before anything else. Then each planned
-directory in plan order — which lists every implicit parent, sorted so a
-parent precedes its child — with `create_dir`, never `create_dir_all`, and
-each is re-read with `symlink_metadata` after creation. A directory that
-already existed is neither counted nor recorded: this run did not create it,
-so this run must never remove it. Then each planned file with
-`OpenOptions::new().write(true).create_new(true)`, which is `O_EXCL` on Unix
-and `CREATE_NEW` on Windows: it refuses rather than truncating, and it does
-not follow a symbolic link at the leaf. Bytes come from
+**3. Write.** Every creation in this phase goes through one resolver, chosen
+once for the whole run and never re-chosen; which one it was is reported as
+`path_resolution_fallback`, and what each defends against is under
+[Race assumptions](#race-assumptions-and-what-they-do-not-cover). A
+`.openkrx-extract.partial` marker is created in the destination, exclusively,
+before anything else. Then each planned directory in plan order — which lists
+every implicit parent, sorted so a parent precedes its child — one level at a
+time, never `create_dir_all`. A directory that already existed is neither
+counted nor recorded: this run did not create it, so this run must never
+remove it. Then each planned file, exclusively: it refuses rather than
+truncating, and it does not follow a symbolic link at the leaf. Bytes come
+from
 `ArchiveInventory::entry_bytes`, bounded by `max_entry_decoded_bytes` and
 CRC-checked, and are written in full. **No permission bit and no timestamp is
 copied from the archive**: a package is untrusted input, and the process
@@ -633,15 +646,56 @@ question to the rename rather than removing it.
 
 ### Race assumptions, and what they do not cover
 
-The destination is trusted not to be modified by another principal while the
-command runs. Exclusive creation and the post-creation `symlink_metadata`
-checks defend against what is **already** at the destination — an existing
-file, a symbolic link, a Windows reparse point — and not against an attacker
-holding concurrent write access to it, who can win the window between a check
-and the operation that follows it. Closing that window needs `openat2` with
-`RESOLVE_BENEATH` on Linux, or the equivalent per-platform primitive, and is
-deliberately deferred; it is recorded as a residual risk in
+How much of the window between a check and the operation that follows it is
+closed depends on the platform, and each successful run says which it got in
+`path_resolution_fallback`.
+
+**Linux, kernel 5.6 or newer.** After preflight the destination is opened
+once as a directory descriptor, with `O_DIRECTORY | O_NOFOLLOW`, and that open
+is the last check of the destination itself: a destination that is no longer
+the real directory preflight accepted — replaced by a symbolic link, or by
+something that is not a directory — fails here and **refuses the run**, under
+`output.symlink_in_path` or `output.not_a_directory`. It is deliberately not a
+fallback: continuing without the descriptor would hand that same path to the
+code that resolves it by name, straight through the replacement, and report
+nothing worse than a flag. Every path the run then creates is resolved by
+the kernel relative to that descriptor with `openat2(2)` under
+`RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS`. No
+absolute path is resolved again after preflight: only a resolved parent
+descriptor and one name component are ever handed to `mkdirat` or `openat`,
+and both refuse a symbolic link at that component. A component swapped for a
+link between preflight and the write is therefore refused by the kernel
+rather than followed, under the code the path rule already has —
+`output.symlink_in_path` for a link or a resolution that would leave the
+destination, `output.not_a_directory` for a component that is not one. This
+closes the check-to-create race on Linux kernels with `openat2`. It is not a
+claim about anything else: a caller who can write to the destination can
+still fill it, and a package's own bytes are neither verified nor
+interpreted.
+
+**A Linux kernel without `openat2`.** Only the *probe* selects the portable
+arm; the open above never does. The call is probed once per run. A
+kernel before 5.6 answers `ENOSYS`, a seccomp filter that hides it answers
+`EPERM`, and a kernel that has the call but not a resolve flag answers
+`EINVAL`; any of those, or any other failure of that one probe, sends the run
+down the portable path exactly once. The report then carries
+`path_resolution_fallback: true`, and the human report gains a line saying
+so, so that the weaker guarantee is stated rather than assumed.
+
+**macOS and Windows.** The destination is trusted not to be modified by
+another principal while the command runs. Exclusive creation and the
+post-creation `symlink_metadata` checks defend against what is **already** at
+the destination — an existing file, a symbolic link, a Windows reparse point
+— and not against an attacker holding concurrent write access to it, who can
+win that window. Closing it needs the equivalent per-platform primitive and
+is deliberately deferred; it is recorded as a residual risk in
 [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer).
+
+**The undo pass is portable everywhere.** Cleanup after a failed write
+removes this run's own paths by path, on every platform, so a principal who
+can swap an ancestor while that pass runs is outside what the descriptor
+covers. It removes only paths this run recorded, never recursively, and a
+removal that fails is counted rather than retried.
 
 Per platform: Windows reparse points are detected through
 `FILE_ATTRIBUTE_REPARSE_POINT` as well as `is_symlink`, because a junction
@@ -1301,7 +1355,13 @@ components joined by `/` on every platform; the destination itself is never
 reported, because the caller named it and a report that repeats it cannot be
 logged unedited. `directories_created` counts only directories this run
 created, not ones that were already there, and `marker_removed` says the run
-reached its last step.
+reached its last step. `path_resolution_fallback` says whether this run
+resolved its paths more weakly than it asked to: it is `true` only on a Linux
+kernel where `extract` asked for `openat2` resolution and could not have it,
+and `false` both where that resolution was used and on a platform where there
+is no stronger mode to ask for. It answers "did this run give something up?",
+never "which platform is this?" — which is why it is the same value in the
+golden output contract on all three runners.
 
 ```json
 {
@@ -1316,7 +1376,8 @@ reached its last step.
       {"entry_index": 0, "path": "mimetype", "bytes": 19},
       {"entry_index": 2, "path": "KRX/OCD/Payload/ID-1/synthetic.pdf", "bytes": 19}
     ],
-    "marker_removed": true
+    "marker_removed": true,
+    "path_resolution_fallback": false
   },
   "verified": false
 }

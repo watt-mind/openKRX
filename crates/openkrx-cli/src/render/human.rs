@@ -175,6 +175,17 @@ pub fn extract(data: &ExtractData) -> String {
 destination was changed or removed. Paths are relative to the destination."
             .to_owned(),
     );
+    // Only when it happened. A run that got the resolution it asked for says
+    // nothing, so the ordinary report is the same line for line on every
+    // platform, and the sentence below is a signal rather than boilerplate.
+    if data.path_resolution_fallback {
+        lines.push(
+            "This kernel does not offer openat2 path resolution, so paths were resolved the \
+portable way: a component replaced while the command ran could have been followed. Extract into \
+a directory only you can write to."
+                .to_owned(),
+        );
+    }
     lines.push(BOUNDARY.to_owned());
     lines.join("\n")
 }
