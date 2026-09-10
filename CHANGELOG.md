@@ -16,6 +16,30 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **The published limits are measured, and the measurement is checked in.**
+  `scripts/measure-limits.py` drives the release executable with `inspect`,
+  `validate-structure` and `extract --json` over a synthetic package sitting
+  exactly on each of six limits — `max_entries`, `max_text_bytes`,
+  `max_entry_decoded_bytes`, `max_total_decoded_bytes`,
+  `max_compression_ratio` and the planner's `max_depth` — and over one package
+  a single step past each, recording peak resident memory and wall time for
+  every run. Peak memory comes from `/usr/bin/time -v` where Linux offers it
+  and otherwise from the kernel's `ru_maxrss` for the measured child through
+  `os.wait4`, and the report names which source it used.
+  `crates/openkrx-core/examples/limit_packages.rs` writes the packages with
+  the test-only writer behind the `synthetic-writer` feature, into a temporary
+  directory; nothing is committed and one of them decodes 128 MiB. The result
+  is `docs/limits-measured.md`, carrying the commit, the date, the operating
+  system and the CPU model it was taken on and stating that the numbers are
+  one machine's measurement rather than a guarantee. The script exits non-zero
+  only for a crashed run or for an over-limit package no command reported the
+  expected `archive.*`, `metadata.*` or `extract.*` code for, which makes the
+  run double as an end-to-end limit test. A new weekly workflow,
+  `.github/workflows/limits.yml`, re-measures on a cron and on dispatch and
+  prints the table and the drift against the committed document into the job
+  summary; it is informational, is not on pull requests and is not a required
+  check. No limit, reader, stable code or envelope changed.
+
 - **A JSON Schema for the `--json` envelope, checked against the goldens.**
   `docs/schema/openkrx-envelope.v1.schema.json` is the machine-readable form
   of the command contract for `schema_version` 1: one draft 2020-12 schema

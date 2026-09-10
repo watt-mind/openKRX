@@ -1,0 +1,111 @@
+name: Limits measurement
+
+# Deliberately NOT a required check, and deliberately off the ordinary
+# pull-request path — the only pull request it runs on is one that changes this
+# workflow or the script it drives, which is how the lane is rehearsed before
+# it lands. It measures a machine: peak resident memory and wall time for a package
+# sitting on each published limit, taken on whichever shared runner GitHub
+# hands out that week. A number from such a runner is evidence about the
+# runner as much as about this repository, so it must never block a merge and
+# this workflow must not be added to the repository's required status checks.
+#
+# What it is for is drift. `docs/limits-measured.md` is one machine's
+# measurement, committed deliberately; this lane re-measures weekly and prints
+# what moved against it. Updating the committed document stays a human commit.
+#
+# The measurement step is `continue-on-error` because a run that fails still
+# has something to say in the summary, and because the one thing here that is
+# a real defect — an over-limit package no command refused — is reported in
+# the final step from the captured status rather than by ending the job early.
+#
+# See docs/testing.md, "Measuring the limits", for what is measured, how the
+# packages are generated and what the exit status means.
+
+on:
+  schedule:
+    # 06:00 UTC every Monday: an hour after the fuzz campaign (fuzz.yml) and
+    # two after the mutation lane (mutants.yml), so the three weekly campaigns
+    # do not queue against each other.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  # GitHub registers a `workflow_dispatch` workflow only from the default
+  # branch, so a brand-new workflow cannot be dispatched from the branch that
+  # adds it — fuzz.yml and release.yml carry the same note, and this trigger
+  # is the same answer they give: a pull request touching this workflow or the
+  # measurement script runs the identical job once, before the lane lands.
+  # The filter is deliberately just these two files. Every other pull request
+  # is untouched by this lane, which measures a machine and must never be able
+  # to block a merge.
+  pull_request:
+    paths:
+      - ".github/workflows/limits.yml"
+      - "scripts/measure-limits.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: limits-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  measure:
+    name: Limits measurement (informational)
+    runs-on: ubuntu-latest
+    # A local run measures in about seven seconds once the workspace is built,
+    # so the whole job is a release build plus a rounding error. The bound is
+    # generous rather than tight: it exists to stop a runaway job, not to
+    # model the run.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable @ 2026-09-03
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # `/usr/bin/time -v` is the preferred peak-memory source and is not on
+      # the runner image by default. The script falls back to `os.wait4` when
+      # it is missing and says which one it used, so this step is an
+      # improvement to the measurement rather than a prerequisite for it.
+      - name: Install GNU time
+        run: sudo apt-get update && sudo apt-get install --yes time
+      # The report is written to a temporary file, never over the committed
+      # one: the drift comparison is against what is in the repository, and a
+      # workflow does not update it.
+      - name: Measure the limits
+        id: measure
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/measure-limits.py \
+            --output "${RUNNER_TEMP}/limits-measured.md" \
+            --compare docs/limits-measured.md \
+            --summary "$GITHUB_STEP_SUMMARY"
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: limits-measured
+          # The job summary carries the table and the drift report, so the
+          # artifact is only there for a maintainer who wants to commit the
+          # regenerated document. One day is enough to fetch it.
+          retention-days: 1
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/limits-measured.md
+      # The script exits non-zero only for a crashed run or an over-limit
+      # package nothing refused. Neither is drift, and both are defects worth
+      # a red job even though this lane gates nothing.
+      - name: Report the result
+        shell: bash
+        run: |
+          if [ "${{ steps.measure.outputs.status }}" != "0" ]; then
+            echo "::error::scripts/measure-limits.py reported a crashed run or an unenforced limit; see the job summary"
+            exit 1
+          fi
+          echo "The measurement completed; the table and any drift are in the job summary."

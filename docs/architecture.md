@@ -385,6 +385,25 @@ caller can extract under a tighter bound than it reads under.
 filesystems agree on, and `max_path_bytes` and `max_depth` are sized far
 above the layout rules A4, A5 and A10 imply.
 
+### What sitting on a limit costs
+
+The values above were sized from what the format description implies. What a
+package that sits exactly on one of them costs to read is measured rather
+than reasoned about: [limits-measured.md](limits-measured.md) is the table
+`scripts/measure-limits.py` produces, which drives `inspect`,
+`validate-structure` and `extract` over a synthetic package at each limit and
+one step past it and records the peak resident memory and the wall time of
+each run.
+
+**Those numbers are one machine's measurement, not a guarantee.** They are
+not part of this contract, and nothing in this repository promises them for
+any other CPU, operating system or build. The measurement's own header names
+the commit, the operating system, the CPU model and the date it was taken on.
+What the measurement *does* hold, and what its script fails on, is the
+enforcement: every package one step past a limit is reported with the stable
+`archive.*`, `metadata.*` or `extract.*` code that limit publishes, and every
+package exactly on a limit is accepted.
+
 ## Structural check inventory
 
 `openkrx_core::profile::check` runs these eleven checks, in this order —

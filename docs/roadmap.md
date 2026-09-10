@@ -200,10 +200,17 @@ list weakens the other; if one changes, change both in the same pull request.
   where openKRX trusts an external implementation on hostile bytes. Its
   output is CRC-checked and size-bounded, which limits the consequences but
   does not remove the dependency.
-- **The limits are reasoned, not measured.** They were sized from what the
-  format description implies, not from a corpus. A real package larger than
-  a ceiling would be refused as over-limit, correctly by the contract and
-  unhelpfully in practice, until the ceiling is revisited with evidence.
+- **The limits are sized from the format description, not from a corpus.**
+  What a package sitting on one of them costs is no longer a guess:
+  `scripts/measure-limits.py` drives the executable over a package at each
+  limit and one step past it, and [limits-measured.md](limits-measured.md)
+  records the peak resident memory and wall time it observed, together with
+  the stable code each over-limit package was reported with. What the
+  measurement cannot say is whether the ceilings are in the right *place*:
+  that needs packages from real producers, and none may be collected here.
+  A real package larger than a ceiling is still refused as over-limit,
+  correctly by the contract and unhelpfully in practice, until the ceiling
+  is revisited with evidence.
 - **The extraction threat model is live, and part of it is still open where
   the portable arm runs.** `extract` writes into a directory the caller
   names, so every row of the output threat model in

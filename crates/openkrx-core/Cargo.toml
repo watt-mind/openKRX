@@ -23,6 +23,13 @@ synthetic-writer = []
 name = "golden_fixtures"
 required-features = ["synthetic-writer"]
 
+# The generator behind the limit measurement's packages. It is an example for
+# the same reasons: it writes files a tool outside the repository then reads,
+# and it needs the same test-only writer.
+[[example]]
+name = "limit_packages"
+required-features = ["synthetic-writer"]
+
 [dependencies]
 miniz_oxide.workspace = true
 quick-xml.workspace = true
