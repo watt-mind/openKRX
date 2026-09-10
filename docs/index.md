@@ -16,7 +16,7 @@ reference.
 | [testing.md](testing.md) | Test layout file by file, how to run the suite and the coverage gate, what the truncation and mutation sweeps guarantee, the fixture policy, the two fuzz targets with their bounded smoke lane and what it does not prove, later compatibility testing, and the private-corpus pointer. |
 | [work-packages.md](work-packages.md) | The dependency-ordered implementation specifications KRX-01 to KRX-07, each with owned paths, acceptance criteria, verification and the unknowns it must not resolve by assumption. |
 | [roadmap.md](roadmap.md) | What is not yet implemented, the milestones with their status, unordered engineering items, the residual risks in the current state, and the private-corpus policy for maintainers. |
-| [releasing.md](releasing.md) | The gates that must be satisfied before a first release, and why release automation is a separate change. |
+| [releasing.md](releasing.md) | The gates that must be satisfied before a first release, then the runbook: what ships in each archive, the six build targets and why each is native, cutting a release step by step, rerunning a failed job, what each workflow does, rehearsing with a `workflow_dispatch` dry run, the release-notes script, the required secrets (none beyond `GITHUB_TOKEN`), and why semver checks stay deferred. |
 
 Repository policies live at the root:
 
