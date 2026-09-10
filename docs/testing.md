@@ -600,6 +600,78 @@ it accumulates is written to `fuzz/corpus/<target>/` and is ignored by Git;
 delete it to start from nothing. Add `-rss_limit_mb=2048` on a memory-tight
 machine, and run one target at a time.
 
+### The seed corpus
+
+libFuzzer starts from whatever `fuzz/corpus/<target>/` already holds, and a
+fresh checkout holds nothing. Seed it first:
+
+```sh
+python3 fuzz/seed.py            # build or refresh every target's corpus
+python3 fuzz/seed.py --verify   # assert it exists; print the counts only
+```
+
+[fuzz/seed.py](../fuzz/seed.py) is Python 3 with the standard library and
+nothing else. It derives its seeds from the committed golden fixtures under
+`tests/fixtures/golden/`, which are synthetic by the [fixture
+policy](#fixture-policy) and are the only files it reads:
+
+| Target | Seeds |
+| --- | --- |
+| `inventory`, `structure`, `extract_plan` | each `.krx` fixture as it stands, the malformed one included |
+| `xml_metadata` | the `KULDEMENY_META.xml` member extracted from each fixture that is a readable container |
+| `create_round_trip` | that member's bytes concatenated with the payload members', one blob per fixture |
+
+The manifest JSON files are not seeds: no target parses a manifest.
+`create_round_trip` reads its input through `arbitrary` rather than as a
+package, so any byte string is a valid seed for it — real XML text and real
+file content simply give the mutator better material to draw header strings
+and attachment bodies from.
+
+Nothing produced is committed. `fuzz/corpus/` is ignored by
+[fuzz/.gitignore](../fuzz/.gitignore), and seeding is a step before a run, not
+a state of the repository. The script writes its seeds by name and overwrites
+only its own, so seeding a corpus libFuzzer has already grown is safe and
+idempotent.
+
+Seeding changes what a bounded run means. A 30-second `inventory` run from an
+empty corpus reached 144 edges and 201 features after 20,504,197 executions,
+on a corpus of 53 inputs. The seeded run *began* at 514 edges and 687
+features — more than the unseeded run ever found — and ended at 798 edges and
+2,349 features after 2,382,542 executions. The execution count falls by an
+order of magnitude because each input is now a real package of 1 to 31 KB
+rather than a handful of bytes, which is the trade being made: fewer, deeper
+executions.
+
+### Running a campaign locally
+
+A campaign is the same targets on a budget worth the name, from a seeded
+corpus that survives between runs:
+
+```sh
+python3 fuzz/seed.py
+for target in inventory xml_metadata structure extract_plan create_round_trip; do
+  cargo +nightly fuzz run --fuzz-dir fuzz --target x86_64-unknown-linux-gnu \
+    "$target" -- -max_total_time=1200 -rss_limit_mb=2048
+done
+```
+
+Run one target at a time; each one uses every core it is given. The corpus
+grows across runs and is worth keeping — delete `fuzz/corpus/` only to
+measure a cold start. What the accumulated corpus reaches is measurable:
+
+```sh
+rustup component add llvm-tools-preview --toolchain nightly
+cargo +nightly fuzz coverage --fuzz-dir fuzz \
+  --target x86_64-unknown-linux-gnu inventory
+```
+
+That replays the corpus through an instrumented build and merges the profiles
+into `fuzz/coverage/inventory/coverage.profdata`. It renders no report, so
+`llvm-cov report` from the toolchain's own `llvm-tools-preview` does that,
+against the instrumented binary cargo-fuzz leaves under
+`target/<triple>/coverage/` — which is where the weekly lane below reads it
+from too.
+
 ### Reproducing an artifact
 
 A crash writes its input to `fuzz/artifacts/<target>/`. Replay and minimise it:
@@ -624,7 +696,9 @@ Add `fuzz/fuzz_targets/<name>.rs` holding one `fuzz_target!` call and nothing
 else, add the matching `[[bin]]` block to `fuzz/Cargo.toml` with
 `test = false`, `doc = false` and `bench = false`, create
 `fuzz/regressions/<name>/.gitkeep`, extend the table above and add the target
-to the CI lane, whose per-target budget the section below states. Keep the
+to both lanes below — the list in `.github/workflows/ci.yml` and the loop in
+`.github/workflows/fuzz.yml` — and to `fuzz/seed.py` if there is fixture
+material it can start from. Keep the
 harness body to the single call unless there is an invariant to hold: a harness
 that asserts a *result* turns a behaviour change into a fuzzing failure, which
 is not what this lane is for, while an invariant — something only a defect can
@@ -635,9 +709,9 @@ it.
 
 The `Fuzz (build only)` job in `.github/workflows/ci.yml` runs on
 `ubuntu-latest` for every push and pull request. It installs the nightly
-toolchain and a pinned `cargo-fuzz`, builds the five targets, then runs each
-for **30 seconds** with `-rss_limit_mb=2048`, a 150-second total fuzzing
-budget.
+toolchain and a pinned `cargo-fuzz`, builds the five targets, seeds the corpus
+with `python3 fuzz/seed.py`, then runs each target for **30 seconds** with
+`-rss_limit_mb=2048`, a 150-second total fuzzing budget.
 Crash artifacts are uploaded when the job fails. The job names
 `--target x86_64-unknown-linux-gnu` explicitly, through the
 `FUZZ_TARGET_TRIPLE` env variable: cargo-fuzz otherwise defaults to the triple
@@ -659,24 +733,59 @@ reuses that lockfile unchanged, which is what `--locked` would have bought.
 The budget is deliberate. Thirty seconds per target proves the harness still
 links and executes and catches a shallow regression — the class of bug a
 refactor introduces — without adding minutes to every CI run. It is not
-a campaign, and it finds nothing deep: the job passing is not evidence that a
-reader is fuzz-clean, only that it survived a short bounded run from an empty
-corpus. Deep fuzzing stays a local activity for now.
+a campaign, and the job passing is not evidence that a reader is fuzz-clean,
+only that it survived a short bounded run from a seeded corpus. The campaign
+is the lane below.
 
-Outstanding, and none of it exists yet:
+### The weekly campaign lane
 
-- **No seed corpus.** Each run starts from nothing, so a run rediscovers ZIP
-  and XML structure from scratch. A corpus built at run time by the existing
-  `tests/support/` writers — not committed as binaries — would let a short run
-  start deep instead of shallow.
-- **No scheduled long run.** Only the 30-second per-target lane exists; a
-  weekly campaign with a persisted corpus is the natural next step.
-- **No coverage measurement** of what the targets reach.
-- **Only the two readers are fuzzed.** `profile::check` and `extract::plan`
-  sit on top of them and have no target of their own.
+`.github/workflows/fuzz.yml` is the long run, on the model of
+[mutants.yml](#mutation-testing): **weekly on a schedule**, plus
+`workflow_dispatch` with a `minutes_per_target` input that defaults to **20**.
+It is deliberately **not** a required check and is not listed in
+`.factory.yaml`. A crash it finds is a defect to triage under
+[fuzz/regressions/README.md](../fuzz/regressions/README.md), not a merge
+block on whatever happened to be in flight.
 
-Until those exist, the sweeps above remain the load-bearing compensating
-control, and the residual risk stays recorded in
+The job is the CI lane's steps on a larger budget: the same pinned actions,
+the same nightly toolchain and pinned `cargo-fuzz`, the same `fuzz/Cargo.lock`
+gate, `python3 fuzz/seed.py`, then each of the five targets for the budget
+with `-rss_limit_mb=2048`. It then runs `cargo +nightly fuzz coverage` for
+`inventory` — the entry point the other package targets all go through —
+renders the report with `llvm-cov` and puts it in the job summary. That step
+is an ordinary one whose failure fails the job: `llvm-tools-preview` installs
+cleanly as a component of the nightly toolchain, which was verified before
+the step was written, so a failure there is a real one.
+
+`fuzz/artifacts`, `fuzz/corpus` and `fuzz/coverage` are uploaded as a
+workflow artifact with a 14-day retention, `if: always()` — on a crash the
+artifacts directory holds the crashing input and the corpus is what a
+maintainer replays it against, and neither is committed, so the artifact is
+the only copy that outlives the run. Nothing is persisted between runs: each
+campaign reseeds from the fixtures and grows its own corpus.
+
+A `workflow_dispatch` workflow is registered only from the default branch, so
+this lane cannot be dispatched from the branch that adds it. It therefore also
+carries a `pull_request` trigger filtered to `.github/workflows/fuzz.yml` and
+`fuzz/seed.py`, which runs the identical job at a 2-minute budget — the same
+rehearsal device [release.yml](../.github/workflows/release.yml) uses, and for
+the same reason. An ordinary pull request touches neither file and is served
+by the 30-second lane above.
+
+Outstanding:
+
+- **The corpus is not persisted between campaigns.** Each weekly run reseeds
+  from the fixtures and starts from that; a corpus carried forward across
+  runs — a cache, or a branch of its own — would compound instead. The
+  uploaded artifact is the current stand-in.
+- **Coverage is measured for one target only**, `inventory`, and is reported
+  rather than gated: no floor exists that a drop would fail.
+- **No campaign has run against a real package.** Every seed is synthetic by
+  the [fixture policy](#fixture-policy), so the shapes the corpus explores are
+  the shapes the fixtures already have.
+
+Until those are addressed, the sweeps above remain the load-bearing
+compensating control, and the residual risk stays recorded in
 [roadmap.md](roadmap.md#residual-risks-in-the-current-state).
 
 ## Benchmarks

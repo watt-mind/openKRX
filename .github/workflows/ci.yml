@@ -193,6 +193,16 @@ jobs:
       - name: Enforce the fuzz lockfile
         run: cargo +nightly metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
       - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE"
+      # libFuzzer starts from whatever `fuzz/corpus/<target>/` holds, and a
+      # fresh checkout holds nothing: an unseeded 30-second run spends itself
+      # rediscovering that a package is a ZIP container at all. Seeding from
+      # the committed golden fixtures puts a well-formed package and a real
+      # metadata document in front of the mutator on the first execution, so
+      # the same 30 seconds start deep. The budget below is unchanged.
+      - name: Build the seed corpus
+        run: |
+          python3 fuzz/seed.py
+          python3 fuzz/seed.py --verify
       - name: Bounded run of each target
         run: |
           cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
