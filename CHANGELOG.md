@@ -337,6 +337,25 @@ and such a change is recorded here explicitly.
   generator. The `Golden output contract` CI job runs both against a release
   build; `scripts/check.sh` is unchanged, so local runs stay fast.
 
+- **Property-based round-trip tests for the writer and the reader.**
+  `crates/openkrx-core/tests/property_round_trip.rs` generates whole
+  `PackageSpec` values — metadata with both M4 enumerations, every optional
+  header element and marker block present or absent, zero to eight
+  attachments whose file names span the accepted component alphabet including
+  precomposed Hungarian letters, attachment sizes from nothing to just past
+  `Limits::RATIO_GRACE_BYTES`, and any MS-DOS timestamp — and asserts five
+  properties over them: a written package reads back with byte-identical
+  attachment bytes, the documented normalised document and no failing
+  structural check; one request writes the same bytes twice; a single-byte
+  mutation is refused or read back inside every ceiling, and never panics; a
+  request over one documented ceiling is refused with that ceiling's
+  `create.over_limit.*` code; and `extract::plan` accepts every name the
+  writer writes. `proptest` is a dev-dependency of `openkrx-core` alone, with
+  default features off, so no shipped binary carries it. Each property runs
+  64 cases by default, overridable with `PROPTEST_CASES`; shrunk failing
+  seeds persist under `crates/openkrx-core/proptest-regressions/` and are
+  committed. No library or command behaviour changed.
+
 ### Changed
 
 - Archive inventory internals: the end-of-central-directory record is read

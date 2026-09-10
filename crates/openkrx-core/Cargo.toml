@@ -33,3 +33,8 @@ unicode-normalization.workspace = true
 # The crate's own integration tests build synthetic archives with the
 # test-only writer, which no default build compiles.
 openkrx-core = { path = ".", features = ["synthetic-writer"] }
+# The property-based round-trip tests, and this crate alone: no binary and no
+# other crate carries it. Default features are off because `fork`, `timeout`
+# and `regex-syntax` pull in `rusty-fork`, `tempfile`, `wait-timeout` and a
+# regex parser that nothing here uses; `std` is all the properties need.
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
