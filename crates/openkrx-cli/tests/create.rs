@@ -624,8 +624,8 @@ fn an_output_that_is_a_dangling_symbolic_link_counts_as_occupied() {
 /// at the path itself are the whole rule on this platform, and they are what
 /// exercises `FILE_ATTRIBUTE_REPARSE_POINT` in
 /// `crate::extract::preflight::is_link` for the writing commands. `mklink /J`
-/// needs no elevation; a runner without it leaves a `SKIPPED:` line and the
-/// test returns.
+/// needs no elevation; a runner without it leaves a `SKIPPED <test>:` line
+/// and the test returns.
 #[cfg(windows)]
 mod junctions {
     use super::{Scratch, create_json, diagnostic, scene, status};
