@@ -76,6 +76,10 @@ jobs:
         if: always()
         with:
           name: mutants-out
+          # Documented exception to the one-day retention baseline (owner:
+          # repository maintainer): this campaign runs weekly, its evidence
+          # must outlive the next scheduled run, and the report is what the
+          # per-crate mutation floor decisions are made from.
           retention-days: 14
           if-no-files-found: warn
           path: |

@@ -315,12 +315,16 @@ safety rests almost entirely on rejection branches, that is the property worth
 measuring.
 
 `.github/workflows/mutants.yml` runs it weekly and on manual dispatch, and it
-is deliberately **not** a required check. A full workspace run rebuilds and
-reruns the suite once per mutant. The seeding run — the whole workspace, both
-crates, all 937 mutants, in one `cargo mutants --workspace --jobs 2`
-invocation — took **7 minutes 39 seconds** of wall time on the machine it was
-measured on. That is short because most mutants rebuild incrementally in under
-a second and this suite runs in about one; the two mutants that make the
+is deliberately **not** a required check. It uploads `mutants.out/` and the
+gate summary as the `mutants-out` artifact, kept for 14 days rather than the
+one-day baseline — a documented exception, recorded under
+[artifact retention](releasing.md#artifact-retention). A full workspace run
+rebuilds and reruns the suite once per mutant. The seeding run — the whole
+workspace, both crates, all 937 mutants, in one
+`cargo mutants --workspace --jobs 2` invocation — took **7 minutes 39 seconds**
+of wall time on the machine it was measured on. That is short because most
+mutants rebuild incrementally in under a second and this suite runs in about
+one; the two mutants that make the
 parser loop forever cost `minimum_test_timeout` — 120 seconds each — which is
 a quarter of the total on its own. A shared runner is slower, and every
 function added makes the run longer, which is why it does not belong in a
@@ -840,7 +844,9 @@ with `python3 fuzz/seed.py`, then runs each target for **30 seconds** with
 `-rss_limit_mb=2048`, a 150-second total fuzzing budget. Between the build and
 the seeding it replays every retained regression, described
 [below](#replaying-the-retained-regressions).
-Crash artifacts are uploaded when the job fails. The job names
+Crash artifacts are uploaded when the job fails, for one day: the retained
+regressions this lane replays are committed under `fuzz/regressions/`, so the
+upload is a run-scoped convenience, not the durable copy. The job names
 `--target x86_64-unknown-linux-gnu` explicitly, through the
 `FUZZ_TARGET_TRIPLE` env variable: cargo-fuzz otherwise defaults to the triple
 of its own binary, and the pre-built one is a musl build, which
@@ -955,7 +961,9 @@ is compounding rather than churning.
 
 **Downloading it.** The `fuzz-campaign` workflow artifact of any campaign run
 carries `fuzz/corpus` alongside `fuzz/artifacts` and `fuzz/coverage`, for 14
-days. Take it from the run page, or:
+days — a documented exception to the one-day retention baseline, recorded
+under [artifact retention](releasing.md#artifact-retention). Take it from the
+run page, or:
 
 ```sh
 gh run download --repo watt-mind/openKRX <run-id> --name fuzz-campaign

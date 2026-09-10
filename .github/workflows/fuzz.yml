@@ -276,8 +276,8 @@ jobs:
           while read -r target files bytes; do
             directory="fuzz/corpus/${target}"
             if [ -d "$directory" ]; then
-              after_files=$(find "$directory" -type f 2>/dev/null | wc -l || echo 0)
-              after_bytes=$(du -sb "$directory" 2>/dev/null | cut -f1 || echo 0)
+              after_files=$( { find "$directory" -type f 2>/dev/null || true; } | wc -l )
+              after_bytes=$( { du -sb "$directory" 2>/dev/null || echo 0; } | cut -f1 )
             else
               echo "::warning::no corpus directory for ${target} after minimisation"
               after_files=0
@@ -372,6 +372,10 @@ jobs:
         if: always()
         with:
           name: fuzz-campaign
+          # Documented exception to the one-day retention baseline (owner:
+          # repository maintainer): this campaign runs weekly, its evidence
+          # must outlive the next scheduled run, and when a campaign fails
+          # this artifact is the only surviving copy of the corpus.
           retention-days: 14
           if-no-files-found: warn
           path: |
