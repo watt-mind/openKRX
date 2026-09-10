@@ -24,8 +24,14 @@ and such a change is recorded here explicitly.
   corpus is every committed `.krx` fixture (which is also the package seed
   corpus `fuzz/seed.py` derives, reproduced in Rust so no interpreter is
   needed), every retained fuzzing regression, packages the synthetic writer
-  builds, every deflate level from 0 to 10 so all three block types are
-  reached, and two properties over generated payloads. Where the reader refused
+  builds, every deflate level from 0 to 10 — put in front of *both* decoders
+  through `Entry::deflated_stream`, a new constructor on the test-only
+  synthetic writer that takes pre-compressed bytes, so the reader inflates
+  stored and fixed-Huffman blocks and not only the one level the writers emit
+  — and two properties over generated payloads. Every package reaches one of
+  six named verdicts and the committed corpus is pinned by name, so a fixture
+  that stops being locatable or decodable turns the test red instead of
+  dropping out of it silently. Where the reader refused
   a package over `max_entry_decoded_bytes`, `max_total_decoded_bytes` or
   `max_compression_ratio`, the reference decoder — running under none of
   openKRX's limits — is shown to cross that same ceiling, so a refusal is

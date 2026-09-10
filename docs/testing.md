@@ -700,6 +700,15 @@ rather than what it decoded *from*, and a package the reader refused reports
 nothing at all, so a package refused over a ceiling can still be pointed at the
 reference decoder.
 
+Nothing is skipped silently. Every package reaches one of six named verdicts —
+not a container, both decoders agreed, refused over a decoded-byte ceiling that
+was then demonstrated, refused over a structural ceiling, malformed, or refused
+for a reason that is not about decoding — and the committed corpus is pinned as
+a table of *(name, verdict, entries compared)*. A fixture the walk stops
+locating, or one the reader starts refusing, changes its row and turns the test
+red rather than quietly dropping out of the corpus; a fixture added later has no
+row at all, which is the prompt to decide what its row should be.
+
 Three things are asserted:
 
 - **Agreement.** Where the reader accepted an entry, the reference decoder
@@ -726,12 +735,13 @@ The corpus is everything the repository can produce:
 | The fuzzing seed corpus | `fuzz/seed.py` sorts `tests/fixtures/golden/*.krx` and writes each one unchanged as a seed for all three package-shaped targets, so the committed packages above *are* those seeds. Reproducing the walk in Rust covers them without an interpreter on the path. |
 | Retained fuzzing regressions | Every file under `fuzz/regressions/{inventory,structure,extract_plan}/`, which are archive images. Empty today, and covered the moment one is retained. |
 | Written packages | Stored and deflated entries built by the synthetic writer over five payload shapes, including the empty one. |
-| Every deflate level | Levels 0 to 10, which is how all three block types — stored, fixed Huffman and dynamic Huffman — are reached; the crate's own writers emit level 6 only. |
+| Every deflate level | Levels 0 to 10, **through both decoders**. `Entry::deflated` compresses at the single level the crate's writers emit, so on its own it would only ever put a dynamic-Huffman stream in front of the reader; `Entry::deflated_stream` — added to the test-only synthetic writer for this — takes pre-compressed bytes instead, so the reader inflates the same stream the reference decoder did at every level. A separate test asserts the sweep really does produce all three block types (stored, fixed Huffman, dynamic Huffman), so the claim cannot quietly stop being true. |
 | Generated payloads | Two [properties](#property-based-tests): random noise, a two-symbol alphabet and a five-symbol alphabet up to 16 KiB, compressed at every level and inflated by both decoders, and the same payloads written into a package and read back. |
 
-Both properties run 48 cases, overridable with `PROPTEST_CASES`, and persist a
-shrunk failing seed under `crates/openkrx-core/proptest-regressions/` like every
-other property here. The whole file runs in about a second.
+Both properties use the same `strategies::config` as every other property here,
+so they run 64 cases, honour `PROPTEST_CASES`, and persist a shrunk failing seed
+under `crates/openkrx-core/proptest-regressions/`. The whole file runs in about
+three seconds.
 
 **What it cannot show.** The reference decoder is itself unverified. Two
 implementations agreeing is evidence, not proof: a stream both read the same

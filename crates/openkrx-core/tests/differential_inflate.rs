@@ -36,6 +36,9 @@
 
 mod support;
 
+#[path = "support/strategies.rs"]
+mod strategies;
+
 use std::path::{Path, PathBuf};
 
 use openkrx_core::{ArchiveError, LimitKind, Limits, archive};
@@ -182,13 +185,45 @@ fn reference_inflate(data: &[u8]) -> Result<Vec<u8>, String> {
 // The comparison
 // ---------------------------------------------------------------------------
 
+/// What the comparison did with one package.
+///
+/// Every outcome is named, including the ones where nothing was compared, so
+/// that a caller can pin the verdict for each committed input by name: a
+/// fixture that stops being locatable, or stops being decodable, changes its
+/// verdict and turns the test red instead of quietly dropping out of the
+/// corpus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// The walk found no central directory to follow: not a container at all.
+    NotAContainer,
+    /// The reader accepted the package and both decoders agreed on every entry.
+    Agreed,
+    /// The reader refused it over a decoded-byte or compression-ratio ceiling,
+    /// and the reference decoder was shown to cross the same ceiling.
+    Limited,
+    /// The reader refused it over a ceiling crossed before anything was
+    /// inflated — an entry count, a name, an extra field, a comment — which is
+    /// a structural verdict with no decoding in it to compare.
+    LimitedStructurally,
+    /// The reader refused it over a decoded-byte ceiling, but the reference
+    /// decoder declined the stream — a deliberately truncated bomb, say — so
+    /// there is nothing to measure the ceiling against. Never silent: a
+    /// package landing here is one whose verdict a caller has to pin.
+    LimitedUnverifiably,
+    /// The reader called the package malformed.
+    Malformed,
+    /// The reader refused it for a reason that is not about decoding at all:
+    /// truncation, ambiguity, an unsupported feature or an unsafe name.
+    Refused,
+}
+
 /// What comparing one package produced, so a caller can assert coverage.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Compared {
+    /// What the comparison did with the package.
+    verdict: Verdict,
     /// Entries whose bytes both decoders produced identically.
     agreed: usize,
-    /// Packages the reader refused for a decoded-size or ratio ceiling.
-    limited: usize,
 }
 
 /// Decode every entry of one package with both decoders under `Limits::DEFAULT`.
@@ -201,11 +236,14 @@ fn compare(image: &[u8], label: &str) -> Compared {
 /// `label` names the input in an assertion message. It is an index or a file
 /// name, never an absolute path.
 fn compare_with(image: &[u8], label: &str, limits: &Limits) -> Compared {
-    let mut result = Compared::default();
+    let mut result = Compared {
+        verdict: Verdict::NotAContainer,
+        agreed: 0,
+    };
     let Some(members) = locate(image) else {
         return result;
     };
-    match archive::inventory(image, limits) {
+    result.verdict = match archive::inventory(image, limits) {
         Ok(inventory) => {
             assert_eq!(
                 inventory.len(),
@@ -230,48 +268,46 @@ fn compare_with(image: &[u8], label: &str, limits: &Limits) -> Compared {
                 );
                 result.agreed += 1;
             }
+            Verdict::Agreed
         }
         Err(ArchiveError::OverLimit {
             limit,
             limit_value,
             entry,
             ..
-        }) => {
-            if assert_limit_is_real(&members, limit, limit_value, entry, label) {
-                result.limited += 1;
-            }
-        }
+        }) => assert_limit_is_real(&members, limit, limit_value, entry, label),
         Err(ArchiveError::Malformed { entry, .. }) => {
             assert_reference_does_not_disagree(&members, entry, label);
+            Verdict::Malformed
         }
-        Err(_) => {}
-    }
+        Err(_) => Verdict::Refused,
+    };
     result
 }
 
 /// Show that a decoded-byte refusal is the ceiling, not a decoder disagreement.
 ///
-/// Returns whether the ceiling was one this file can speak about. The name,
-/// count, extra-field and comment ceilings are structural: they are crossed
-/// before a byte is inflated, so there is nothing here to demonstrate.
+/// Reports which kind of refusal it was. The name, count, extra-field and
+/// comment ceilings are structural: they are crossed before a byte is inflated,
+/// so there is nothing here to demonstrate.
 fn assert_limit_is_real(
     members: &[Member<'_>],
     limit: LimitKind,
     limit_value: u64,
     entry: Option<u32>,
     label: &str,
-) -> bool {
+) -> Verdict {
     let index = match entry {
         Some(index) => index as usize,
-        None => return false,
+        None => return Verdict::LimitedStructurally,
     };
     let Some(member) = members.get(index) else {
-        return false;
+        return Verdict::LimitedStructurally;
     };
     match limit {
         LimitKind::EntryDecodedBytes => {
             let Some(decoded) = reference_or_skip(member, label, index) else {
-                return false;
+                return Verdict::LimitedUnverifiably;
             };
             assert!(
                 decoded > limit_value,
@@ -287,7 +323,7 @@ fn assert_limit_is_real(
             let mut total = 0_u64;
             for (position, earlier) in members.iter().enumerate().take(index + 1) {
                 let Some(decoded) = reference_or_skip(earlier, label, position) else {
-                    return false;
+                    return Verdict::LimitedUnverifiably;
                 };
                 total = total.saturating_add(decoded);
             }
@@ -300,7 +336,7 @@ fn assert_limit_is_real(
         }
         LimitKind::CompressionRatio => {
             let Some(decoded) = reference_or_skip(member, label, index) else {
-                return false;
+                return Verdict::LimitedUnverifiably;
             };
             // The reader charges the ratio against the whole entry's compressed
             // bytes and stops the moment a decoded chunk crosses it, so the
@@ -317,9 +353,9 @@ fn assert_limit_is_real(
                 limit.code()
             );
         }
-        _ => return false,
+        _ => return Verdict::LimitedStructurally,
     }
-    true
+    Verdict::Limited
 }
 
 /// The reference decode's length, or nothing when it declined the stream.
@@ -443,6 +479,31 @@ fn label(path: &Path) -> String {
         .unwrap_or_else(|| String::from("unnamed"))
 }
 
+/// The verdict every committed package is expected to reach, and how many of
+/// its entries both decoders agreed on.
+///
+/// Pinned by name rather than counted, because a silent skip is the failure
+/// mode this table exists to prevent: a fixture the walk stops locating, or one
+/// the reader starts refusing, changes its row and turns the test red instead
+/// of quietly dropping out of the corpus. A fixture added later has no row and
+/// fails the exhaustiveness check below, which is the intended prompt to decide
+/// what it should be.
+const EXPECTED: [(&str, Verdict, usize); 5] = [
+    // A well-formed package: every entry compared.
+    ("consistent.krx", Verdict::Agreed, 4),
+    // Deliberately not a container at all, which is what it is a fixture for.
+    ("malformed.krx", Verdict::NotAContainer, 0),
+    // Well-formed as an archive; what it is missing is a payload entry the
+    // metadata document references, which is a check-level fact, not a
+    // decoding one.
+    ("missing-attachment.krx", Verdict::Agreed, 2),
+    // Well-formed as an archive, with the unprefixed layout.
+    ("no-prefix.krx", Verdict::Agreed, 4),
+    // 300 entries against a ceiling of 256: crossed while walking the central
+    // directory, before anything is inflated.
+    ("over-limit.krx", Verdict::LimitedStructurally, 0),
+];
+
 #[test]
 fn every_committed_package_decodes_identically_under_both_decoders() {
     let packages = fixture_packages();
@@ -450,11 +511,23 @@ fn every_committed_package_decodes_identically_under_both_decoders() {
         !packages.is_empty(),
         "no committed package was found; the fixture walk is looking in the wrong place"
     );
-    let mut agreed = 0;
+    let mut seen: Vec<(String, Verdict, usize)> = Vec::new();
     for path in &packages {
         let image = std::fs::read(path).expect("a committed fixture is readable");
-        agreed += compare(&image, &label(path)).agreed;
+        let name = label(path);
+        let compared = compare(&image, &name);
+        seen.push((name, compared.verdict, compared.agreed));
     }
+    let expected: Vec<(String, Verdict, usize)> = EXPECTED
+        .iter()
+        .map(|(name, verdict, agreed)| ((*name).to_owned(), *verdict, *agreed))
+        .collect();
+    assert_eq!(
+        seen, expected,
+        "the committed corpus is not what this test was written against: every package must \
+         appear exactly once, with the verdict and the compared-entry count its row states"
+    );
+    let agreed: usize = seen.iter().map(|(_, _, agreed)| agreed).sum();
     assert!(
         agreed > 0,
         "no entry was compared; the corpus reached no accepted package"
@@ -469,8 +542,8 @@ fn a_refusal_over_a_decoded_byte_ceiling_is_the_ceiling_and_not_the_decoder() {
     let bomb = vec![0_u8; 4 * 1024 * 1024];
     let image = Archive::of(vec![Entry::deflated(b"bomb.bin", &bomb)]).build();
     assert_eq!(
-        compare_with(&image, "ratio bomb", &Limits::DEFAULT).limited,
-        1,
+        compare_with(&image, "ratio bomb", &Limits::DEFAULT).verdict,
+        Verdict::Limited,
         "the ratio ceiling was not demonstrated"
     );
 
@@ -485,8 +558,8 @@ fn a_refusal_over_a_decoded_byte_ceiling_is_the_ceiling_and_not_the_decoder() {
                 ..Limits::DEFAULT
             }
         )
-        .limited,
-        1,
+        .verdict,
+        Verdict::Limited,
         "the per-entry ceiling was not demonstrated"
     );
 
@@ -504,18 +577,25 @@ fn a_refusal_over_a_decoded_byte_ceiling_is_the_ceiling_and_not_the_decoder() {
                 ..Limits::DEFAULT
             }
         )
-        .limited,
-        1,
+        .verdict,
+        Verdict::Limited,
         "the archive-wide ceiling was not demonstrated"
     );
 }
 
 #[test]
 fn every_retained_fuzzing_regression_decodes_identically_under_both_decoders() {
-    for path in &regressions() {
+    // Empty today, and there is nothing to pin: a regression is retained
+    // because a fuzz target found it, and any verdict is a legitimate one for
+    // such an input. What matters is that each is put through the comparison,
+    // whose own assertions fire wherever it is decodable, so the count is
+    // reported rather than checked against a number this test cannot know.
+    let retained = regressions();
+    for path in &retained {
         let image = std::fs::read(path).expect("a retained regression is readable");
         compare(&image, &label(path));
     }
+    println!("retained regressions compared: {}", retained.len());
 }
 
 // ---------------------------------------------------------------------------
@@ -538,7 +618,13 @@ fn packages_the_synthetic_writer_builds_decode_identically_under_both_decoders()
             Entry::deflated(b"deflated", payload),
         ])
         .build();
-        compared += compare(&image, &format!("synthetic {index}")).agreed;
+        let result = compare(&image, &format!("synthetic {index}"));
+        assert_eq!(
+            result.verdict,
+            Verdict::Agreed,
+            "synthetic {index}: the reader did not accept the package"
+        );
+        compared += result.agreed;
     }
     assert_eq!(
         compared,
@@ -547,61 +633,95 @@ fn packages_the_synthetic_writer_builds_decode_identically_under_both_decoders()
     );
 }
 
+/// Build a one-entry package around a stream the caller compressed.
+///
+/// `Entry::deflated` compresses at the one level the crate's writers emit, so
+/// on its own it would only ever put a dynamic-Huffman stream in front of the
+/// reader. `Entry::deflated_stream` takes the compressed bytes instead, which
+/// is how the reader is made to inflate a stored block and a fixed-Huffman
+/// block as well.
+fn package_at_level(payload: &[u8], level: u8) -> Vec<u8> {
+    let stream = miniz_oxide::deflate::compress_to_vec(payload, level);
+    Archive::of(vec![Entry::deflated_stream(b"payload", payload, stream)]).build()
+}
+
+/// Compare one payload at one level through both decoders, or say what failed.
+///
+/// Both legs are the point: the reference decoder round-trips the compressor's
+/// output, *and* the reader inflates the very same stream — otherwise a level
+/// the reader never sees would be claimed as covered.
+fn compare_at_level(payload: &[u8], level: u8) -> Result<(), String> {
+    let stream = miniz_oxide::deflate::compress_to_vec(payload, level);
+    let theirs = reference_inflate(&stream).map_err(|error| format!("reference: {error}"))?;
+    if theirs != payload {
+        return Err(String::from(
+            "the reference decoder did not round trip the compressor's output",
+        ));
+    }
+    let image = package_at_level(payload, level);
+    let compared = compare(&image, &format!("level {level}"));
+    if compared
+        != (Compared {
+            verdict: Verdict::Agreed,
+            agreed: 1,
+        })
+    {
+        return Err(format!(
+            "the reader did not accept and compare it: {compared:?}"
+        ));
+    }
+    Ok(())
+}
+
 #[test]
 fn every_deflate_level_the_compressor_accepts_decodes_identically() {
-    let payloads: [Vec<u8>; 4] = [
+    for (index, payload) in sweep_payloads().iter().enumerate() {
+        for level in LEVELS {
+            compare_at_level(payload, level)
+                .unwrap_or_else(|error| panic!("payload {index} at level {level}: {error}"));
+        }
+    }
+}
+
+/// The payload shapes the sweep compresses, from empty to a long repeated run.
+fn sweep_payloads() -> [Vec<u8>; 4] {
+    [
         Vec::new(),
         vec![0_u8; 4096],
         pseudo_random(4096),
         b"the same short run, over and over. ".repeat(256),
-    ];
-    for payload in &payloads {
+    ]
+}
+
+/// The reader really is shown every deflate block type by the sweep.
+///
+/// Without this the sweep could keep passing while the compressor quietly
+/// stopped varying its output, and the claim that all three block types reach
+/// the reader would become untrue with nothing to catch it. The first three
+/// bits of a stream are its first block's header: `BFINAL`, then two bits of
+/// `BTYPE` — 0 stored, 1 fixed Huffman, 2 dynamic Huffman.
+#[test]
+fn the_level_sweep_reaches_every_deflate_block_type() {
+    let mut types = std::collections::BTreeSet::new();
+    for payload in &sweep_payloads() {
         for level in LEVELS {
             let stream = miniz_oxide::deflate::compress_to_vec(payload, level);
-            let theirs = reference_inflate(&stream)
-                .unwrap_or_else(|error| panic!("level {level}: reference: {error}"));
-            assert_eq!(
-                &theirs, payload,
-                "level {level}: the reference decoder did not round trip the compressor's output"
-            );
-            let image = Archive::of(vec![Entry::deflated(b"payload", payload)]).build();
-            assert_eq!(
-                compare(&image, &format!("level {level}")).agreed,
-                1,
-                "level {level}: the entry was not compared"
-            );
+            if let Some(first) = stream.first() {
+                types.insert((first >> 1) & 0b11);
+            }
         }
     }
+    assert_eq!(
+        types,
+        std::collections::BTreeSet::from([0, 1, 2]),
+        "the sweep no longer puts a stored, a fixed-Huffman and a dynamic-Huffman block in \
+         front of the reader"
+    );
 }
 
 // ---------------------------------------------------------------------------
 // The property
 // ---------------------------------------------------------------------------
-
-/// Cases the property runs when `PROPTEST_CASES` says nothing.
-///
-/// Each case compresses one payload at every level and inflates it twice, so a
-/// case is eleven compressions and twenty-two decodes; the count is chosen to
-/// keep the whole file inside its second-scale budget on the slowest lane.
-const DEFAULT_CASES: u32 = 48;
-
-/// The bounded configuration the property runs under.
-fn config() -> ProptestConfig {
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|cases| *cases > 0)
-        .unwrap_or(DEFAULT_CASES);
-    ProptestConfig {
-        cases,
-        failure_persistence: Some(Box::new(
-            proptest::test_runner::FileFailurePersistence::Direct(
-                "proptest-regressions/differential_inflate.txt",
-            ),
-        )),
-        ..ProptestConfig::default()
-    }
-}
 
 /// Payloads worth compressing: noise, runs and a mixture, up to 16 KiB.
 ///
@@ -618,17 +738,19 @@ fn payload() -> impl Strategy<Value = Vec<u8>> {
 }
 
 proptest! {
-    #![proptest_config(config())]
+    #![proptest_config(strategies::config("proptest-regressions/differential_inflate.txt"))]
 
     /// Both decoders read the compressor's output as the bytes that went in.
+    ///
+    /// The reader's leg goes through a package built around the caller's own
+    /// stream, so it inflates the same bytes the reference decoder did — at
+    /// every level, not only the one the writers emit.
     #[test]
     fn both_decoders_agree_on_any_payload_at_any_level(payload in payload()) {
         for level in LEVELS {
-            let stream = miniz_oxide::deflate::compress_to_vec(&payload, level);
-            let theirs = reference_inflate(&stream).map_err(|error| {
-                TestCaseError::fail(format!("level {level}: reference: {error}"))
+            compare_at_level(&payload, level).map_err(|error| {
+                TestCaseError::fail(format!("level {level}: {error}"))
             })?;
-            prop_assert_eq!(&theirs, &payload, "level {} reference output", level);
         }
     }
 
@@ -640,6 +762,9 @@ proptest! {
             Entry::deflated(b"deflated", &payload),
         ])
         .build();
-        prop_assert_eq!(compare(&image, "written").agreed, 2);
+        prop_assert_eq!(compare(&image, "written"), Compared {
+            verdict: Verdict::Agreed,
+            agreed: 2,
+        });
     }
 }
