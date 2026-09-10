@@ -271,9 +271,13 @@ jobs:
           persist-credentials: false
       - name: Decide whether the core crate changed
         id: scope
+        # The manifest and the lockfile are in the pathspec beside the crate's
+        # own sources: a dependency bump can move a type this crate re-exports
+        # or derives on, which changes the public API without touching a line
+        # under `crates/openkrx-core`.
         run: |
           set -euo pipefail
-          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- crates/openkrx-core; then
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- crates/openkrx-core Cargo.toml Cargo.lock; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -308,20 +312,35 @@ jobs:
             echo '## API compatibility (informational)'
             echo
             if [ "$CHANGED" != 'true' ]; then
-              echo 'SKIPPED: `crates/openkrx-core` is unchanged against the base commit, so there is no public API to compare.'
+              echo 'SKIPPED: `crates/openkrx-core`, `Cargo.toml` and `Cargo.lock` are unchanged against the base commit, so there is no public API to compare.'
             else
-              if [ "$OUTCOME" = 'success' ]; then
-                echo 'PASS: `cargo-semver-checks` found no breaking change in the public API of `openkrx-core` against the base commit.'
-              else
-                echo 'BREAK: `cargo-semver-checks` reported a public API change in `openkrx-core` against the base commit. It does not fail the build, because nothing is published and there is no downstream build to break; the report below is what one would have seen.'
+              case "$OUTCOME" in
+                success)
+                  echo 'PASS: `cargo-semver-checks` found no breaking change in the public API of `openkrx-core` against the base commit.'
+                  ;;
+                failure)
+                  echo 'BREAK: `cargo-semver-checks` reported a public API change in `openkrx-core` against the base commit. It does not fail the build, because nothing is published and there is no downstream build to break; the report below is what one would have seen.'
+                  ;;
+                *)
+                  # `skipped` or `cancelled`: the toolchain, the cache or the
+                  # install did not get as far as running the comparison, so
+                  # there is no result to report either way. The job stays
+                  # green, because an informational report that could not run
+                  # is not a finding about this pull request.
+                  echo 'NOT RUN: setup failed before the comparison, so nothing was compared. This is not a finding about the public API; see the job log for the step that failed.'
+                  ;;
+              esac
+              echo
+              # Absent whenever the comparison never ran, and `set -e` would
+              # otherwise turn that into a red informational job.
+              if [ -f "$RUNNER_TEMP/api-report.txt" ]; then
+                echo '<details><summary>cargo-semver-checks output</summary>'
+                echo
+                echo '```text'
+                cat "$RUNNER_TEMP/api-report.txt"
+                echo '```'
+                echo
+                echo '</details>'
               fi
-              echo
-              echo '<details><summary>cargo-semver-checks output</summary>'
-              echo
-              echo '```text'
-              cat "$RUNNER_TEMP/api-report.txt"
-              echo '```'
-              echo
-              echo '</details>'
             fi
           } >> "$GITHUB_STEP_SUMMARY"

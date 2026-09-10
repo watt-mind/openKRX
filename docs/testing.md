@@ -1074,11 +1074,19 @@ are deliberate:
   gate would be a claim the project cannot yet make. The decision to gate
   belongs with the decision to publish; see
   [releasing.md](releasing.md#semver-checks).
-- It **skips cleanly**. When `crates/openkrx-core` is unchanged against the
-  base commit, the job says so in the summary and installs nothing.
-- It reports into the **job summary**. A `PASS`, `BREAK` or `SKIPPED` line
-  plus the tool's own output land in `$GITHUB_STEP_SUMMARY`, so a reviewer
-  reads the finding on the run page instead of opening a log.
+- It **skips cleanly**. The comparison runs when `crates/openkrx-core`,
+  `Cargo.toml` or `Cargo.lock` differs from the base commit — the manifest and
+  the lockfile are in that list because a dependency bump can move a type this
+  crate re-exports or derives on, changing the public API without touching a
+  line under `crates/openkrx-core`. When none of the three moved, the job says
+  so in the summary and installs nothing.
+- It reports into the **job summary**. A `PASS`, `BREAK`, `NOT RUN` or
+  `SKIPPED` line, plus the tool's own output when there is any, land in
+  `$GITHUB_STEP_SUMMARY`, so a reviewer reads the finding on the run page
+  instead of opening a log. `NOT RUN` is the case where the toolchain, the
+  cache or the install failed before the comparison started: there is no
+  result either way, and an informational report that could not run is not a
+  finding about the pull request, so the job still ends green.
 
 The job checks out with `fetch-depth: 0`, because `--baseline-rev` resolves a
 commit in the local clone and the default single-commit fetch does not contain
