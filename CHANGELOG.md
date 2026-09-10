@@ -621,6 +621,35 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **The weekly fuzz campaign is cumulative, and retained crashes are replayed
+  on every push (KRX-11).** `.github/workflows/fuzz.yml` used to reseed from
+  the fixtures every week and throw the result away when the runner shut down.
+  It now restores each target's `fuzz/corpus/<target>/` from the previous
+  campaign's `actions/cache` entry, seeds on top — `fuzz/seed.py` overwrites
+  only its own files, so a restored corpus is left intact — fuzzes for the
+  budget, then minimises with `cargo +nightly fuzz cmin` and saves that
+  minimised directory as the campaign's new entry, so week n+1 starts from
+  everything week n reached. The cache key is
+  `fuzz-corpus-<generation>-<target>-<ISO week>-<run id>` with restore keys
+  falling back to the latest entry for the target; a maintainer discards the
+  accumulation by bumping `CORPUS_CACHE_VERSION` in the workflow. The job
+  summary now reports inputs and bytes per target before and after, and the
+  `fuzz-campaign` artifact still carries the corpus, the crash artifacts and
+  the coverage report for 14 days — on a crash it is the only copy, because
+  the save steps do not run when a target fails. No corpus is committed:
+  nothing about `fuzz/.gitignore` or the fixture policy changed. Separately,
+  the `Fuzz (build only)` job in `.github/workflows/ci.yml` gains one step
+  that replays every file under `fuzz/regressions/<target>/` through the built
+  target with `-runs=0` and fails on a crash, under a five-minute step
+  timeout, so a fixed crash cannot come back unnoticed. Every regressions
+  directory is empty today — no crash has ever been found — and a target
+  without retained inputs is skipped with a line saying so, rather than run
+  against its `.gitkeep`. The lockfile gate and the 30-second per-target smoke
+  budget are unchanged. `docs/testing.md`, `docs/releasing.md` (gate 2 and the
+  workflow table), `fuzz/README.md` and `fuzz/regressions/README.md` record
+  the corpus lifecycle, how to download a campaign's corpus and how to reset
+  it.
+
 - **Every push commit keeps its own Security run (PC-05).** The Security
   workflow grouped push runs by `github.ref` and cancelled in progress
   unconditionally, so a second push to `develop` erased the first commit's

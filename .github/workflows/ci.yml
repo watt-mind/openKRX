@@ -193,6 +193,42 @@ jobs:
       - name: Enforce the fuzz lockfile
         run: cargo +nightly metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
       - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE"
+      # Every retained crash, replayed on every push. `fuzz/regressions/<target>/`
+      # holds the minimised inputs that could not be expressed as a generated
+      # construction in a `*_rejects_*.rs` test — the rule is in
+      # fuzz/regressions/README.md — and this step is what stops one of them
+      # coming back: the directory is passed as the corpus and `-runs=0` adds no
+      # mutation, so libFuzzer executes each file in it once and exits, and a
+      # crash fails the job. Replaying is not fuzzing and costs about what the
+      # process starts cost, so the step carries its own five-minute bound on
+      # top of the job's twenty.
+      #
+      # A target whose directory holds nothing but `.gitkeep` is skipped rather
+      # than replayed: libFuzzer would otherwise execute the placeholder as an
+      # input, which is harmless but reads in the log as a regression that was
+      # checked when there was none. Today every directory is in that state — no
+      # crash has ever been found — so this step reports five skips and passes;
+      # the moment a blob lands it starts guarding it, with no edit here.
+      - name: Replay the retained regressions
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          replayed=0
+          for target in inventory xml_metadata structure extract_plan create_round_trip; do
+            directory="fuzz/regressions/${target}"
+            count=$(find "$directory" -type f ! -name '.gitkeep' | wc -l)
+            if [ "$count" -eq 0 ]; then
+              echo "${target}: no retained regressions"
+              continue
+            fi
+            echo "::group::${target}: replaying ${count} retained input(s)"
+            cargo +nightly fuzz run --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
+              "$target" "$directory" -- -runs=0 -rss_limit_mb=2048
+            echo "::endgroup::"
+            replayed=$((replayed + count))
+          done
+          echo "Replayed ${replayed} retained regression input(s)."
       # libFuzzer starts from whatever `fuzz/corpus/<target>/` holds, and a
       # fresh checkout holds nothing: an unseeded 30-second run spends itself
       # rediscovering that a package is a ZIP container at all. Seeding from

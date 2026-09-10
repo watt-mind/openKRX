@@ -26,9 +26,17 @@ redacted, and the
    input must now yield.
 4. Only then fix the reader.
 
-A blob committed here is not picked up implicitly. Replay the directory
-explicitly to re-check every retained crash in one run:
+## Replaying
+
+The `Fuzz (build only)` job in `.github/workflows/ci.yml` replays these
+directories on every push and pull request — `-runs=0`, so each file is
+executed once with no mutation — and fails on a crash. That is what makes a
+blob committed here a permanent gate. A target whose directory holds nothing
+but its `.gitkeep` is skipped and the job says so, which is what every target
+does today; the step needs no edit when the first blob lands.
+
+By hand, one target at a time:
 
 ```sh
-cargo +nightly fuzz run --fuzz-dir fuzz inventory fuzz/regressions/inventory
+cargo +nightly fuzz run --fuzz-dir fuzz inventory fuzz/regressions/inventory -- -runs=0
 ```

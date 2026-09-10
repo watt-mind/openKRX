@@ -820,9 +820,11 @@ Add `fuzz/fuzz_targets/<name>.rs` holding one `fuzz_target!` call and nothing
 else, add the matching `[[bin]]` block to `fuzz/Cargo.toml` with
 `test = false`, `doc = false` and `bench = false`, create
 `fuzz/regressions/<name>/.gitkeep`, extend the table above and add the target
-to both lanes below — the list in `.github/workflows/ci.yml` and the loop in
-`.github/workflows/fuzz.yml` — and to `fuzz/seed.py` if there is fixture
-material it can start from. Keep the
+to both lanes below — the list and the replay loop in
+`.github/workflows/ci.yml`, and in `.github/workflows/fuzz.yml` the run loop,
+the minimisation loop, the size-recording loop and its own pair of corpus
+`restore`/`save` steps, which are per target by design — and to `fuzz/seed.py`
+if there is fixture material it can start from. Keep the
 harness body to the single call unless there is an invariant to hold: a harness
 that asserts a *result* turns a behaviour change into a fuzzing failure, which
 is not what this lane is for, while an invariant — something only a defect can
@@ -835,7 +837,9 @@ The `Fuzz (build only)` job in `.github/workflows/ci.yml` runs on
 `ubuntu-latest` for every push and pull request. It installs the nightly
 toolchain and a pinned `cargo-fuzz`, builds the five targets, seeds the corpus
 with `python3 fuzz/seed.py`, then runs each target for **30 seconds** with
-`-rss_limit_mb=2048`, a 150-second total fuzzing budget.
+`-rss_limit_mb=2048`, a 150-second total fuzzing budget. Between the build and
+the seeding it replays every retained regression, described
+[below](#replaying-the-retained-regressions).
 Crash artifacts are uploaded when the job fails. The job names
 `--target x86_64-unknown-linux-gnu` explicitly, through the
 `FUZZ_TARGET_TRIPLE` env variable: cargo-fuzz otherwise defaults to the triple
@@ -859,7 +863,35 @@ links and executes and catches a shallow regression — the class of bug a
 refactor introduces — without adding minutes to every CI run. It is not
 a campaign, and the job passing is not evidence that a reader is fuzz-clean,
 only that it survived a short bounded run from a seeded corpus. The campaign
-is the lane below.
+is the [weekly lane](#the-weekly-campaign-lane).
+
+### Replaying the retained regressions
+
+The `Replay the retained regressions` step in the same job runs every file
+under `fuzz/regressions/<target>/` through the built target and fails the job
+on a crash:
+
+```sh
+cargo +nightly fuzz run --fuzz-dir fuzz --target x86_64-unknown-linux-gnu \
+  inventory fuzz/regressions/inventory -- -runs=0 -rss_limit_mb=2048
+```
+
+The directory is passed as the corpus and `-runs=0` adds no mutation, so
+libFuzzer executes each file in it once and exits. That is what makes a
+retained crash a permanent gate rather than a blob nobody re-checks: a fixed
+crash that comes back fails the next push. It runs before the seeding, on
+every push and pull request, and carries a five-minute step timeout — replaying
+a handful of minimised inputs costs about what the process starts cost, so a
+step that runs long is a defect in itself.
+
+A target whose directory holds nothing but its `.gitkeep` is skipped and the
+step says so. **Every directory is in that state today**: no crash has ever
+been found, so the step reports five skips and passes. It needs no edit when
+the first blob lands — the rule for when one may, in
+[fuzz/regressions/README.md](../fuzz/regressions/README.md), is unchanged, and
+a named generated construction in a `*_rejects_*.rs` file remains the preferred
+form of the evidence. This step is the backstop for the inputs that cannot be
+written that way.
 
 ### The weekly campaign lane
 
@@ -883,12 +915,69 @@ is an ordinary one whose failure fails the job: `llvm-tools-preview` installs
 cleanly as a component of the nightly toolchain, which was verified before
 the step was written, so a failure there is a real one.
 
+#### The cumulative corpus
+
+The campaign is cumulative: week n+1 starts from everything week n reached,
+not from the fixtures alone. Each target's corpus is a separate
+[`actions/cache`](https://github.com/actions/cache) entry, and the campaign
+walks it through four states:
+
+1. **Restore.** `fuzz/corpus/<target>/` is restored from the previous
+   campaign's entry. The key is
+   `fuzz-corpus-<generation>-<target>-<ISO week>-<run id>`; the run id makes
+   every campaign write a key of its own, because `actions/cache/save` refuses
+   to overwrite an existing key and a second run in the same week would
+   otherwise throw its work away. Reading is therefore done by the restore
+   keys — the week prefix first, then the bare target prefix — and a prefix
+   match returns the most recently created entry, so a restore always lands on
+   the latest campaign. A miss is not an error: the directory stays empty and
+   the seeding below fills it.
+2. **Seed on top.** `python3 fuzz/seed.py` writes its seeds by name and
+   overwrites only its own, so it refreshes the fixture-derived inputs without
+   disturbing anything libFuzzer added in an earlier week.
+3. **Fuzz.** Each target for the budget, exactly as before.
+4. **Minimise and save.** `cargo +nightly fuzz cmin` merges each corpus into a
+   fresh directory, keeping only the inputs that contribute a feature no
+   earlier input already covers, and replaces the corpus with it. Coverage is
+   preserved by construction while the input count and the byte total fall,
+   which is what stops a corpus carried forward every week from growing without
+   bound. That minimised directory is what is saved as the new cache entry.
+   Saving happens before the coverage pass, so a failure there cannot cost the
+   campaign hours of accumulated inputs, and it is skipped on the pull-request
+   rehearsal, whose two minutes per target are not what the next campaign
+   should start from.
+
+The job summary reports **inputs and bytes per target, before and after**:
+"before" is measured after the restore and the seeding, so it is what the
+campaign actually started from, and "after" once the minimisation is done.
+Read together across weeks, those two columns are the evidence that the corpus
+is compounding rather than churning.
+
+**Downloading it.** The `fuzz-campaign` workflow artifact of any campaign run
+carries `fuzz/corpus` alongside `fuzz/artifacts` and `fuzz/coverage`, for 14
+days. Take it from the run page, or:
+
+```sh
+gh run download --repo watt-mind/openKRX <run-id> --name fuzz-campaign
+```
+
+and unpack `corpus/<target>/` over the local `fuzz/corpus/<target>/`. A cache
+entry itself is readable only by a workflow run, so the artifact is the
+maintainer-facing copy — and on a crash it is the only copy, because the save
+steps do not run when a target fails.
+
+**Resetting it.** Bump `CORPUS_CACHE_VERSION` in
+`.github/workflows/fuzz.yml` — `v1` to `v2`. Every key is prefixed with it, so
+every restore misses and the next campaign starts from the seeds alone. That
+is what a maintainer wants after a change to what an input *means*: a limit, a
+harness, or a target's entry point, when the accumulated inputs are exploring a
+shape the reader no longer has. Nothing is deleted; the old entries stop being
+addressed and expire on GitHub's own schedule.
+
 `fuzz/artifacts`, `fuzz/corpus` and `fuzz/coverage` are uploaded as a
 workflow artifact with a 14-day retention, `if: always()` — on a crash the
 artifacts directory holds the crashing input and the corpus is what a
-maintainer replays it against, and neither is committed, so the artifact is
-the only copy that outlives the run. Nothing is persisted between runs: each
-campaign reseeds from the fixtures and grows its own corpus.
+maintainer replays it against, and neither is committed.
 
 A `workflow_dispatch` workflow is registered only from the default branch, so
 this lane cannot be dispatched from the branch that adds it. It therefore also
@@ -900,10 +989,13 @@ by the 30-second lane above.
 
 Outstanding:
 
-- **The corpus is not persisted between campaigns.** Each weekly run reseeds
-  from the fixtures and starts from that; a corpus carried forward across
-  runs — a cache, or a branch of its own — would compound instead. The
-  uploaded artifact is the current stand-in.
+- **The persisted corpus is a cache, not a repository.** GitHub evicts a cache
+  entry that has not been read for seven days and enforces a repository-wide
+  size limit, so a long enough gap between campaigns — a paused schedule, a
+  quota pushed over by another lane — silently returns the next run to the
+  seeds. The weekly cron reads the entry often enough that this should not
+  happen, and the before/after columns in the job summary are where it would
+  show; nothing alerts on it.
 - **Coverage is measured for one target only**, `inventory`, and is reported
   rather than gated: no floor exists that a drop would fail.
 - **No campaign has run against a real package.** Every seed is synthetic by
