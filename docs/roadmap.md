@@ -37,9 +37,11 @@ The authoritative, code-level version of this list is [architecture.md](architec
   `.openkrx-extract.partial` marker that makes it detectable; rename-based
   staging is deferred, with reasons in
   [architecture.md](architecture.md#cleanup-after-a-failed-write).
-- `openat2`-style path resolution. Extraction is confined with
-  `symlink_metadata` and exclusive creation, which do not defend against a
-  concurrent writer holding access to the destination; see
+- Race-resistant path resolution on macOS and Windows. Linux kernels with
+  `openat2` resolve every destination path beneath one directory descriptor;
+  elsewhere extraction is confined with `symlink_metadata` and exclusive
+  creation, which do not defend against a concurrent writer holding access to
+  the destination; see
   [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer).
 - Signature handling, including `signatures.xml` (rule A7). openKRX
   performs no cryptography and is not planned to.
@@ -157,9 +159,10 @@ Stated plainly, because the tests that would remove them do not exist yet.
 These are the same facts the 2026-09-10 readiness assessment in
 [releasing.md](releasing.md#readiness-status) weighs, read from the other
 end: the first two risks below are why release gate 1 is not met and why a
-first release could only be a labelled pre-release, and the extraction race,
-the uncovered Windows symbolic link and the smoke-only fuzzing are why gate 2
-is only partially met. The rest — strictness never measured against real
+first release could only be a labelled pre-release, and the extraction race
+on the two platforms that still have it, the uncovered Windows symbolic link
+and the smoke-only fuzzing are why gate 2 is only partially met. The rest —
+strictness never measured against real
 archives, inherited deflate correctness, reasoned rather than measured
 limits, the classifier keying on a code's category — are disclosed
 limitations that no gate turns into a blocker, and they belong in the
@@ -196,14 +199,17 @@ list weakens the other; if one changes, change both in the same pull request.
   format description implies, not from a corpus. A real package larger than
   a ceiling would be refused as over-limit, correctly by the contract and
   unhelpfully in practice, until the ceiling is revisited with evidence.
-- **The extraction threat model is live, and one part of it is not
-  defended.** `extract` writes into a directory the caller names, so every
-  row of the output threat model in [SECURITY.md](../SECURITY.md) now
-  applies to real files. Confinement rests on `symlink_metadata` and
-  exclusive creation, which lose to a writer who can replace a path
-  component between the check and the creation; that race is stated, not
-  tested, in
-  [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer). A crash
+- **The extraction threat model is live, and one part of it is defended on
+  one platform only.** `extract` writes into a directory the caller names, so
+  every row of the output threat model in [SECURITY.md](../SECURITY.md) now
+  applies to real files. On Linux with `openat2` the kernel resolves every
+  path beneath one descriptor, and a component replaced between the check and
+  the creation is refused rather than followed. On macOS and Windows, and on
+  a Linux kernel that has no `openat2`, confinement still rests on
+  `symlink_metadata` and exclusive creation, which lose to a writer who can
+  make that replacement; that race is stated, not tested, in
+  [SECURITY.md](../SECURITY.md#residual-risks-of-the-output-layer). The undo
+  pass after a failed write resolves by path on every platform. A crash
   still leaves partial output behind the `.openkrx-extract.partial` marker,
   because the undo pass runs on a returned error and not on a signal.
 - **The exit-status classifier keys on a code's category segment.** The core

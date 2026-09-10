@@ -18,6 +18,17 @@
 //! `marker_removed` says the run reached its last step. It is `true` in every
 //! successful report; it is a field rather than an assumption so that a
 //! consumer can assert it rather than infer it.
+//!
+//! `path_resolution_fallback` says the run resolved its paths more weakly than
+//! it tried to. On Linux, `extract` asks the kernel to resolve every
+//! destination path beneath one directory descriptor with `openat2`; a kernel
+//! that cannot do that sends the run down the portable check-then-create path,
+//! and this field is how the report says so instead of leaving the caller to
+//! guess from a kernel version. It is `false` on a platform where there is no
+//! stronger mode to fall back *from*, because nothing was given up there: the
+//! field answers "did this run resolve more weakly than it asked to?", never
+//! "which platform is this?". `docs/architecture.md` states what each platform
+//! does and does not defend against.
 
 use serde::Serialize;
 
@@ -35,6 +46,11 @@ pub struct ExtractData {
     pub items: Vec<WrittenView>,
     /// Whether the partial marker was removed, which ends a complete run.
     pub marker_removed: bool,
+    /// Whether this run asked the kernel to resolve every path beneath one
+    /// directory descriptor and could not have it, and so used the portable
+    /// check-then-create path instead. `false` where there was no stronger
+    /// mode to ask for.
+    pub path_resolution_fallback: bool,
 }
 
 /// One file that exists on disk because this run created it.

@@ -650,6 +650,46 @@ and such a change is recorded here explicitly.
   means the operation succeeded rather than that every byte reached the
   consumer, which matters for `create --stdout` and `repack --stdout`.
 
+- **`extract` resolves every destination path beneath one directory
+  descriptor on Linux (KRX-09).** After preflight the destination is opened
+  once and every directory and file the run creates is resolved by the kernel
+  relative to that descriptor with `openat2(2)` under `RESOLVE_BENEATH`,
+  `RESOLVE_NO_SYMLINKS` and `RESOLVE_NO_MAGICLINKS`; only a resolved parent
+  descriptor and one name component are ever handed to `mkdirat` or `openat`,
+  so no absolute path is resolved again after preflight. A path component
+  replaced between the check and the creation that follows is refused by the
+  kernel rather than followed, under the codes the path rule already has —
+  `output.symlink_in_path` and `output.not_a_directory`. Opening that
+  descriptor is itself the last check of the destination: it asks for
+  `O_DIRECTORY | O_NOFOLLOW`, and a failure refuses the run rather than
+  falling back, because falling back would hand a destination that had just
+  been replaced to the code that resolves it by name. Only the `openat2`
+  probe selects the portable arm. This closes the
+  check-to-create race on Linux kernels with `openat2`; macOS and Windows
+  keep the previous check-then-create path, their behaviour and their
+  messages are unchanged, and the undo pass after a failed write still
+  resolves by path on every platform. No new stable code, and
+  `capabilities --json` is unchanged.
+- **The `extract` JSON result gains `path_resolution_fallback`.** A `bool`,
+  present in every successful `extract` report on every platform. It is
+  `true` only where openKRX asked the kernel for the stronger resolution and
+  could not have it — a kernel before 5.6 answering `ENOSYS`, a seccomp
+  filter answering `EPERM`, a missing resolve flag answering `EINVAL` — in
+  which case the run takes the portable path once and the human report gains
+  a line saying so. It is `false` both when that resolution was used and on a
+  platform where there is no stronger mode to ask for, so the value is the
+  same on all three runners and the golden output contract pins it;
+  `tests/golden/extract-consistent-json/stdout` is the one golden that moves.
+  Adding a field does not raise `schema_version`, which stays `1`.
+- **`rustix` is a new dependency of the CLI crate, on Linux only.**
+  Declared under `[target.'cfg(target_os = "linux")'.dependencies]` with
+  `default-features = false` and the `fs` and `std` features, so its
+  `linux_raw` backend links no C library and it brings only `bitflags` and
+  `linux-raw-sys`. It is the `openat2` call surface, used from one module,
+  and it is there because the workspace forbids `unsafe`; the rationale is in
+  [docs/research.md](docs/research.md). Its licence,
+  `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT`, is accepted by
+  `deny.toml` on the MIT arm.
 - **First-release readiness is assessed against the six gates (KRX-07,
   openKRX side).** `docs/releasing.md` gains a dated "Readiness status"
   section: one row per gate with a status, public evidence links and what
