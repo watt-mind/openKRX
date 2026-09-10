@@ -172,6 +172,47 @@ impl Drop for Scratch {
     }
 }
 
+/// Create a directory junction at `link` pointing at `target`.
+///
+/// A junction is the one reparse point a Windows runner can make without any
+/// privilege: `mklink /J` needs neither developer mode nor elevation, and it
+/// is a `cmd` builtin, so a subprocess stands in for the reparse-point call
+/// this workspace cannot make while `unsafe_code` is forbidden.
+///
+/// Returns `false`, after printing one loud `SKIPPED:` line, when `mklink`
+/// itself did not produce the junction. A caller must return early on `false`
+/// rather than assert, so that a runner without the builtin says so in the
+/// log instead of failing a rule it never exercised.
+///
+/// `cmd` wants backslashes. Every path a test builds comes from `Path::join`,
+/// so its separators are already the platform's; the replacement covers only a
+/// forward slash the temporary root itself might carry.
+#[cfg(windows)]
+#[must_use]
+pub fn junction(link: &Path, target: &Path) -> bool {
+    fn backslashes(path: &Path) -> String {
+        path.to_string_lossy().replace('/', "\\")
+    }
+
+    let made = Command::new("cmd")
+        .args([
+            "/c",
+            "mklink",
+            "/J",
+            &backslashes(link),
+            &backslashes(target),
+        ])
+        .stdin(Stdio::null())
+        .output();
+    match made {
+        Ok(output) if output.status.success() && std::fs::symlink_metadata(link).is_ok() => true,
+        _ => {
+            eprintln!("SKIPPED: mklink /J unavailable");
+            false
+        }
+    }
+}
+
 /// The timestamp every creation test writes, so that its bytes are fixed.
 pub const MANIFEST_TIMESTAMP: &str = "2026-01-02T03:04:06";
 
