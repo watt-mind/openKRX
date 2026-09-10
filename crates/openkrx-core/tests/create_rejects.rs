@@ -476,6 +476,69 @@ fn the_archive_size_limit_holds_at_its_boundary() {
 }
 
 #[test]
+fn an_attachment_the_reader_would_call_a_bomb_is_refused() {
+    // A megabyte of one byte deflates to about a kilobyte, a ratio far above
+    // the documented 100. The reader refuses such an entry while inflating, so
+    // the writer must refuse it too, or it would hand back a package its own
+    // inventory rejects.
+    let spec = spec_sized(1, 1024 * 1024);
+    let error = refuses(&spec, &Limits::DEFAULT);
+    assert_eq!(error.code(), "create.over_limit.compression_ratio");
+    assert_eq!(error.attachment_index(), Some(0));
+    assert!(
+        error
+            .to_string()
+            .starts_with("create.over_limit.compression_ratio (limit 100, observed "),
+        "{error}"
+    );
+    // Relaxing the reader's ceiling is what makes it writable, and the package
+    // then reads back under those same relaxed limits.
+    let mut limits = Limits::DEFAULT;
+    limits.max_compression_ratio = u64::MAX;
+    let image = accepts(&spec, &limits);
+    let inventory = archive::inventory(&image, &limits).expect("the image is an archive");
+    assert_eq!(
+        inventory.entry_bytes(2).expect("the entry decodes").len(),
+        1024 * 1024
+    );
+}
+
+#[test]
+fn every_accepted_package_reads_back_entry_by_entry() {
+    // The invariant the ratio check exists for: whatever `package` returns,
+    // `inventory`, the structural checks and `entry_bytes` on every attachment
+    // all succeed under the same limits. The two attachments are the cases
+    // either side of the ratio rule's grace window.
+    let just_under_grace = vec![b'z'; (Limits::RATIO_GRACE_BYTES - 1) as usize];
+    let over_grace_but_incompressible = support::pseudo_random(128 * 1024);
+    let spec = PackageSpec::with_attachments(
+        metadata_with_dispatch(),
+        vec![
+            AttachmentInput::new("compressible.bin", just_under_grace.clone()),
+            AttachmentInput::new("noise.bin", over_grace_but_incompressible.clone()),
+        ],
+    );
+    let image = accepts(&spec, &Limits::DEFAULT);
+    let report = create::verify_round_trip(&image, &Limits::DEFAULT, &MetadataLimits::DEFAULT)
+        .expect("the package reads back");
+    assert!(
+        !report
+            .checks()
+            .iter()
+            .any(|check| matches!(check.outcome, openkrx_core::profile::CheckOutcome::Fail(_)))
+    );
+    let inventory = archive::inventory(&image, &Limits::DEFAULT).expect("the image is an archive");
+    assert_eq!(
+        inventory.entry_bytes(2).expect("the entry decodes"),
+        just_under_grace
+    );
+    assert_eq!(
+        inventory.entry_bytes(3).expect("the entry decodes"),
+        over_grace_but_incompressible
+    );
+}
+
+#[test]
 fn a_package_written_at_a_tightened_ceiling_reads_back_at_the_same_one() {
     // The point of enforcing the reader's limits on the way out: whatever the
     // configuration, what was written is readable under it.

@@ -149,6 +149,7 @@ pub fn package(spec: &PackageSpec, limits: &Limits) -> Result<Vec<u8>, CreateErr
     check_limits(&entries, limits)?;
 
     let prepared = zip::prepare(&entries);
+    check_ratios(&prepared, limits)?;
     let image_bytes = zip::image_bytes(&prepared);
     let archive_ceiling = limits.max_archive_bytes.min(u64::from(u32::MAX));
     if image_bytes > archive_ceiling {
@@ -185,6 +186,33 @@ pub fn verify_round_trip(
     profile::check(&inventory, metadata_limits)
 }
 
+/// Refuse an entry whose decoded-to-stored ratio the reader would refuse.
+///
+/// The rule and the numbers are the reader's, in `archive::inflate`: an entry
+/// that produced more than [`Limits::RATIO_GRACE_BYTES`] decoded bytes must not
+/// exceed `max_compression_ratio`. It is checked here rather than earlier
+/// because the ratio is not known until the entry has been compressed, and it
+/// is what keeps the promise on [`package`]: a package this crate writes is one
+/// it reads back under the same limits. A highly compressible attachment — a
+/// long run of one byte — is the case that reaches it.
+fn check_ratios(prepared: &[zip::Prepared<'_>], limits: &Limits) -> Result<(), CreateError> {
+    for (position, entry) in prepared.iter().enumerate() {
+        let decoded = entry.uncompressed_size();
+        let ratio = decoded / entry.compressed_size();
+        if decoded > Limits::RATIO_GRACE_BYTES && ratio > limits.max_compression_ratio {
+            return Err(CreateError::OverLimit {
+                limit: CreateLimitKind::CompressionRatio,
+                limit_value: limits.max_compression_ratio,
+                observed: Some(ratio),
+                index: position
+                    .checked_sub(2)
+                    .and_then(|attachment| u32::try_from(attachment).ok()),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Apply every reader ceiling to the entries about to be written.
 ///
 /// The checks run in a fixed order — entry count, then per entry the name
@@ -193,10 +221,14 @@ pub fn verify_round_trip(
 /// attachment positions, so a diagnostic about them carries no index at all.
 fn check_limits(entries: &[Entry<'_>], limits: &Limits) -> Result<(), CreateError> {
     let count = entries.len() as u64;
-    if count > u64::from(limits.max_entries) {
+    // A non-ZIP64 end record counts entries in 16 bits, so the writer's own
+    // ceiling is the smaller of the configured one and what the record holds:
+    // a relaxed `max_entries` must refuse the package, never truncate the count.
+    let entries_ceiling = u64::from(limits.max_entries).min(u64::from(u16::MAX));
+    if count > entries_ceiling {
         return Err(CreateError::OverLimit {
             limit: CreateLimitKind::Entries,
-            limit_value: u64::from(limits.max_entries),
+            limit_value: entries_ceiling,
             observed: Some(count),
             index: None,
         });
@@ -238,4 +270,39 @@ fn check_limits(entries: &[Entry<'_>], limits: &Limits) -> Result<(), CreateErro
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! The one ceiling no public call can reach: an entry count above what a
+    //! non-ZIP64 end record can express. Writing 65 536 entries to prove it
+    //! would cost seconds of compression for a `u16`, so the check itself is
+    //! called with entries that carry no data.
+
+    use super::{CreateError, CreateLimitKind, Entry, Limits, Method, check_limits};
+
+    #[test]
+    fn the_entry_count_ceiling_is_what_the_end_record_can_count() {
+        let mut limits = Limits::DEFAULT;
+        limits.max_entries = 70_000;
+        let entries: Vec<Entry<'_>> = (0..=u32::from(u16::MAX))
+            .map(|_| Entry {
+                name: "KRX/OCD/Payload/ID-1/a",
+                data: &[],
+                method: Method::Deflate,
+            })
+            .collect();
+        assert_eq!(entries.len(), 65_536);
+        assert_eq!(
+            check_limits(&entries, &limits),
+            Err(CreateError::OverLimit {
+                limit: CreateLimitKind::Entries,
+                limit_value: 65_535,
+                observed: Some(65_536),
+                index: None,
+            }),
+            "a relaxed max_entries must refuse the package, not truncate the count"
+        );
+        assert_eq!(check_limits(&entries[..65_535], &limits), Ok(()));
+    }
 }

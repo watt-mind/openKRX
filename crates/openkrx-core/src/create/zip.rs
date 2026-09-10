@@ -18,7 +18,7 @@
 //! | Directory entries | none |
 //!
 //! No ZIP64 record is ever written, so the image, every entry and every offset
-//! must fit in 32 bits. Writing happens in two steps for that reason: an entry
+//! must fit in 32 bits, and the entry count in 16. Writing happens in two steps for that reason: an entry
 //! is compressed first, the exact image length is known before a byte of it is
 //! assembled, and the caller refuses the package when that length exceeds the
 //! ceiling — so no size or offset is ever truncated into a header.
@@ -103,6 +103,21 @@ pub(crate) fn prepare<'a>(entries: &[Entry<'a>]) -> Vec<Prepared<'a>> {
             }
         })
         .collect()
+}
+
+impl Prepared<'_> {
+    /// The entry's decoded size, in bytes.
+    pub(crate) const fn uncompressed_size(&self) -> u64 {
+        self.uncompressed_size
+    }
+
+    /// The entry's stored size, in bytes, never zero for the ratio it feeds.
+    ///
+    /// The reader divides by the same floor, so the ratio computed here is the
+    /// ratio `archive::inflate` computes over the same entry.
+    pub(crate) fn compressed_size(&self) -> u64 {
+        (self.stored.len() as u64).max(1)
+    }
 }
 
 /// The exact length the assembled image will have, in bytes.

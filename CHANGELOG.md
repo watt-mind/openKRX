@@ -29,9 +29,11 @@ and such a change is recorded here explicitly.
   The `MELLEKLET` references and `MELLEKLETEK_SZAMA` are derived from the
   attachments actually written — `MERET` in kilobytes rounded up, the unit
   M6 documents — and a caller-supplied value that disagrees is refused. The
-  reader's `Limits` and both the archive and extraction name rules are
-  enforced on the output, and `create::verify_round_trip` reads a written
-  package back through `archive::inventory`, `metadata::parse` and
+  reader's `Limits` — entry count, name length, per-entry and total decoded
+  bytes, compression ratio and image length — and both the archive and
+  extraction name rules are enforced on the output, so whatever `package`
+  returns is a package the reader accepts; `create::verify_round_trip` reads
+  a written one back through `archive::inventory`, `metadata::parse` and
   `profile::check`. No command exposes any of this: nothing writes a file,
   and `capabilities().operations` is unchanged.
 
@@ -41,11 +43,12 @@ and such a change is recorded here explicitly.
   written package is "structurally consistent with the documented layout",
   never "conforming".** Reading one back still reports `Unresolved(A19)` for
   the marker's location and `Unresolved(M13)` for the declared size.
-- **Twenty-two stable `create.*` codes**, catalogued in
+- **Twenty-three stable `create.*` codes**, catalogued in
   [docs/codes.md](docs/codes.md#creation-codes) and extracted by
   `scripts/check-codes.py`, whose head list gains `create`:
   `create.invalid.*` for a request that contradicts itself,
-  `create.over_limit.*` for a ceiling the output would exceed, and
+  `create.over_limit.*` for a ceiling the output would exceed — including the
+  compression ratio the reader refuses a decompression bomb by — and
   `create.unsafe_name.*` for a name the reader or the extraction planner
   would refuse. `Category::of_code` classifies the first and third as a
   package problem (exit 6) and the second as a limit (exit 8).

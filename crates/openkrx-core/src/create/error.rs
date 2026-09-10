@@ -68,7 +68,8 @@ pub enum CreateLimitKind {
     /// `max_archive_bytes`, or the 4 GiB ceiling the format itself imposes on
     /// a writer that never emits ZIP64, whichever is smaller.
     ArchiveBytes,
-    /// `max_entries`, counting the marker and the metadata document.
+    /// `max_entries`, counting the marker and the metadata document, or the
+    /// 65 535 entries a non-ZIP64 end record can count, whichever is smaller.
     Entries,
     /// `max_name_bytes`, applied to a written entry name.
     NameBytes,
@@ -76,6 +77,11 @@ pub enum CreateLimitKind {
     EntryBytes,
     /// `max_total_decoded_bytes`, applied to every entry together.
     TotalBytes,
+    /// `max_compression_ratio`, applied to one entry's decoded-to-stored
+    /// ratio once it has produced more than [`crate::Limits::RATIO_GRACE_BYTES`]
+    /// decoded bytes — the same rule, on the same numbers, that the reader
+    /// enforces while inflating.
+    CompressionRatio,
 }
 
 impl CreateLimitKind {
@@ -88,6 +94,7 @@ impl CreateLimitKind {
             Self::NameBytes => "create.over_limit.name_bytes",
             Self::EntryBytes => "create.over_limit.entry_bytes",
             Self::TotalBytes => "create.over_limit.total_bytes",
+            Self::CompressionRatio => "create.over_limit.compression_ratio",
         }
     }
 }

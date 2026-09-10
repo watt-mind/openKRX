@@ -365,7 +365,10 @@ No code here describes a file, a path or a destination: the writer returns
 bytes and touches no filesystem. Writing those bytes out is the command-line
 half of KRX-06 and will add codes of its own.
 
-Tests are in `crates/openkrx-core/tests/create_rejects.rs`.
+Tests are in `crates/openkrx-core/tests/create_rejects.rs`, except the entry
+count a non-ZIP64 end record cannot express, whose test is the `#[cfg(test)]`
+module in `crates/openkrx-core/src/create/mod.rs`: writing 65 536 entries to
+prove a `u16` would cost seconds of compression.
 
 ### `create.invalid.*`
 
@@ -392,10 +395,11 @@ attachment is known. The defaults are in
 | Code | Meaning | Asserted by |
 | --- | --- | --- |
 | `create.over_limit.archive_bytes` | The assembled image would exceed `max_archive_bytes`, or the 4 GiB the non-ZIP64 records can address, whichever is smaller. The exact length is known before a byte is assembled, so no size or offset is ever truncated into a header. | `the_archive_size_limit_holds_at_its_boundary` |
-| `create.over_limit.entries` | More entries than `max_entries`, counting the marker and the metadata document. | `the_entry_count_limit_holds_at_its_boundary` |
+| `create.over_limit.entries` | More entries than `max_entries`, counting the marker and the metadata document, or more than the 65 535 a non-ZIP64 end record can count, whichever is smaller. A relaxed `max_entries` refuses the package rather than truncating the count. | `the_entry_count_limit_holds_at_its_boundary`, `the_entry_count_ceiling_is_what_the_end_record_can_count` |
 | `create.over_limit.name_bytes` | One entry name is longer than `max_name_bytes`. The two fixed names are checked on the same path as an attachment's. | `the_name_length_limit_holds_at_its_boundary` |
 | `create.over_limit.entry_bytes` | One entry's bytes exceed `max_entry_decoded_bytes`, or the 4 GiB a non-ZIP64 size field holds. | `the_entry_size_limit_holds_at_its_boundary` |
 | `create.over_limit.total_bytes` | Every entry together exceeds `max_total_decoded_bytes`. | `the_total_size_limit_holds_at_its_boundary` |
+| `create.over_limit.compression_ratio` | One entry's decoded-to-stored ratio exceeds `max_compression_ratio`, once it has produced more than `Limits::RATIO_GRACE_BYTES` decoded bytes. It is the reader's own rule on the reader's own numbers: an entry the writer let through here is one `archive::inventory` would refuse while inflating it. | `an_attachment_the_reader_would_call_a_bomb_is_refused` |
 
 ### `create.unsafe_name.*`
 

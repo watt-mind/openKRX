@@ -229,6 +229,10 @@ impl Writer {
 }
 
 /// Escape one text value, refusing what XML 1.0 or the reader cannot carry.
+///
+/// Element content only: `"` and `'` are deliberately not escaped, so the
+/// result is not safe inside an attribute value. The serialiser writes exactly
+/// one attribute, the fixed namespace declaration, and never a caller's text.
 fn escape(value: &str, index: Option<u32>) -> Result<String, CreateError> {
     let invalid = |kind| CreateError::Invalid { kind, index };
     if value != value.trim() {

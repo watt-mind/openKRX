@@ -654,7 +654,7 @@ them makes two runs over the same input produce different bytes.
 | External attributes | `0o100644 << 16`: a regular file, `rw-r--r--` |
 | Extra fields, comments, data descriptors | none |
 | Directory entries | none |
-| ZIP64 | never; the image, every entry and every offset fit in 32 bits |
+| ZIP64 | never; the image, every entry and every offset fit in 32 bits, and the entry count in 16 |
 | XML declaration | `version="1.0" encoding="UTF-8" standalone="yes"` |
 | Namespace prefix | `ns2`, bound to the target namespace (M1, M9) |
 | Element order | M2 for `KULDEMENY`, M3 for `FEJRESZ`, M5 for `MELLEKLET` |
@@ -699,9 +699,17 @@ reproduced by the writer, so a document carrying them is refused with
 
 The reader's ceilings apply to the output, so a package this crate writes is
 one it can read back under the same `Limits`: the entry count, each entry
-name's length, each entry's decoded size, the total decoded size and the
-image length, the last of them also bounded by the 4 GiB the non-ZIP64
-records can address. Entry names are checked twice — against the archive
+name's length, each entry's decoded size, the total decoded size, each
+entry's decoded-to-stored compression ratio, and the image length. Two of
+them are bounded twice, by the configuration and by what a non-ZIP64 record
+can express: the image by 4 GiB, and the entry count by the 65 535 the end
+record counts in 16 bits, so a relaxed `max_entries` refuses the package
+rather than truncating the count. The ratio is checked after compression,
+against the same numbers and the same
+[`Limits::RATIO_GRACE_BYTES`](#archive-inventory-limits) window the reader
+applies while inflating, because an attachment that compresses far enough —
+a long run of one byte — is one the reader refuses as a decompression bomb
+whoever wrote it. Entry names are checked twice — against the archive
 layer's name rules and against the extraction planner's component rules — so
 that what openKRX writes it can also extract, on Linux, macOS and Windows
 alike. Text is refused when XML 1.0 cannot carry it, and refused when it
