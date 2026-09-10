@@ -144,10 +144,30 @@ impl Entry {
     }
 
     /// A deflated entry whose decoded content is `data`.
+    ///
+    /// Compressed at the one level this crate's writers emit, so the entry is
+    /// the shape a package `create::package` wrote would carry.
     #[must_use]
     pub fn deflated(name: &[u8], data: &[u8]) -> Self {
+        Self::deflated_stream(name, data, compress_to_vec(data, 6))
+    }
+
+    /// A deflated entry holding `compressed`, declaring `data` as its content.
+    ///
+    /// [`Entry::deflated`] compresses at one level, which fixes the deflate
+    /// block types the reader ever sees from it. This constructor takes the
+    /// compressed bytes instead, so a test can put a stream the writers would
+    /// never produce — another level, a stored or a fixed-Huffman block, a
+    /// stream from another compressor — in front of the reader.
+    ///
+    /// The CRC-32 and the declared size are still derived from `data`, so the
+    /// entry is well formed exactly when `compressed` is `data` deflated. A
+    /// caller that hands it anything else is building a deliberately broken
+    /// entry, which is a legitimate thing to want here.
+    #[must_use]
+    pub fn deflated_stream(name: &[u8], data: &[u8], compressed: Vec<u8>) -> Self {
         let mut entry = Self::stored(name, data);
-        entry.data = compress_to_vec(data, 6);
+        entry.data = compressed;
         entry.method = DEFLATE;
         entry
     }

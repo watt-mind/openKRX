@@ -104,6 +104,34 @@ output buffer at a time, and every limit is checked against the bytes it
 actually produced. A one-shot decompression API would have made
 "enforce against decoded bytes, not declared sizes" impossible to honour.
 
+### `zune-inflate` as a reference decoder
+
+`miniz_oxide` being the only implementation of RFC 1951 in the reader made
+deflate correctness something the project inherited rather than tested. The
+[differential inflate test](testing.md#differential-inflate) narrows that by
+decoding every stream twice, which needs a second decoder that is genuinely
+second.
+
+That ruled out the obvious candidate. `flate2` is the usual choice, but its
+default backend *is* `miniz_oxide`: a comparison against it would compare a
+decoder with itself and pass no matter what either did. `flate2` can be built
+against `zlib-rs` instead, which is independent, but it is then a wrapper crate
+plus a backend crate for a test that needs one function.
+
+`zune-inflate` is that one function. It is pure Rust with no `unsafe` on the
+paths used here, has no transitive dependency once `zlib` and `gzip` are turned
+off — the archive layer reads raw deflate streams, so neither container's
+framing nor the Adler-32 that `zlib` pulls in is wanted — and it is licensed
+`MIT OR Apache-2.0 OR Zlib`, all of which `deny.toml` already allows. It is a
+port of libdeflate's decompressor: a different lineage from `miniz_oxide`,
+which descends from miniz, which is where its value as a second opinion comes
+from.
+
+It is a dev-dependency of `openkrx-core` alone. No shipped binary carries it,
+the production dependency set is unchanged, and the reader still drives
+`miniz_oxide` and nothing else. What the arrangement buys is stated where the
+test is: two implementations agreeing is evidence, not proof.
+
 ### `quick-xml`, with the dangerous features refused above it
 
 `quick-xml` is a pull parser: it emits events and resolves nothing on its

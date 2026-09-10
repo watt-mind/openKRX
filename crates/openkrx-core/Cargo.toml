@@ -50,6 +50,19 @@ criterion = { version = "0.8.2", default-features = false, features = [
     "cargo_bench_support",
 ] }
 
+# The compressor behind the level sweep. It is already this crate's deflate
+# dependency, so this line adds nothing to the lock file; an integration test
+# links against the crate, not against the crate's private dependencies, so it
+# needs its own declaration to name the compressor the writer uses.
+miniz_oxide = { workspace = true }
+# The reference decoder behind the differential inflate test, and nothing else:
+# it is a second, independent implementation of RFC 1951, used only to check
+# `miniz_oxide`'s output against something that shares no code with it. Default
+# features are off because `zlib` and `gzip` add container framing — and with
+# `zlib` an `adler32` dependency — that this crate never reads: the archive
+# layer inflates raw deflate streams. See `docs/research.md`.
+zune-inflate = { workspace = true }
+
 # One target per layer, each with criterion's own harness rather than libtest's.
 # See `docs/testing.md`, "Benchmarks".
 [[bench]]
