@@ -270,7 +270,12 @@ that none of them is decided here.
 
 ## KRX-07: Consumer contract and first release review
 
-Status: planned, and next: KRX-06's command half is done.
+Status: in progress. The first-release readiness half is done: all six
+[release gates](releasing.md#readiness-status) have recorded, dated and
+evidence-linked outcomes as of 2026-09-10, with a first pre-release proposal
+beside them. The consumer half — the synthetic openPapir import integration
+and the openSzigno attachment handoff — is pending and belongs to openPapir's
+own scoped change; nothing in this repository claims it.
 
 Dependencies: KRX-04, KRX-05, KRX-06 and KRX-08. Owner: integration
 contributor;
@@ -286,8 +291,9 @@ build; all [release gates](releasing.md) have recorded outcomes.
 
 ## Dispatch policy
 
-KRX-01 to KRX-06 are implemented, and so is KRX-08; KRX-07 is the next
-scoped change. Independent work
+KRX-01 to KRX-06 are implemented, and so is KRX-08; KRX-07 is under way, its
+release-review half recorded and its consumer half still to do. Independent
+work
 on the remaining packages is split only with explicit module ownership and
 agreed interfaces. Keep one
 issue/branch per bounded change. File newfound

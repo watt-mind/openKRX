@@ -31,6 +31,144 @@ reviewable change: nothing in this repository pushes to crates.io, to a
 container registry, or to a package manager, and nothing here should be read
 as a statement that openKRX is ready to be released.
 
+## Readiness status
+
+Assessed 2026-09-10, against the six gates above, for the openKRX side of
+[KRX-07](work-packages.md#krx-07-consumer-contract-and-first-release-review).
+The openPapir consumer contract is the other half of that package and is not
+assessed here. This section is a statement of where the evidence stands; it
+makes no release, creates no tag, and claims nothing beyond what the linked
+proof supports. Every link is to a public file or workflow on the `develop`
+branch, so a reader outside the project can check each row.
+
+| Gate | Status | Evidence | What changes the status |
+| --- | --- | --- | --- |
+| 1. Operations and supported profile documented, with independent conformance evidence and explicit limitations | **Not met** | Operations, profile and limitations are documented: [architecture.md](https://github.com/watt-mind/openKRX/blob/develop/docs/architecture.md#not-yet-implemented), [profile.md](https://github.com/watt-mind/openKRX/blob/develop/docs/profile.md), [conformance.md](https://github.com/watt-mind/openKRX/blob/develop/docs/conformance.md). Independent conformance evidence does **not** exist: nine of thirty-seven rules are undecidable from the retrieved sources ([Known gaps](https://github.com/watt-mind/openKRX/blob/develop/docs/conformance.md#known-gaps), [Unresolved essential rules](https://github.com/watt-mind/openKRX/blob/develop/docs/profile.md#unresolved-essential-rules)), and the 2026-09-09 search found no public sample archive and no independent implementation ([Conformance evidence](https://github.com/watt-mind/openKRX/blob/develop/docs/profile.md#conformance-evidence)). | An authoritative statement from the format owner on A19–A22, or a lawfully usable sample archive or independent implementation. The two routes are the outreach questions in [research.md](https://github.com/watt-mind/openKRX/blob/develop/docs/research.md#open-evidence-gaps) and an aggregate-only run of the private-corpus harness ([private opt-in corpus check](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#private-opt-in-corpus-check)); neither is code, and both are for a person. |
+| 2. Published limits, stable command and error contracts, platform extraction guarantees backed by adversarial tests | **Partially met** | Limits are published as a contract ([Limits](https://github.com/watt-mind/openKRX/blob/develop/docs/architecture.md#limits)) and held by the [scaling guard](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#the-scaling-guard). The command contract, the JSON envelope with `schema_version` 1 and the nine [exit statuses](https://github.com/watt-mind/openKRX/blob/develop/docs/architecture.md#exit-statuses) are pinned byte for byte by the [golden output contract](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#golden-output-contract) and by `scripts/check-codes.py`. Adversarial tests exist: the truncation and mutation [sweeps](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#sweeps), [property-based tests](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#property-based-tests), five [fuzz targets](https://github.com/watt-mind/openKRX/blob/develop/docs/testing.md#fuzzing), and the link and reparse-point cases including the Windows junction tests. | Two extraction guarantees are stated rather than tested: the check-to-create race needs `openat2`-style resolution, and a Windows *symbolic* link is still covered only by the shared attribute path ([residual risks of the output layer](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#residual-risks-of-the-output-layer)). Closing either, plus a fuzzing campaign with a persisted corpus rather than the bounded lane, moves this row. |
+| 3. Required CI green on the release commit, including dependency/security review and MSRV | **Met per commit; unproven for a release commit that does not exist yet** | The nine required checks are named in [.factory.yaml](https://github.com/watt-mind/openKRX/blob/develop/.factory.yaml) and run in [ci.yml](https://github.com/watt-mind/openKRX/actions/workflows/ci.yml): format and lint, documentation, tests on three operating systems, the golden output contract, `Minimum supported Rust (1.88)`, `Dependencies` (`cargo deny` over [deny.toml](https://github.com/watt-mind/openKRX/blob/develop/deny.toml)), `Coverage` against the 90 % floor, plus the bounded fuzz lane. [security.yml](https://github.com/watt-mind/openKRX/actions/workflows/security.yml) adds Gitleaks over the full history, `actionlint`, the advisory scan and CodeQL. | Nothing structural. The gate is satisfied only by a green required run on the exact commit that is tagged, so it is re-checked at release time, on the `develop` → `master` merge commit. [mutants.yml](https://github.com/watt-mind/openKRX/actions/workflows/mutants.yml) and [fuzz.yml](https://github.com/watt-mind/openKRX/actions/workflows/fuzz.yml) are weekly and deliberately not required; a red weekly lane is a reason to stop, not a blocking check. |
+| 4. Public fixtures and dependency licences, privacy boundaries, documentation, changelog, vulnerability reporting | **Met** | Fixtures are synthetic originals with recorded provenance and a generator ([tests/fixtures/README.md](https://github.com/watt-mind/openKRX/blob/develop/tests/fixtures/README.md)) under their own MIT [licence](https://github.com/watt-mind/openKRX/blob/develop/tests/fixtures/LICENSE); dependency licences are allow-listed in [deny.toml](https://github.com/watt-mind/openKRX/blob/develop/deny.toml) and enforced by the required `Dependencies` check. Privacy boundaries: content-free diagnostics with canary tests ([command-line input layer](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#threat-model-mapping-command-line-input-layer)), the [data and key policy](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#data-and-key-policy) and the [private-corpus policy](https://github.com/watt-mind/openKRX/blob/develop/docs/roadmap.md#private-corpus-policy-for-maintainers). The documentation set is gated by `check-doc-links.py`, `check-codes.py` and markdownlint. [CHANGELOG.md](https://github.com/watt-mind/openKRX/blob/develop/CHANGELOG.md) is Keep a Changelog and is the release notes. Vulnerability reporting is GitHub private advisories ([Reporting](https://github.com/watt-mind/openKRX/blob/develop/SECURITY.md#reporting)). | Nothing outstanding. A new committed binary fixture, a dependency outside the allow-list, or a diagnostic that carries a value would reopen the row. |
+| 5. A separate release change: versioning, provenance, checksums, package contents, smoke tests | **Met** | [release.yml](https://github.com/watt-mind/openKRX/blob/develop/.github/workflows/release.yml) is that change, reviewed on its own. `plan` re-reads the workspace version through `cargo metadata` and fails when the tag is not exactly `v<version>`; `build` produces six archives; `checksums` writes one `SHA256SUMS`; `attest` produces SLSA build provenance; `smoke` verifies each archive's checksum, contents and packaged `SKILL.md` and runs the binary on its own architecture. The whole path is rehearsable as a dry run, and the workflow publishes nothing. | The `attest` and `release` pair is the one part a dry run cannot exercise, because both have effects outside the run; the first real tag is what exercises it. |
+| 6. A reviewed `develop` → `master` release pull request merged before tagging | **Not met** | No release pull request exists, no tag exists, and `master` has never received a release merge. The procedure is written down in [Cutting a release](#cutting-a-release) and the tag is created by hand. | Opening the `develop` → `master` pull request, having a human review it and merging it. This gate cannot be satisfied in advance; it is satisfied by doing it. |
+
+### Gate 1, stated plainly
+
+**Independent conformance evidence is absent, and no amount of further
+internal testing produces it.** Three primary sources describe three
+different container layouts and none supersedes the others, so A19 to A22
+and M11 to M15 stay open; five of them are reported as `Unresolved` by a
+named check and four are not asserted at all. No public sample `.krx`
+archive, no independent implementation, no conformance suite and no PRONOM
+record was found on 2026-09-09. Every fixture in this repository is
+independently authored from openKRX's own reading of the documents, so a
+rule read wrongly would be read wrongly by the fixture too.
+
+The two routes out are the private-corpus report — the aggregate-only
+harness a maintainer may run locally over real packages, which can turn a
+class count into a rule but never into a fixture — and the outreach
+questions in [research.md](research.md#open-evidence-gaps): one to the
+format owner about the layout, one for the SPOCS D2.2 deliverable. Both are
+for a person to make.
+
+Therefore **a first release can only be a pre-release, labelled as such**.
+It may ship a reader, a protected extractor, a deterministic writer and a
+deterministic repacker whose behaviour is documented and tested; it may not
+be presented as conforming, interoperable, secure or production-ready, and
+nothing in the archives or in the release body may say that a package
+openKRX reads or writes is acceptable to any service.
+
+## A first pre-release, if one is cut
+
+Nothing below is scheduled. It is the concrete shape a first release would
+take, so that cutting one is a decision rather than a research task.
+
+### The version
+
+`0.1.0-alpha.1`, replacing the current `0.1.0-dev.0` in the
+`[workspace.package]` table of the root `Cargo.toml`. `publish = false`
+stays: no crates.io publish, no registry credential and no installation
+instructions are part of this, and lifting `publish = false` remains a
+separate reviewed change with its own `cargo-semver-checks` decision.
+
+Under [SemVer](https://semver.org/spec/v2.0.0.html) §9 and §11 a version
+carrying a pre-release identifier has *lower* precedence than the normal
+version it precedes, so `0.1.0-alpha.1 < 0.1.0`, and dot-separated
+identifiers are compared left to right — `0.1.0-alpha.1 < 0.1.0-alpha.2 <
+0.1.0-beta.1 < 0.1.0`. The alphanumeric comparison also means
+`0.1.0-alpha.1` sorts *below* the placeholder `0.1.0-dev.0` it replaces,
+because `alpha` precedes `dev` in ASCII order. Nothing has ever been
+released, no consumer resolves either string and neither has a tag, so that
+ordering has no effect on anyone; it is recorded here so that no one later
+reads the bump as an increase.
+
+The tag is `v0.1.0-alpha.1`, and it must equal `v` followed by the workspace
+version exactly. The `plan` job reads the version back through
+`cargo metadata` and fails the run before anything is built when the two
+disagree, so a mistyped tag stops the release rather than shipping archives
+whose file names contradict the binaries inside them.
+
+### What moves in the changelog
+
+The whole `[Unreleased]` section moves under one new
+`## [0.1.0-alpha.1] - <date>` heading, keeping its `### Added`,
+`### Changed`, `### Removed` and `### Fixed` subsections in place — that is
+every entry currently there, from the profile and the bounded inventory
+through the reader commands, protected extraction, the deterministic writer
+and `repack`, to the testing and release machinery. The changelog is the
+release notes, so that section becomes the draft release body verbatim; a
+new empty `[Unreleased]` heading is left above it.
+
+Adding a version heading also ends the documented concession described in
+[The release notes script](#the-release-notes-script): once any version
+section exists, `release-notes.py --check X.Y.Z` no longer accepts
+`[Unreleased]` as a substitute.
+
+### What the run would produce
+
+Exactly what [What ships](#what-ships) lists, and nothing else: six archives
+(`openkrx-0.1.0-alpha.1-<triple>.tar.gz` for the five Unix targets and
+`.zip` for `x86_64-pc-windows-msvc`), each containing the binary, `LICENSE`,
+`README.md`, `CHANGELOG.md` and the `SKILL.md` the packaged binary wrote;
+one `SHA256SUMS` over all six; a SLSA build-provenance attestation per
+archive in GitHub's attestation store; and a **draft** GitHub release
+carrying the archives, `SHA256SUMS` and the changelog section as its body.
+No crate is published anywhere.
+
+### The human steps
+
+Copied from [Cutting a release](#cutting-a-release); nothing here is new
+procedure.
+
+1. On a branch off `develop`, set `version = "0.1.0-alpha.1"` in
+   `[workspace.package]`, run `cargo update --workspace` so `Cargo.lock`
+   follows, move the `[Unreleased]` entries under the new heading, and
+   confirm the notes with `python3 scripts/release-notes.py 0.1.0-alpha.1`.
+   Open the pull request against `develop` and let CI pass.
+2. Open the release pull request from `develop` to `master`, review it, and
+   merge it. This is gate 6.
+3. Tag `master` after the merge, by hand:
+
+   ```sh
+   git fetch origin
+   git tag -a v0.1.0-alpha.1 origin/master -m "openKRX 0.1.0-alpha.1"
+   git push origin v0.1.0-alpha.1
+   ```
+
+4. Watch the run: `plan`, six `build` legs, six `smoke` legs, `checksums`,
+   `attest`, `release`. The smoke job asserts, among the rest, that
+   `validate-structure` over the consistent fixture still exits 4.
+5. Publish the draft by hand, **as a pre-release**. The workflow creates the
+   draft without a pre-release marker, so the flag is set at publication:
+
+   ```sh
+   gh release view v0.1.0-alpha.1
+   gh release edit v0.1.0-alpha.1 --draft=false --prerelease
+   ```
+
+   Until that command is run, no user-visible release exists. The release
+   body is the changelog section, so the limitations a reader needs — the
+   nine unresolved rules, the absence of any conformance claim — have to be
+   legible there before the draft is published.
+
 ## What ships
 
 One human action starts a release — pushing a tag — and one ends it —
