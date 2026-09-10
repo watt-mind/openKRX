@@ -179,19 +179,40 @@ impl Drop for Scratch {
 /// is a `cmd` builtin, so a subprocess stands in for the reparse-point call
 /// this workspace cannot make while `unsafe_code` is forbidden.
 ///
-/// Returns `false`, after printing one loud `SKIPPED:` line, when `mklink`
-/// itself did not produce the junction. A caller must return early on `false`
-/// rather than assert, so that a runner without the builtin says so in the
-/// log instead of failing a rule it never exercised.
+/// Returns `false`, after printing one `SKIPPED` line naming the test, when
+/// `mklink` itself did not produce the junction. A caller must return early on
+/// `false` rather than assert, so that a runner without the builtin says so
+/// instead of failing a rule it never exercised. `println!` rather than
+/// `eprintln!` because libtest captures both and shows what it captured on
+/// failure or under `--show-output`, and `--nocapture` passes it straight
+/// through; the word SKIPPED is there to be greppable in a log where a
+/// skipped case would otherwise read as a pass, and
+/// the test name — read from the thread libtest runs the case on — says which
+/// rule went unexercised.
 ///
 /// `cmd` wants backslashes. Every path a test builds comes from `Path::join`,
 /// so its separators are already the platform's; the replacement covers only a
 /// forward slash the temporary root itself might carry.
+///
+/// Both paths are asserted to hold none of `&^|<>"` before anything is
+/// spawned. They are scratch paths this module composed, so a metacharacter
+/// could only arrive from the temporary root, and `cmd` would read one as
+/// syntax rather than as part of a name: a loud failure is the honest outcome
+/// there, not a junction quietly made somewhere else.
 #[cfg(windows)]
 #[must_use]
 pub fn junction(link: &Path, target: &Path) -> bool {
+    /// The characters `cmd` reads as syntax rather than as part of a name.
+    const METACHARACTERS: [char; 6] = ['&', '^', '|', '<', '>', '"'];
+
     fn backslashes(path: &Path) -> String {
-        path.to_string_lossy().replace('/', "\\")
+        let text = path.to_string_lossy().replace('/', "\\");
+        assert!(
+            !text.contains(METACHARACTERS),
+            "a path bound for `cmd /c mklink /J` holds one of {METACHARACTERS:?}, \
+which `cmd` would read as syntax"
+        );
+        text
     }
 
     let made = Command::new("cmd")
@@ -207,7 +228,13 @@ pub fn junction(link: &Path, target: &Path) -> bool {
     match made {
         Ok(output) if output.status.success() && std::fs::symlink_metadata(link).is_ok() => true,
         _ => {
-            eprintln!("SKIPPED: mklink /J unavailable");
+            // libtest names each test's thread after the test, which is how a
+            // helper this far from the case can still say which one it
+            // skipped. The placeholder covers only a thread with no name at
+            // all, so that the line keeps its shape rather than losing a
+            // field.
+            let test = std::thread::current().name().unwrap_or("<test>").to_owned();
+            println!("SKIPPED {test}: mklink /J unavailable");
             false
         }
     }

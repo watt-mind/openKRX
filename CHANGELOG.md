@@ -25,8 +25,10 @@ and such a change is recorded here explicitly.
   the destination (`output.symlink_in_path`), a junction as the destination or
   the output directory (`output.destination_symlink`), and a junction at the
   planned output path (`output.exists`). A runner without the builtin prints
-  `SKIPPED: mklink /J unavailable` rather than passing quietly. No behaviour
-  changed; `docs/testing.md` and `SECURITY.md` record the narrowed skip.
+  `SKIPPED <test>: mklink /J unavailable`, which libtest shows on failure or
+  under `--show-output` and which is greppable in a log where a rule that went
+  unexercised would otherwise read as a pass. No behaviour changed;
+  `docs/testing.md` and `SECURITY.md` record the narrowed skip.
 
 - **Property-based tests for repacking.**
   `crates/openkrx-core/tests/property_repack.rs` asserts over generated

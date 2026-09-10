@@ -623,7 +623,7 @@ fn repacking_onto_the_package_being_edited_is_refused() {
 /// reparse point `mklink /J` makes without elevation, which is what lets this
 /// runner reach `FILE_ATTRIBUTE_REPARSE_POINT` in
 /// `crate::extract::preflight::is_link` at all. A runner without `mklink`
-/// leaves a `SKIPPED:` line and the test returns.
+/// leaves a `SKIPPED <test>:` line and the test returns.
 #[cfg(windows)]
 mod junctions {
     use super::{Scratch, diagnostic, edits_file, repack_json, source, status};

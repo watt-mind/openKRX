@@ -105,10 +105,13 @@ A consumer matches on the stable dotted code, and must treat an unknown code
 as a failure rather than as a success.
 
 Missing public documentation fails the build: both crate roots deny
-`missing_docs`, `openkrx-core` additionally denies
-`rustdoc::broken_intra_doc_links` and `rustdoc::private_intra_doc_links`, and
-`openkrx-cli` — a binary, every item of which is private, so `missing_docs`
-alone could never fire there — denies
+`missing_docs` and `rustdoc::broken_intra_doc_links`. `openkrx-core`
+additionally denies `rustdoc::private_intra_doc_links`, which `openkrx-cli`
+leaves at its default deliberately: a binary is documented with
+`--document-private-items`, so the links from its root to the module behind
+each command do resolve, and denying the lint would forbid exactly the links
+that make that documentation navigable. `openkrx-cli` — a binary, every item
+of which is private, so `missing_docs` alone could never fire there — denies
 `clippy::missing_docs_in_private_items` in its place.
 
 ### Module map: `openkrx-core`
@@ -953,6 +956,16 @@ possible only with no references, since the references live inside it — keeps
 none instead of gaining an empty one. An empty container and no container at
 all are different documents under M7, and repacking preserves whichever it was
 given.
+
+That holds for an edit that adds nothing. **Adding an attachment to a dispatch
+that carried no container and then removing it again does not restore the
+original bytes**: the writer must emit the container to hold the added
+reference, and the later removal cannot know the original had none, because
+nothing in the package it is given says so. The result differs by exactly that
+one empty element and by nothing else, and a second add-and-remove over it is
+an exact identity — the shift happens once and never drifts further. It is
+documented behaviour rather than a defect, pinned by the property test in
+[testing.md](testing.md#the-container-asymmetry).
 
 **A package refused this way is not damaged.** `inspect`, `list`,
 `validate-structure` and `extract` all still read it; the refusal says what
