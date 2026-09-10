@@ -662,6 +662,16 @@ and such a change is recorded here explicitly.
 
 ### Changed
 
+- **Documentation describes fuzzing, the extraction guarantees and the
+  required checks as they are on `develop` (KRX-17).** Wording only, no
+  behaviour change: the five fuzz targets, the weekly campaign over a
+  cumulative corpus and the retained-regression replay replace the
+  "two targets, smoke lane only" description in `docs/architecture.md`,
+  `docs/roadmap.md`, `docs/index.md`, `docs/testing.md` and `SECURITY.md`;
+  the extraction residual risks now name the portable arm and the mount a
+  component walk cannot refuse; and `docs/testing.md` lists
+  `scripts/check-schema.py` among the checks `scripts/check.sh` runs and
+  carries the current stable-code head list.
 - **Extraction resolves and undoes through the destination descriptor on every
   Unix target, not Linux alone (KRX-15).** The descriptor-relative arm was
   Linux-only, because `openat2(2)` is; it now covers `cfg(unix)`, with

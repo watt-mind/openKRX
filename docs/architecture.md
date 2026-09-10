@@ -68,12 +68,14 @@ below is still absent.
 - ZIP64, encryption, multi-disk archives and every compression method other
   than stored and deflate. These are refused, not deferred; see
   [Parser safety model](#parser-safety-model).
-- Fuzzing beyond a smoke lane. Both readers have a `cargo-fuzz` target,
-  `inventory` and `xml_metadata`, and CI runs each for 30 seconds per push —
-  a smoke budget that proves the harness executes, not a campaign. There is
-  no seed corpus, no scheduled long run, and no target for `profile::check`
-  or `extract::plan`. The exhaustive truncation and single-byte mutation
-  sweeps remain the compensating control; see
+- A campaign on every push. Five `cargo-fuzz` targets exist — `inventory`,
+  `xml_metadata`, `structure`, `extract_plan` and `create_round_trip` — but
+  the per-push lane runs each for 30 seconds from a seeded corpus, a smoke
+  budget that proves the harness executes rather than a campaign. The long
+  run is the weekly lane, which fuzzes each target for a larger budget from a
+  corpus carried forward from the previous campaign, and every retained crash
+  is replayed on every push. The exhaustive truncation and single-byte
+  mutation sweeps remain the compensating control on the per-push path; see
   [testing.md](testing.md#fuzzing).
 
 ## Crate shape

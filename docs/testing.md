@@ -161,8 +161,10 @@ That is the gate. It runs, in order: `cargo fmt --all --check`;
 `cargo test --workspace --locked`; `cargo doc --workspace --no-deps --locked`
 with `RUSTDOCFLAGS="-D warnings"`; `cargo machete`;
 `cargo deny --all-features check`; `python3 scripts/check-doc-links.py`;
-`python3 scripts/check-codes.py`; `python3 scripts/check-file-length.py`;
-markdownlint; and `actionlint`.
+`python3 scripts/check-codes.py`; [`python3
+scripts/check-schema.py`](#the-envelope-schema) when the `jsonschema` package
+is importable, and a loud skip line naming the install command when it is
+not; `python3 scripts/check-file-length.py`; markdownlint; and `actionlint`.
 
 To run one part by hand:
 
@@ -194,12 +196,15 @@ coverage rather than only raise the aggregate. A test that merely repeats a
 trivial implementation detail raises the number without adding evidence and
 should not be written.
 
-Three checks are Python, standard library only, and run offline:
+Four checks are Python and run offline. Three need the standard library
+alone; the fourth needs the `jsonschema` package, which is a repository tool
+rather than a dependency of either crate:
 
 | Script | What it enforces |
 | --- | --- |
 | `scripts/check-doc-links.py` | Every relative Markdown link resolves, and every heading anchor it names exists. External links are never fetched, so the check stays deterministic. |
 | `scripts/check-file-length.py` | Tracked Rust files stay under 800 lines, or 1 500 for test files. |
+| `scripts/check-schema.py` | Every JSON envelope the goldens pin, and six failure envelopes it renders itself, validates against [the published schema](#the-envelope-schema). Needs `jsonschema`; skipped loudly by `scripts/check.sh` when it is not importable, and required in CI, which installs it. |
 | `scripts/check-codes.py` | Every stable code literal in `crates/*/src/**` appears in [codes.md](codes.md), every code that document lists still exists in the sources, and the heads the catalogue documents are exactly the heads the script's `HEADS` line names. |
 
 `scripts/check-codes.py` is the maintenance gate for the code catalogue. It
@@ -209,8 +214,9 @@ leaving a stale row behind, both stop the build. Run it alone with
 `python3 scripts/check-codes.py`; on success it prints one line naming how
 many codes are catalogued.
 
-The head list — `archive`, `extract`, `input`, `metadata`, `output` — is
-written once, in the `HEADS` line of that script, and two gates hold the rest
+The head list — `archive`, `create`, `extract`, `input`, `manifest`,
+`metadata`, `output`, `repack` — is written once, in the `HEADS` line of that
+script, and two gates hold the rest
 of the tree to it. The script builds its extraction patterns from `HEADS` and
 fails when the heads [codes.md](codes.md) documents in backticks are not
 exactly those. The CLI catalogue test
@@ -497,9 +503,13 @@ exists to produce. CI never writes this file.
 
 ## Sweeps
 
-Two exhaustive sweeps sit under the [fuzz targets](#fuzzing) and cover what a
-short bounded fuzzing run cannot: they are exhaustive rather than random,
-cheap, deterministic, and they run in the normal test suite on every platform.
+Two exhaustive sweeps sit under the [fuzz targets](#fuzzing) and cover what
+the bounded per-push fuzzing run cannot: they are exhaustive rather than
+random, cheap, deterministic, and they run in the normal test suite on every
+platform. The random half is split across two lanes — the 30-second
+[per-push lane](#the-ci-lane) and the [weekly campaign](#the-weekly-campaign-lane)
+over a [cumulative corpus](#the-cumulative-corpus) — and neither is
+exhaustive over anything, which is why these sweeps stay.
 
 **Truncation.** For each representative input, every prefix — every length
 from zero up to one byte short of the whole — is fed to the parser, and each
