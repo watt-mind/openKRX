@@ -369,7 +369,7 @@ fn refused_creation(failure: &Failure, cleanup: Cleanup, json: bool) -> i32 {
         let text = render::json::failure_with_cleanup(CREATE, failure, cleanup);
         input::line(&mut std::io::stdout(), &text);
     }
-    input::line(&mut std::io::stderr(), &failure.line());
+    input::line(&mut std::io::stderr(), &failure.line(CREATE));
     input::line(&mut std::io::stderr(), &render::human::cleanup(cleanup));
     failure.category.status()
 }
@@ -418,7 +418,7 @@ fn refused(failure: &Failure, cleanup: Cleanup, json: bool) -> i32 {
         let text = render::json::failure_with_cleanup(EXTRACT, failure, cleanup);
         input::line(&mut std::io::stdout(), &text);
     }
-    input::line(&mut std::io::stderr(), &failure.line());
+    input::line(&mut std::io::stderr(), &failure.line(EXTRACT));
     input::line(&mut std::io::stderr(), &render::human::cleanup(cleanup));
     failure.category.status()
 }
@@ -435,7 +435,7 @@ fn reader(command: Reader, file: &str, json: bool) -> i32 {
                 let text = render::json::failure(command.name(), &failure);
                 input::line(&mut std::io::stdout(), &text);
             }
-            input::line(&mut std::io::stderr(), &failure.line());
+            input::line(&mut std::io::stderr(), &failure.line(command.name()));
             failure.category.status()
         }
     }

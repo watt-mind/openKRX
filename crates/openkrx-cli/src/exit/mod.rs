@@ -372,13 +372,33 @@ mod tests {
         }
         let scoped = Failure::output_at(super::OUTPUT_EXISTS, 7);
         assert_eq!(scoped.message(), "output.exists at entry 7");
-        assert!(scoped.line().ends_with("(exit 9)"));
-        assert!(scoped.line().contains("nothing is ever overwritten"));
+        assert!(scoped.line("extract").ends_with("(exit 9)"));
+        assert!(
+            scoped
+                .line("extract")
+                .contains("nothing is ever overwritten")
+        );
         // Each output code says what happened rather than sharing one
         // sentence that describes all nine conditions at once.
-        let missing = Failure::output(super::OUTPUT_DESTINATION_MISSING).line();
+        let missing = Failure::output(super::OUTPUT_DESTINATION_MISSING).line("extract");
         assert!(missing.contains("does not exist"));
         assert!(!missing.contains("overwritten"), "{missing}");
+        // And the four codes both writing commands reach name the argument the
+        // caller actually typed: telling someone who ran `create` to extract
+        // into an empty directory is advice about a command they did not run.
+        for (code, extract, create) in [
+            (super::OUTPUT_DESTINATION_MISSING, "--into", "--out"),
+            (super::OUTPUT_DESTINATION_NOT_A_DIRECTORY, "--into", "--out"),
+            (super::OUTPUT_DESTINATION_SYMLINK, "extraction", "create"),
+            (super::OUTPUT_EXISTS, "extract into", "--out"),
+        ] {
+            let extracting = Failure::output(code).line("extract");
+            let creating = Failure::output(code).line("create");
+            assert!(extracting.contains(extract), "{code}: {extracting}");
+            assert!(!extracting.contains("--out"), "{code}: {extracting}");
+            assert!(creating.contains(create), "{code}: {creating}");
+            assert!(!creating.contains("--into"), "{code}: {creating}");
+        }
     }
 
     #[test]
@@ -403,9 +423,12 @@ mod tests {
                     .message()
                     .ends_with("at field /metadata/source_system")
             );
-            assert!(failure.line().ends_with("(exit 6)"));
+            assert!(failure.line("create").ends_with("(exit 6)"));
             // Each code carries its own sentence rather than the category's.
-            assert!(!failure.line().contains("truncated in transit"), "{code}");
+            assert!(
+                !failure.line("create").contains("truncated in transit"),
+                "{code}"
+            );
         }
         let scoped = Failure::manifest_at(super::MANIFEST_TYPE, "/attachments/path", 2);
         assert_eq!(scoped.attachment_index, Some(2));
@@ -425,8 +448,8 @@ mod tests {
         assert_eq!(failure.code, "create.internal.self_check_failed");
         assert_eq!(failure.category, Category::Package);
         assert_eq!(failure.category.status(), 6);
-        assert!(failure.line().contains("defect in openkrx"));
-        assert!(failure.line().contains("nothing was left behind"));
+        assert!(failure.line("create").contains("defect in openkrx"));
+        assert!(failure.line("create").contains("nothing was left behind"));
     }
 
     #[test]
@@ -493,7 +516,7 @@ mod tests {
 
     #[test]
     fn a_diagnostic_line_explains_its_category_without_naming_the_input() {
-        let line = Failure::over_input_cap().line();
+        let line = Failure::over_input_cap().line("inspect");
         assert!(line.starts_with("openkrx: input.over_limit.archive_bytes"));
         assert!(line.contains("could not be read"));
         assert!(line.ends_with("(exit 5)"));
@@ -610,7 +633,7 @@ extracts it and this test classifies it"
         assert_eq!(failure.category, Category::Package);
         assert_eq!(failure.category.status(), 6);
         assert!(!failure.classified);
-        let line = failure.line();
+        let line = failure.line("inspect");
         assert!(line.contains("does not classify"));
         assert!(!line.contains("truncated in transit"));
 
@@ -619,7 +642,7 @@ extracts it and this test classifies it"
             entry: None,
         });
         assert!(known.classified);
-        assert!(known.line().contains("truncated in transit"));
+        assert!(known.line("inspect").contains("truncated in transit"));
     }
 
     #[test]

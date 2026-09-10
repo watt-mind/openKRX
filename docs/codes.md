@@ -88,6 +88,13 @@ No code carries a path. The destination is the caller's own argument and a
 diagnostic that repeated it could not be logged safely; the entry index says
 which planned file the failure concerns, wherever the failure belongs to one.
 
+The four codes both commands reach — `output.destination_missing`,
+`output.destination_not_a_directory`, `output.destination_symlink` and
+`output.exists` — carry a different sentence for each of them in human mode,
+because they are fixed by different actions: telling a caller who ran
+`create` to extract into an empty directory is advice about a command they
+did not run. The code and the exit status are the same either way.
+
 The **fields** column is `entry` alone: an output failure carries no limit
 value, because none of these conditions is a ceiling. A `create` refusal
 carries no entry index either — nothing has been written when it is decided.

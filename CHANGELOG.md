@@ -407,11 +407,13 @@ and such a change is recorded here explicitly.
   Both are absent from every other command's diagnostics, and neither
   carries a value from the manifest, so `schema_version` stays `1`: adding a
   field does not raise it.
-- **The three shared `output.*` sentences now cover both writing commands.**
-  `output.destination_missing`, `.destination_not_a_directory` and
-  `.exists` name the `--into` directory and the `--out` file rather than
-  `--into` alone. The codes and their exit status are unchanged; the human
-  sentences, and the two `extract` no-clobber goldens, changed.
+- **The four `output.*` codes both writing commands reach now carry a
+  sentence per command.** `output.destination_missing`,
+  `.destination_not_a_directory`, `.destination_symlink` and `.exists` are
+  produced by `extract` and by `create`, and are fixed by different actions,
+  so each names the argument the caller actually typed. `extract`'s sentences
+  are unchanged to the byte; `create`'s name `--out`. The codes, their exit
+  status and every golden of a reading or extracting command are unchanged.
 
 - Archive inventory internals: the end-of-central-directory record is read
   as its 22 fixed bytes, proven present before parsing begins, so locating

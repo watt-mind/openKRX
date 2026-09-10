@@ -52,10 +52,7 @@ fn a_destination_that_is_not_a_directory_is_told_what_the_argument_names() {
     assert_eq!(status(&output), 9);
     let line = line(&output);
     assert!(
-        line.contains(
-            "the --into argument, or the parent of the --out argument, names something that is \
-not a directory"
-        ),
+        line.contains("the --into argument names something that is not a directory"),
         "{line}"
     );
     assert!(

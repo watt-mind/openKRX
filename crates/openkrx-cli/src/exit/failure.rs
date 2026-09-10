@@ -32,22 +32,38 @@ const UNCLASSIFIED_EXPLANATION: &str = "the package was refused with a code this
 /// sentence is content-free: no path, no file name, no operating-system
 /// message, so the line stays safe to log wherever the others are.
 ///
-/// Both writing commands share the `output.*` codes, so each sentence covers
-/// the destination directory `extract --into` names and the file
-/// `create --out` names without naming either.
-const fn advice(code: &str) -> Option<&'static str> {
+/// **The four codes both writing commands share are keyed on `command` too.**
+/// `extract` and `create` reach `output.destination_missing`,
+/// `.destination_not_a_directory`, `.destination_symlink` and `.exists` by
+/// different routes and are fixed by different actions, and a sentence that
+/// covered both would tell a caller who ran one command to do something with
+/// the other's flag. Each therefore names the argument the caller actually
+/// typed, and nothing else.
+fn advice(code: &str, command: &str) -> Option<&'static str> {
+    let creating = command == "create";
     Some(match code.as_bytes() {
+        b"output.destination_missing" if creating => {
+            "the directory the --out file would go in does not exist, and \
+create never creates one: create it first, or correct the --out argument"
+        }
         b"output.destination_missing" => {
-            "the destination directory does not exist, and openkrx never \
-creates one: create it first, or correct the --into argument, or the --out \
-argument's parent directory"
+            "the destination directory does not exist, and extract never \
+creates one: create it first, or correct the --into argument"
+        }
+        b"output.destination_not_a_directory" if creating => {
+            "the --out argument's parent names something that is not a \
+directory"
         }
         b"output.destination_not_a_directory" => {
-            "the --into argument, or the parent of the --out argument, names \
-something that is not a directory"
+            "the --into argument names something that is not a directory"
+        }
+        b"output.destination_symlink" if creating => {
+            "the directory the --out file would go in is a symbolic link or a \
+reparse point; create writes only into a real directory, so name the \
+directory itself"
         }
         b"output.destination_symlink" => {
-            "the destination is a symbolic link or a reparse point; openkrx \
+            "the destination is a symbolic link or a reparse point; extraction \
 writes only into a real directory, so name the directory itself"
         }
         b"output.partial_marker_present" => {
@@ -55,10 +71,15 @@ writes only into a real directory, so name the directory itself"
 interrupted run, so what is in it may be incomplete: review it and remove \
 that file, or extract into a different directory"
         }
+        b"output.exists" if creating => {
+            "something is already at the path --out names; nothing is ever \
+overwritten, so name a file that does not exist yet, or move what is there \
+out of the way first"
+        }
         b"output.exists" => {
-            "something is already at a path this run would create; nothing is \
-ever overwritten, so extract into an empty directory, or name an --out file \
-that does not exist yet, or move what is there out of the way first"
+            "a file this package would create is already in the destination; \
+nothing is ever overwritten, so extract into an empty directory, or move the \
+existing file out of the way first"
         }
         b"output.symlink_in_path" => {
             "a directory this package would write through is a symbolic link \
@@ -254,10 +275,14 @@ impl Failure {
     /// The one line human mode writes on stderr: the code, its numbers, and
     /// one sentence saying what the category means. It carries no part of the
     /// input, so it stays safe to log.
+    ///
+    /// `command` is the name the envelope carries, and it selects between the
+    /// two sentences the codes `extract` and `create` share: a caller who ran
+    /// one of them must not be told to fix the other one's argument.
     #[must_use]
-    pub fn line(&self) -> String {
+    pub fn line(&self, command: &str) -> String {
         let explanation = if self.classified {
-            advice(self.code).unwrap_or_else(|| self.category.explanation())
+            advice(self.code, command).unwrap_or_else(|| self.category.explanation())
         } else {
             UNCLASSIFIED_EXPLANATION
         };
