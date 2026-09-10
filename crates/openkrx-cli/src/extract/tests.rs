@@ -1,30 +1,41 @@
-//! Unix: the check-to-create window, exercised rather than described.
+//! Unix: the check-to-create windows, exercised rather than described.
 //!
 //! Every other test of the output layer is a subprocess test in
 //! `tests/extract.rs`, because the contract worth testing is the observable
-//! one. These two cannot be: the thing under test is what happens *inside* one
+//! one. These cannot be: the thing under test is what happens *inside* one
 //! run, between the moment preflight accepted a destination and the moment the
 //! first file is created, and no subprocess can be interrupted there.
 //!
-//! [`super::run_between`] is the seam, and it is an ordinary private function
-//! of this module: a closure called once in that window, and the chooser for
-//! the path-resolution arm. `super::run` passes a closure that does nothing
-//! and the real chooser, so what these tests drive is the shipped code with no
-//! `cfg(test)` branch and no feature in it.
+//! There are three seams, and each is an ordinary private function or
+//! parameter rather than a `cfg(test)` branch or a feature, so what these
+//! tests drive is the shipped code. [`super::run_between`] takes a closure
+//! called once after the last directory and before the first file, and the
+//! chooser for the path-resolution arm; `super::run` passes a closure that
+//! does nothing and the real chooser.
+//! [`super::writer::directories_between`] takes a closure called on the
+//! portable arm between each `create_dir` and the `symlink_metadata` that
+//! reads it back — the narrower window the portable arm has and the `openat2`
+//! arm does not, and the only way to reach the branch that refuses a
+//! directory this run had already created.
 //!
 //! They are `cfg(unix)`, because the arm under test is: the destination is
 //! held open and every path resolved from it on every Unix target, by the
 //! kernel where `openat2` is available and by the component walk elsewhere.
 //! The two that drive the `openat2` probe are Linux-only, because no other
-//! target has a stronger mode to fall back from. The portable arm's own rules
-//! are held by the subprocess tests on all three platforms.
+//! target has a stronger mode to fall back from. The one that drives the
+//! portable arm's create-then-check window builds a `Resolver::Portable`
+//! itself, so it holds that arm on a Unix host without waiting for a kernel
+//! that falls back to it. The portable arm's other rules are held by the
+//! subprocess tests on all three platforms.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use openkrx_core::extract::{self, ExtractLimits};
 use openkrx_core::synthetic::{Archive, Entry};
 use openkrx_core::{Limits, archive};
 
+use super::cleanup::{Cleanup, Ledger};
 use super::resolver::Resolver;
 use crate::exit::{OUTPUT_NOT_A_DIRECTORY, OUTPUT_SYMLINK_IN_PATH};
 
@@ -335,6 +346,72 @@ gave nothing up and reports nothing given up"
     assert_eq!(data.files_written, 1);
     assert_eq!(data.directories_created, 1);
     assert!(data.marker_removed);
+}
+
+#[test]
+fn a_directory_this_run_created_and_then_refused_is_accounted_for() {
+    let scratch = Scratch::new("portable-ledger");
+    let destination = scratch.dir("destination");
+    let outside = scratch.dir("outside");
+
+    // The portable arm's own window, which the `openat2` arm does not have:
+    // `create_dir` has just made `destination/payload`, and before the
+    // `symlink_metadata` that reads it back a principal with write access
+    // swaps it for a link. The directory was this run's, so the refusal has to
+    // carry that fact to the ledger — a refusal that dropped it would leave
+    // the one thing this run created unaccounted for.
+    let bytes = package();
+    let inventory = archive::inventory(&bytes, &Limits::DEFAULT).expect("a readable archive");
+    let plan = extract::plan(&inventory, &ExtractLimits::DEFAULT).expect("a plannable package");
+
+    let planted = destination.join("payload");
+    let target = outside.clone();
+    let mut swap = |path: &Path| {
+        std::fs::remove_dir(path).expect("remove the directory the run created");
+        std::os::unix::fs::symlink(&target, path).expect("plant a symbolic link");
+    };
+
+    let mut ledger = Ledger::new();
+    let failure = super::writer::directories_between(
+        &destination,
+        &plan,
+        &Resolver::Portable,
+        &mut ledger,
+        &mut swap,
+    )
+    .expect_err("a directory that reads back as a link is refused");
+    assert_eq!(
+        failure.code, OUTPUT_SYMLINK_IN_PATH,
+        "the re-read caught the link, under the code the path rule already has"
+    );
+
+    // The path is in the ledger, so the undo pass reaches it. It is no longer
+    // the directory this run created, so `remove_dir` refuses it and the pass
+    // counts it as left in place rather than reaching for the link with
+    // `remove_file` or `remove_dir_all`: the caller is told the destination is
+    // not as it was found, and nothing of anyone else's is deleted. The undo
+    // takes the arm the creation took, so it is handed the same resolver.
+    let cleanup = ledger.undo(&Resolver::Portable, &destination);
+    assert_eq!(
+        cleanup,
+        Cleanup {
+            removed: 0,
+            left_in_place: 1
+        },
+        "this run's path was accounted for, and nothing was removed through \
+the link"
+    );
+    assert!(
+        std::fs::symlink_metadata(&planted)
+            .expect("the planted link is still there")
+            .file_type()
+            .is_symlink(),
+        "the undo pass did not follow or delete the link someone else planted"
+    );
+    assert!(
+        tree_is_empty(&outside),
+        "nothing outside the destination was touched"
+    );
 }
 
 #[test]

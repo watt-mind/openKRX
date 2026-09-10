@@ -54,8 +54,9 @@ pub enum Directory {
 /// found unacceptable: the portable arm creates the directory and reads it
 /// back, and what it reads back may be a link someone put there in between.
 /// The directory is this run's either way, so the ledger has to record it
-/// before the refusal is returned — otherwise the undo pass would leave
-/// behind the one thing this run did create.
+/// before the refusal is returned — otherwise the undo pass would never look
+/// at the one path this run did create, and the counts it reports would say
+/// the destination was left as it was found when it was not.
 #[derive(Debug)]
 pub struct DirectoryFailure {
     /// The refusal, with its stable code.
@@ -253,6 +254,16 @@ impl Resolver {
 
     /// Create one planned directory, or accept the real directory already there.
     ///
+    /// `after_create` is called once on the portable arm, between `create_dir`
+    /// and the `symlink_metadata` that reads the result back — the window in
+    /// which a principal with write access can swap the new directory for a
+    /// link. It is an ordinary parameter, like the one `run_between` takes:
+    /// nothing is gated on `cfg(test)` or a feature, and `writer::directories`
+    /// passes a closure that does nothing, so the shipped path is the tested
+    /// path. A test plants a link through it to reach the branch that refuses
+    /// a directory *this run created*, which is the only way `created` is ever
+    /// `true`. The Linux arm has no such window and ignores it.
+    ///
     /// # Errors
     ///
     /// A [`DirectoryFailure`] carrying `output.symlink_in_path` when a
@@ -264,11 +275,12 @@ impl Resolver {
         &self,
         destination: &Path,
         components: &[String],
+        after_create: &mut dyn FnMut(&Path),
     ) -> Result<Directory, DirectoryFailure> {
         match self {
             #[cfg(unix)]
             Self::Beneath(root) => beneath_directory(root, components),
-            Self::Portable => portable_directory(destination, components),
+            Self::Portable => portable_directory(destination, components, after_create),
         }
     }
 
@@ -348,6 +360,7 @@ impl Resolver {
 fn portable_directory(
     destination: &Path,
     components: &[String],
+    after_create: &mut dyn FnMut(&Path),
 ) -> Result<Directory, DirectoryFailure> {
     let path = join(destination, components);
     let outcome = match std::fs::create_dir(&path) {
@@ -357,6 +370,9 @@ fn portable_directory(
             return Err(DirectoryFailure::untouched(Failure::output(OUTPUT_IO)));
         }
     };
+    // The window, and the seam that lets a test stand in it. It does nothing
+    // in a real run.
+    after_create(&path);
     // Everything from here on may refuse a directory this run has already
     // created, so each refusal carries that fact rather than dropping it.
     let created = outcome == Directory::Created;

@@ -126,17 +126,40 @@ pub fn write(
 ///
 /// A refusal that *did* create the directory first — the portable arm reading
 /// back a link someone put there between the creation and the check — records
-/// it before returning, so the undo pass removes it. The count is not raised:
-/// it reports a completed run, and this run is about to fail.
+/// it before returning, so the undo pass accounts for it. It is no longer the
+/// directory this run made, so `remove_dir` refuses it and the pass reports it
+/// as left in place rather than deleting whatever took its place; what the
+/// record buys is that the caller is told, instead of the path going missing
+/// from the run's own account of itself. The count is not raised: it reports a
+/// completed run, and this run is about to fail.
 fn directories(
     destination: &Path,
     plan: &ExtractionPlan,
     resolver: &Resolver,
     ledger: &mut Ledger,
 ) -> Result<u32, Failure> {
+    directories_between(destination, plan, resolver, ledger, &mut |_| ())
+}
+
+/// The same pass, with the portable arm's create-then-check window open.
+///
+/// `after_create` is handed to [`Resolver::directory`]; see it for why the
+/// seam exists. [`directories`] passes a closure that does nothing, so a real
+/// run is the tested code with no `cfg(test)` branch in it.
+///
+/// # Errors
+///
+/// The same as [`directories`].
+pub(super) fn directories_between(
+    destination: &Path,
+    plan: &ExtractionPlan,
+    resolver: &Resolver,
+    ledger: &mut Ledger,
+    after_create: &mut dyn FnMut(&Path),
+) -> Result<u32, Failure> {
     let mut created = 0_u32;
     for components in plan.directories() {
-        match resolver.directory(destination, components) {
+        match resolver.directory(destination, components, after_create) {
             Ok(Directory::Created) => {
                 ledger.directory(components.clone());
                 created = created.saturating_add(1);

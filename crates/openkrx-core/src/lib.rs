@@ -226,7 +226,7 @@
 //! ```
 //! use openkrx_core::create::FixedTimestamp;
 //! use openkrx_core::repack::{self, AttachmentAddition, Edits};
-//! use openkrx_core::{Limits, MetadataLimits, archive};
+//! use openkrx_core::{Limits, MetadataLimits, archive, create, metadata};
 //!
 //! # use openkrx_core::create::{AttachmentInput, PackageSpec};
 //! # use openkrx_core::draft::{self, HeaderDraft};
@@ -259,6 +259,18 @@
 //! assert_eq!(plan.added(), &[2]);
 //! let edited = repack::apply(&inventory, &plan, FixedTimestamp::EPOCH, &Limits::DEFAULT)?;
 //! assert_ne!(edited, image);
+//!
+//! // Read the repacked image back rather than trusting that it differs: the
+//! // edit is only applied if the new document says so.
+//! let reread = archive::inventory(&edited, &Limits::DEFAULT)?;
+//! let position = reread
+//!     .entries()
+//!     .iter()
+//!     .position(|entry| entry.name_bytes() == create::METADATA_NAME.as_bytes())
+//!     .ok_or("no metadata document")?;
+//! let document = reread.entry_bytes(position as u32)?;
+//! let parsed = metadata::parse(&document, &MetadataLimits::DEFAULT)?;
+//! assert_eq!(parsed.header.consignment_id, "SYNTHETIC-0002");
 //! # Ok(())
 //! # }
 //! ```
