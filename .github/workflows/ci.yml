@@ -242,3 +242,86 @@ jobs:
             while IFS= read -r subject; do
               printf '%s\n' "$subject" | sh scripts/commit-msg.sh -
             done
+  api-compat:
+    name: API compatibility (informational)
+    # A report, not a gate. Neither crate is published, so no downstream build
+    # can break yet and nothing here belongs in the required checks; this job
+    # exists so that an accidental change to `openkrx-core`'s public API is
+    # visible in the pull request while that is still cheap to reconsider.
+    # `continue-on-error: true` below keeps a finding from failing the run, and
+    # the job is deliberately absent from the repository's required-check list.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The workflow-level `RUSTFLAGS: -D warnings` is dropped here on purpose:
+      # this job also compiles the *baseline* commit, which is code this pull
+      # request did not write and cannot fix. A warning there would abort the
+      # comparison instead of reporting on it. Every other job still builds the
+      # working tree with warnings denied.
+      RUSTFLAGS: ''
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # `--baseline-rev` resolves a commit in this clone, so the default
+      # single-commit fetch is not enough: the base commit must be present.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide whether the core crate changed
+        id: scope
+        run: |
+          set -euo pipefail
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- crates/openkrx-core; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable @ 2026-09-03
+        if: steps.scope.outputs.changed == 'true'
+        with:
+          # `rust-toolchain.toml` pins the same channel; naming it here only
+          # makes the job install it before the toolchain file asks for it.
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.scope.outputs.changed == 'true'
+      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+        if: steps.scope.outputs.changed == 'true'
+        with:
+          tool: cargo-semver-checks@0.50.0
+      - name: Compare the public API against the base commit
+        id: report
+        if: steps.scope.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bash scripts/api-check.sh "$BASE_SHA" 2>&1 | tee "$RUNNER_TEMP/api-report.txt"
+      - name: Publish the report
+        if: always()
+        env:
+          CHANGED: ${{ steps.scope.outputs.changed }}
+          OUTCOME: ${{ steps.report.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## API compatibility (informational)'
+            echo
+            if [ "$CHANGED" != 'true' ]; then
+              echo 'SKIPPED: `crates/openkrx-core` is unchanged against the base commit, so there is no public API to compare.'
+            else
+              if [ "$OUTCOME" = 'success' ]; then
+                echo 'PASS: `cargo-semver-checks` found no breaking change in the public API of `openkrx-core` against the base commit.'
+              else
+                echo 'BREAK: `cargo-semver-checks` reported a public API change in `openkrx-core` against the base commit. It does not fail the build, because nothing is published and there is no downstream build to break; the report below is what one would have seen.'
+              fi
+              echo
+              echo '<details><summary>cargo-semver-checks output</summary>'
+              echo
+              echo '```text'
+              cat "$RUNNER_TEMP/api-report.txt"
+              echo '```'
+              echo
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

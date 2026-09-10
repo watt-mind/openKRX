@@ -125,6 +125,16 @@ Unordered, and independent of the milestone sequence.
 - **A golden output contract** pinning the human and JSON renderings of each
   command, so an accidental change to what a reader sees fails a test rather
   than a review. In progress, and not a gate yet.
+- **A public-API gate for `openkrx-core`.** The report exists: the
+  `API compatibility (informational)` job runs `cargo-semver-checks` against
+  the pull request's base commit and writes what it found into the job
+  summary, and `scripts/api-check.sh` is the same comparison locally; see
+  [testing.md](testing.md#api-compatibility-report). What does not exist is a
+  gate. Nothing is published, so there is no released baseline and no
+  downstream build a break could break, and the job is deliberately not a
+  required check. Turning the report into a gate belongs with lifting
+  `publish = false`; the decision is recorded in
+  [releasing.md](releasing.md#semver-checks).
 - **Property tests** for the ZIP reader's coverage arithmetic, generating
   structurally valid archives and asserting that exactly the declared bytes
   are claimed.

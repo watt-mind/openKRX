@@ -243,6 +243,17 @@ Open the pull request against `develop` as usual and let CI pass.
 `master` is the stable branch and is what the tag points at. Open a pull
 request from `develop` to `master`, review it, and merge it.
 
+Before merging it, **review the API report**. The
+`API compatibility (informational)` job runs on this pull request like any
+other, with `master` as its baseline, so its job summary is the list of
+public-API changes to `openkrx-core` since the last release commit. It is not
+a required check and cannot block the merge; reading it is the step. A `BREAK`
+line is not automatically wrong — while the crate is unpublished and
+pre-1.0 nothing downstream can break — but it is the moment to decide whether
+the version being cut reflects it, and to say so in the changelog entry. The
+same comparison runs locally as `bash scripts/api-check.sh origin/master`; see
+[testing.md](testing.md#api-compatibility-report).
+
 ### 3. Tag `master` after the merge
 
 ```sh
@@ -360,7 +371,7 @@ moved, because a tag-triggered run reads the workflow from the tagged commit.
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `ci.yml` | push and pull request on `develop`/`master`; dispatch | Format, lint, docs, tests on three operating systems, the golden output contract, MSRV, dependency policy, coverage and the bounded fuzz lane. Also builds a release binary and smokes `--help`, `--version` and `capabilities --json`. |
+| `ci.yml` | push and pull request on `develop`/`master`; dispatch | Format, lint, docs, tests on three operating systems, the golden output contract, MSRV, dependency policy, coverage and the bounded fuzz lane. Also builds a release binary and smokes `--help`, `--version` and `capabilities --json`. On a pull request it additionally reports the public-API comparison of `openkrx-core` against the base commit, informationally. |
 | `security.yml` | push, pull request, weekly cron, dispatch | Gitleaks over the full history, `actionlint` over every workflow, and CodeQL, on every trigger; the advisory scan on the weekly cron and on dispatch only. |
 | `mutants.yml` | weekly cron; dispatch | Mutation testing with per-crate floors. Deliberately not a required check. |
 | `release.yml` | push of a `v*` tag; dispatch with `dry_run`; pull request changing `release.yml` or `release-notes.py` | Everything in [Watch the run](#4-watch-the-run). Creates a draft release and nothing else, and on anything but a `v*` tag creates nothing at all. |
@@ -462,15 +473,25 @@ workflow.
 
 ## Semver checks
 
-Deferred until `publish = false` is lifted.
+The report exists; the **gate** is deferred until `publish = false` is lifted.
 
-Neither crate has a published version, so there is no baseline for
+Neither crate has a published version, so there is no released baseline for
 `cargo-semver-checks` to compare against and no downstream consumer whose
-build a breaking change could break. The JSON envelope is versioned separately
-by its `schema_version` field, which is `1`; the rules for raising it are in
-[CHANGELOG.md](../CHANGELOG.md), and the envelope itself is held byte for byte
-by the golden output contract described in [testing.md](testing.md), which is
-the compatibility gate that does exist today.
+build a breaking change could break. A commit is a baseline it accepts,
+though, so the comparison is worth making even now: the
+`API compatibility (informational)` job in `ci.yml` runs
+`cargo-semver-checks` for `openkrx-core` against a pull request's base commit
+and writes a `PASS`, `BREAK` or `SKIPPED` line and the tool's output into the
+job summary. It is informational by construction — `continue-on-error: true`,
+and absent from the required checks — so a finding is read, not enforced.
+`scripts/api-check.sh` is the same comparison for a maintainer.
+[testing.md](testing.md#api-compatibility-report) describes both.
 
-When a crate is first published, add `cargo-semver-checks` against the
-previous release to `ci.yml` and record the decision here.
+The JSON envelope is versioned separately by its `schema_version` field, which
+is `1`; the rules for raising it are in [CHANGELOG.md](../CHANGELOG.md), and
+the envelope itself is held byte for byte by the golden output contract
+described in [testing.md](testing.md), which is the compatibility gate that
+does exist today.
+
+When a crate is first published, change the baseline from the base commit to
+the previous release, make the job required, and record the decision here.

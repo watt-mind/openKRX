@@ -1032,6 +1032,67 @@ host reported ratios of 16.6, 6.4 and 7.3 in a debug build and 15.1, 8.0 and
 7.4 in a release one, against a threshold of 32 — every path linear, and none
 of the three has a superlinear ceiling to report.
 
+## API compatibility report
+
+The golden output contract above holds the CLI's contract: the bytes a
+consumer parses. It says nothing about the other public surface, the Rust API
+of `openkrx-core`, where an accidental rename or a removed `pub use` is
+invisible to every test in this repository as long as the workspace still
+compiles against itself.
+
+[cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks)
+answers that question by building the rustdoc JSON of two versions of the same
+crate and running SemVer lints across the pair. Its usual baseline is the
+crate's last published release; `publish = false` means there is none, so the
+baseline here is a git revision — for a pull request, its base commit.
+
+`scripts/api-check.sh [base-rev] [crate]` is the same comparison for a
+maintainer, defaulting to `origin/develop` and `openkrx-core`:
+
+```sh
+cargo install cargo-semver-checks --locked
+git fetch origin develop
+bash scripts/api-check.sh origin/develop
+```
+
+The script forces `--release-type minor`, and that flag is the whole reason
+the run says anything. Both sides of every comparison carry the same
+`0.1.0-dev.0` workspace version, and an unchanged version makes
+`cargo-semver-checks` assume a major bump — under which every breaking change
+is permitted, so all 196 breaking-change lints are skipped and the run reports
+nothing whatever the diff did. Declaring the comparison a minor release runs
+them, and the question they answer is the useful one: would this change break
+a downstream build if the API were already published?
+
+The `API compatibility (informational)` job in `ci.yml` runs the script on
+pull requests against `github.event.pull_request.base.sha`. Three properties
+are deliberate:
+
+- It is **informational**. The step carries `continue-on-error: true` and the
+  job is not in the repository's required checks, so a finding cannot block a
+  merge. Nothing is published and no downstream build exists to break, so a
+  gate would be a claim the project cannot yet make. The decision to gate
+  belongs with the decision to publish; see
+  [releasing.md](releasing.md#semver-checks).
+- It **skips cleanly**. When `crates/openkrx-core` is unchanged against the
+  base commit, the job says so in the summary and installs nothing.
+- It reports into the **job summary**. A `PASS`, `BREAK` or `SKIPPED` line
+  plus the tool's own output land in `$GITHUB_STEP_SUMMARY`, so a reviewer
+  reads the finding on the run page instead of opening a log.
+
+The job checks out with `fetch-depth: 0`, because `--baseline-rev` resolves a
+commit in the local clone and the default single-commit fetch does not contain
+the base. It also clears the workflow-level `RUSTFLAGS: -D warnings`: it
+compiles the baseline commit too, which is code the pull request did not write
+and cannot fix, and a warning there would abort the comparison rather than
+report on it.
+
+What the report is not: it compares one crate's public Rust API against one
+earlier commit. It says nothing about the CLI contract, which the golden cases
+hold, nothing about the JSON envelope, which `schema_version` versions, and
+nothing about package-format compatibility, which is the separate open problem
+below.
+
 ## Compatibility testing later
 
 Once a reader command exists, a compatibility layer becomes possible and
