@@ -161,13 +161,13 @@ These are the same facts the 2026-09-10 readiness assessment in
 [releasing.md](releasing.md#readiness-status) weighs, read from the other
 end: the first two risks below are why release gate 1 is not met and why a
 first release could only be a labelled pre-release, and the extraction race
-that is still open on Windows — and on a Linux kernel too old for `openat2`,
-which every successful report says — together with a weekly fuzzing campaign
+that is still open where the portable arm runs (Windows, and a Linux kernel
+too old for `openat2`; every successful `extract` report names the arm it ran
+on in `path_resolution_fallback`), together with a weekly fuzzing campaign
 that has not yet accumulated a history, are why gate 2 is only partially met.
-The rest —
-strictness never measured against real
-archives, inherited deflate correctness, reasoned rather than measured
-limits, the classifier keying on a code's category — are disclosed
+The rest — strictness never measured against real archives, inherited
+deflate correctness, reasoned rather than measured limits, and the
+classifier keying on a code's category — are disclosed
 limitations that no gate turns into a blocker, and they belong in the
 limitations a release states rather than in the decision to cut one. Neither
 list weakens the other; if one changes, change both in the same pull request.
