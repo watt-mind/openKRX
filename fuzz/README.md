@@ -48,13 +48,29 @@ directories and are ignored by Git. **No corpus is committed** — the seeds are
 derived at run time, never checked in; see
 [regressions/README.md](regressions/README.md) for what may be.
 
-Two lanes run these targets. `.github/workflows/ci.yml` seeds the corpus and
-runs each target for 30 seconds on every push and pull request;
-`.github/workflows/fuzz.yml` is the weekly campaign — 20 minutes per target by
-default, a `minutes_per_target` dispatch input, a coverage pass over
-`inventory`, and the corpus and any crash artifacts uploaded for 14 days. It
-is deliberately not a required check. Both are documented in
+Two lanes run these targets. `.github/workflows/ci.yml` replays every retained
+regression, seeds the corpus and runs each target for 30 seconds on every push
+and pull request; `.github/workflows/fuzz.yml` is the weekly campaign — 20
+minutes per target by default, a `minutes_per_target` dispatch input, a
+coverage pass over `inventory`, and the corpus and any crash artifacts uploaded
+for 14 days. It is deliberately not a required check. Both are documented in
 [docs/testing.md](../docs/testing.md#fuzzing).
+
+The campaign's corpus is **cumulative**. Each target's `corpus/<target>/` is
+restored from the previous campaign's `actions/cache` entry, seeded on top,
+fuzzed, then minimised with `cargo fuzz cmin` and saved as the new entry, so
+week n+1 starts from everything week n reached rather than from the fixtures
+alone. The job summary reports inputs and bytes per target, before and after.
+Download a campaign's corpus from its `fuzz-campaign` workflow artifact:
+
+```sh
+gh run download --repo watt-mind/openKRX <run-id> --name fuzz-campaign
+```
+
+Reset the accumulation by bumping `CORPUS_CACHE_VERSION` in the workflow, which
+makes every restore miss. Still **no corpus is committed** — the cache and the
+artifact both live outside the repository. See
+[docs/testing.md](../docs/testing.md#the-cumulative-corpus).
 
 `fuzz/Cargo.lock` is committed so a fuzz build resolves the same dependency
 tree everywhere, and CI enforces it: `cargo fuzz` accepts none of cargo's

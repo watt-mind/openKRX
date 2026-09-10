@@ -8,6 +8,13 @@ name: Fuzz campaign
 # [fuzz/regressions/README.md](../../fuzz/regressions/README.md), not a merge
 # block. It must not be added to the repository's required status checks.
 #
+# The corpus is cumulative. Each target's `fuzz/corpus/<target>/` is restored
+# from the previous campaign's `actions/cache` entry, seeded on top, fuzzed for
+# the budget, then minimised with `cargo fuzz cmin` and saved as this
+# campaign's entry, so week n+1 starts from everything week n reached instead
+# of from the fixtures alone. A maintainer discards the accumulation by
+# bumping `CORPUS_CACHE_VERSION` below.
+#
 # See docs/testing.md, "Fuzzing", for the seed corpus, the local campaign and
 # how a crash is handled.
 
@@ -62,6 +69,15 @@ jobs:
       # otherwise defaults to the triple of its own binary, and the pre-built
       # one is a musl build, which AddressSanitizer cannot link against.
       FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+      # The reset knob for the cumulative corpus. Every cache key below is
+      # prefixed with it, so bumping it to `v2` makes every restore miss and
+      # the next campaign start from the seeds alone — which is what a
+      # maintainer wants after a change to what an input means (a limit, a
+      # harness, a target's entry point), when the accumulated inputs are
+      # exploring a shape the reader no longer has. Nothing is deleted: the
+      # old entries simply stop being addressed and expire on GitHub's own
+      # schedule.
+      CORPUS_CACHE_VERSION: v1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,14 +142,89 @@ jobs:
           echo "seconds=$((minutes * 60))" >> "$GITHUB_OUTPUT"
           echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
           echo "Budget: ${minutes} minute(s) per target, five targets."
-      # libFuzzer starts from whatever `fuzz/corpus/<target>/` already holds.
-      # Seeding it from the committed golden fixtures is what makes a long run
-      # start deep: the first execution already carries a well-formed package
-      # and a real metadata document rather than a handful of random bytes.
+      # The cache key is per target and per ISO week, with the run id appended
+      # so every campaign writes a new entry rather than colliding with the
+      # one it restored — `actions/cache/save` refuses to overwrite a key that
+      # already exists, and a second run in the same week would otherwise
+      # throw its work away. The restore keys below do the reading: the
+      # week-prefix first, then the target prefix, and a prefix match returns
+      # the most recently created entry, which is the latest campaign's
+      # minimised corpus.
+      - name: Resolve the corpus cache key
+        id: corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          week=$(date -u +%G-W%V)
+          echo "week=$week" >> "$GITHUB_OUTPUT"
+          echo "Corpus cache generation: ${CORPUS_CACHE_VERSION}, week ${week}."
+      - name: Restore the inventory corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/inventory
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-inventory-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-inventory-${{ steps.corpus.outputs.week }}-
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-inventory-
+      - name: Restore the xml_metadata corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/xml_metadata
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-xml_metadata-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-xml_metadata-${{ steps.corpus.outputs.week }}-
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-xml_metadata-
+      - name: Restore the structure corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/structure
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-structure-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-structure-${{ steps.corpus.outputs.week }}-
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-structure-
+      - name: Restore the extract_plan corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/extract_plan
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-extract_plan-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-extract_plan-${{ steps.corpus.outputs.week }}-
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-extract_plan-
+      - name: Restore the create_round_trip corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/create_round_trip
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-create_round_trip-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-create_round_trip-${{ steps.corpus.outputs.week }}-
+            fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-create_round_trip-
+      # libFuzzer starts from whatever `fuzz/corpus/<target>/` already holds —
+      # here, whatever the restore above put there, which on the first run of a
+      # new cache generation is nothing. Seeding from the committed golden
+      # fixtures is what makes a long run start deep: the first execution
+      # already carries a well-formed package and a real metadata document
+      # rather than a handful of random bytes. The script writes its seeds by
+      # name and overwrites only its own, so it lands *on top of* a restored
+      # corpus without disturbing anything libFuzzer added.
       - name: Build the seed corpus
         run: |
           python3 fuzz/seed.py
           python3 fuzz/seed.py --verify
+      # Measured after the restore and the seeding, so the "before" column is
+      # what this campaign actually starts from; the matching "after" column is
+      # taken once the run and the minimisation are done.
+      - name: Record the corpus size before the campaign
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "${RUNNER_TEMP}/corpus-before.txt"
+          for target in inventory xml_metadata structure extract_plan create_round_trip; do
+            directory="fuzz/corpus/${target}"
+            files=$(find "$directory" -type f | wc -l)
+            bytes=$(du -sb "$directory" | cut -f1)
+            printf '%s %s %s\n' "$target" "$files" "$bytes" >> "${RUNNER_TEMP}/corpus-before.txt"
+          done
+          cat "${RUNNER_TEMP}/corpus-before.txt"
       - run: cargo +nightly fuzz build --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE"
       - name: Run every target for the budget
         env:
@@ -147,6 +238,91 @@ jobs:
               "$target" -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048
             echo "::endgroup::"
           done
+      # `cargo fuzz cmin` is libFuzzer's `-merge=1` with the bookkeeping done
+      # for it: it merges the corpus into a fresh directory, keeping only the
+      # inputs that contribute a feature no earlier input already covers, and
+      # replaces the corpus with that directory. Coverage is preserved by
+      # construction while the input count and the bytes fall, which is what
+      # keeps a corpus that is carried forward every week from growing without
+      # bound — and what keeps the next campaign's restore, seeding and first
+      # pass cheap.
+      - name: Minimise every corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in inventory xml_metadata structure extract_plan create_round_trip; do
+            echo "::group::cmin ${target}"
+            cargo +nightly fuzz cmin --fuzz-dir fuzz --target "$FUZZ_TARGET_TRIPLE" \
+              "$target" -- -rss_limit_mb=2048
+            echo "::endgroup::"
+          done
+      # Reporting must not be able to lose a campaign. This step sits between
+      # the minimisation and the five saves, so under an unguarded
+      # `set -euo pipefail` a directory that had gone missing or unreadable
+      # would fail `du`, skip every save, and throw away hours of accumulated
+      # inputs over a number in a table. Every measurement therefore falls back
+      # to 0 and a missing directory is reported as such: a zero in this table
+      # is a signal to read the log, not a reason to discard the corpus.
+      - name: Report the corpus size before and after
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Corpus size per target"
+            echo
+            echo "| Target | Inputs before | Bytes before | Inputs after | Bytes after |"
+            echo "| --- | ---: | ---: | ---: | ---: |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          while read -r target files bytes; do
+            directory="fuzz/corpus/${target}"
+            if [ -d "$directory" ]; then
+              after_files=$(find "$directory" -type f 2>/dev/null | wc -l || echo 0)
+              after_bytes=$(du -sb "$directory" 2>/dev/null | cut -f1 || echo 0)
+            else
+              echo "::warning::no corpus directory for ${target} after minimisation"
+              after_files=0
+              after_bytes=0
+            fi
+            printf "| \`%s\` | %s | %s | %s | %s |\n" \
+              "$target" "$files" "$bytes" "${after_files:-0}" "${after_bytes:-0}" \
+              >> "$GITHUB_STEP_SUMMARY"
+          done < "${RUNNER_TEMP}/corpus-before.txt"
+      # Saved before the coverage pass rather than after it: coverage is an
+      # ordinary step whose failure fails the job, and a failure there must not
+      # cost the campaign the corpus it just spent hours growing. Not on the
+      # pull-request path — a rehearsal restores the real corpus to prove the
+      # wiring, but what it produces in two minutes per target is not what the
+      # next campaign should start from.
+      - name: Save the inventory corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/inventory
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-inventory-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+      - name: Save the xml_metadata corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/xml_metadata
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-xml_metadata-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+      - name: Save the structure corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/structure
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-structure-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+      - name: Save the extract_plan corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/extract_plan
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-extract_plan-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
+      - name: Save the create_round_trip corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/create_round_trip
+          key: fuzz-corpus-${{ env.CORPUS_CACHE_VERSION }}-create_round_trip-${{ steps.corpus.outputs.week }}-${{ github.run_id }}
       # One target only, and only off the pull-request path: replaying an
       # accumulated corpus through an instrumented build costs another build
       # and another pass over every input, which a rehearsal does not need.
@@ -186,8 +362,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       # Always, including on a crash: the artifacts directory holds the
       # crashing input, and the corpus is what a maintainer replays it
-      # against. Neither is committed — `fuzz/.gitignore` ignores both — so a
-      # workflow artifact is the only copy that survives the run.
+      # against. Neither is committed — `fuzz/.gitignore` ignores both. The
+      # upload stays even though the corpus is now cached as well: the cache is
+      # the campaign-to-campaign carrier, readable only by a workflow run,
+      # while this artifact is the downloadable copy — and on a crash it is the
+      # only copy at all, because the save steps above do not run when a target
+      # fails.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
