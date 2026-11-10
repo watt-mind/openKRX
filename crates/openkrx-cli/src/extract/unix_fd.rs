@@ -30,8 +30,9 @@
 //!   component swapped after it has been opened cannot redirect anything,
 //!   because what the walk holds from then on is the directory itself and not
 //!   its name. The two differences from the kernel's own resolution are
-//!   stated on the `walk` function itself, which exists only on those
-//!   targets.
+//!   stated on the `walk` function itself, which ships only on those
+//!   targets and is compiled into every Unix test build, Linux included, so
+//!   that the suite exercises it wherever it runs.
 //!
 //! Only a resolved directory descriptor and a **single** name component are
 //! ever handed to `mkdirat`, `openat` or `unlinkat`, and none of them follows
@@ -57,7 +58,10 @@ use rustix::io::Errno;
 #[cfg(target_os = "linux")]
 use rustix::fs::{ResolveFlags, openat2};
 
-#[cfg(not(target_os = "linux"))]
+// The component walk is compiled into the Linux test build too, so that the
+// lane that measures the suite — which runs on Linux — exercises it rather
+// than counting its every mutant as a survivor of code it never built.
+#[cfg(any(not(target_os = "linux"), test))]
 use rustix::fs::{FileType, statat};
 
 /// The resolve flags every `openat2` in this module asks for.
@@ -214,7 +218,7 @@ pub fn resolve(root: &Dir, components: &[String]) -> Result<Dir, Errno> {
 /// that is not a directory, `EXDEV` for a component that is not a plain name,
 /// `ENOENT` for a component that is not there, and whatever else `openat(2)`
 /// reported.
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(not(target_os = "linux"), test))]
 fn walk(root: &Dir, components: &[String]) -> Result<Dir, Errno> {
     let mut current = openat(&root.0, ".", DIRECTORY_FLAGS, Mode::empty()).map(Dir)?;
     for component in components {
@@ -235,7 +239,7 @@ fn walk(root: &Dir, components: &[String]) -> Result<Dir, Errno> {
 }
 
 /// Whether `component` is a single ordinary name, and not a way out.
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(not(target_os = "linux"), test))]
 fn is_plain_name(component: &str) -> bool {
     !component.is_empty()
         && component != "."
@@ -258,7 +262,7 @@ fn is_plain_name(component: &str) -> bool {
 /// follow links, on the error path only. A component that turns out to be a
 /// symbolic link is reported as `ELOOP`; anything else keeps the error the
 /// kernel gave, and so does a failure of the question itself.
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(not(target_os = "linux"), test))]
 fn refine(parent: &Dir, component: &str, error: Errno) -> Errno {
     if error != Errno::NOTDIR {
         return error;
@@ -320,4 +324,128 @@ pub fn remove_file(parent: &Dir, name: &str) -> Result<(), Errno> {
 /// Whatever `unlinkat(2)` reported.
 pub fn remove_dir(parent: &Dir, name: &str) -> Result<(), Errno> {
     unlinkat(&parent.0, name, AtFlags::REMOVEDIR)
+}
+
+#[cfg(test)]
+mod tests {
+    //! The component walk, driven directly on every Unix target.
+    //!
+    //! On Linux the shipped resolver is `openat2`, so without these tests the
+    //! walk — the arm every other Unix ships — would be exercised only by a
+    //! macOS run of the subprocess suite. Each test holds one rule the walk's
+    //! documentation states: a plain name descends, a symbolic link is
+    //! `ELOOP` whatever the kernel answered, a plain file is `ENOTDIR`, and a
+    //! component that is not a plain name is `EXDEV` before any syscall.
+
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use rustix::io::Errno;
+
+    use super::{create_file, is_plain_name, open_root, walk};
+
+    /// Distinguishes two scratch directories created in the same process.
+    static SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+    /// A directory this test owns, removed when it is dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let sequence = SCRATCH.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "openkrx-walk-{label}-{}-{sequence}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("create a scratch directory of this test's own");
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn components(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn only_a_single_ordinary_name_is_a_plain_name() {
+        assert!(is_plain_name("payload"));
+        assert!(is_plain_name(".hidden"));
+        assert!(is_plain_name("..."));
+        for refused in ["", ".", "..", "a/b", "/", "a\0b"] {
+            assert!(!is_plain_name(refused), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn the_walk_descends_through_real_directories_and_ends_where_it_was_asked() {
+        let scratch = Scratch::new("descend");
+        std::fs::create_dir_all(scratch.0.join("outer").join("inner"))
+            .expect("create the nested directories");
+        let root = open_root(&scratch.0).expect("open the destination");
+        let inner = walk(&root, &components(&["outer", "inner"])).expect("walk two levels down");
+        create_file(&inner, "written.bin").expect("create a file in the walked directory");
+        assert!(
+            scratch
+                .0
+                .join("outer")
+                .join("inner")
+                .join("written.bin")
+                .is_file(),
+            "the descriptor the walk returned names the innermost directory"
+        );
+        let itself = walk(&root, &[]).expect("an empty walk reopens the destination");
+        create_file(&itself, "top.bin").expect("create a file in the destination");
+        assert!(scratch.0.join("top.bin").is_file());
+    }
+
+    #[test]
+    fn a_component_that_is_not_a_plain_name_is_refused_before_any_syscall() {
+        let scratch = Scratch::new("plain");
+        std::fs::create_dir(scratch.0.join("outer")).expect("create a directory");
+        let root = open_root(&scratch.0).expect("open the destination");
+        for name in ["..", ".", "", "outer/.."] {
+            assert_eq!(
+                walk(&root, &components(&[name])).err(),
+                Some(Errno::XDEV),
+                "{name:?}"
+            );
+        }
+        assert_eq!(
+            walk(&root, &components(&["outer", ".."])).err(),
+            Some(Errno::XDEV),
+            "a way out after a real directory is refused too"
+        );
+    }
+
+    #[test]
+    fn a_symbolic_link_in_the_walk_is_a_loop_on_every_kernel() {
+        let scratch = Scratch::new("link");
+        std::fs::create_dir(scratch.0.join("real")).expect("create a directory");
+        std::os::unix::fs::symlink(scratch.0.join("real"), scratch.0.join("link"))
+            .expect("plant a symbolic link to a real directory");
+        let root = open_root(&scratch.0).expect("open the destination");
+        assert_eq!(walk(&root, &components(&["link"])).err(), Some(Errno::LOOP));
+        assert_eq!(
+            walk(&root, &components(&["real", "missing"])).err(),
+            Some(Errno::NOENT),
+            "an absent component keeps the error the kernel gave"
+        );
+    }
+
+    #[test]
+    fn a_plain_file_in_the_walk_is_not_a_directory_and_not_a_loop() {
+        let scratch = Scratch::new("file");
+        std::fs::write(scratch.0.join("plain"), b"synthetic").expect("create a plain file");
+        let root = open_root(&scratch.0).expect("open the destination");
+        assert_eq!(
+            walk(&root, &components(&["plain"])).err(),
+            Some(Errno::NOTDIR)
+        );
+    }
 }
