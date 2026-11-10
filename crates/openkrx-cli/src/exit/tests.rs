@@ -8,7 +8,9 @@
 
 use super::{Category, Failure};
 use openkrx_core::extract::{ExtractLimitKind, UnsupportedEntryKind};
-use openkrx_core::{ArchiveError, LimitKind, MalformedKind, PlanError, Structure, UnsupportedKind};
+use openkrx_core::{
+    ArchiveError, LimitKind, MalformedKind, PlanError, ProfileError, Structure, UnsupportedKind,
+};
 
 /// Every category, in status order. Adding one must be added here too.
 const EVERY_CATEGORY: [Category; 9] = [
@@ -265,6 +267,26 @@ fn every_repacking_refusal_classifies_and_explains_itself() {
             "{code}"
         );
     }
+    // Each refused edit names its own fix rather than the category's generic
+    // sentence: where attachment numbers come from, that a target is named
+    // once, and that a plan applied to another package is openkrx's defect.
+    for (code, sentence) in [
+        (
+            "repack.invalid.no_such_attachment",
+            "numbers are the document's own CSATOLMANY_SZAMA, counted from 1",
+        ),
+        (
+            "repack.invalid.duplicate_target",
+            "two edits name the same attachment number",
+        ),
+        (
+            "repack.invalid.inventory_mismatch",
+            "the plan was applied to a package other than the one it was made from",
+        ),
+    ] {
+        let line = Failure::new(code).line("repack");
+        assert!(line.contains(sentence), "{code}: {line}");
+    }
     let failure = Failure::repack_self_check_failed();
     assert_eq!(failure.code, "repack.internal.self_check_failed");
     assert!(failure.line("repack").contains("defect in openkrx"));
@@ -276,6 +298,7 @@ fn every_repacking_refusal_classifies_and_explains_itself() {
 
 #[test]
 fn a_repacking_refusal_points_at_the_attachment_number_it_concerns() {
+    use openkrx_core::create::{CreateError, CreateLimitKind};
     use openkrx_core::repack::{InvalidKind, RepackError, UnsupportedKind};
 
     let invalid = Failure::from(RepackError::Invalid {
@@ -309,6 +332,37 @@ fn a_repacking_refusal_points_at_the_attachment_number_it_concerns() {
     assert_eq!(read.category, Category::Limit);
     assert_eq!(
         read.message(),
+        "archive.over_limit.entries (limit 256, observed 300)"
+    );
+
+    // A write refusal keeps the ceiling and the attachment the writer named,
+    // which a bare code would drop.
+    let write = Failure::from(RepackError::Write(CreateError::OverLimit {
+        limit: CreateLimitKind::EntryBytes,
+        limit_value: 1024,
+        observed: Some(2048),
+        index: Some(1),
+    }));
+    assert_eq!(write.category, Category::Limit);
+    assert_eq!(write.limit, Some(1024));
+    assert_eq!(write.observed, Some(2048));
+    assert_eq!(write.attachment_index, Some(1));
+}
+
+#[test]
+fn a_profile_refusal_keeps_the_archive_diagnostic_it_carries() {
+    // Re-reading an entry while checking the profile fails with the archive
+    // layer's own error, and the numbers and entry index it carries survive
+    // the conversion rather than being reduced to the code alone.
+    let failure = Failure::from(ProfileError::Archive(ArchiveError::OverLimit {
+        limit: LimitKind::Entries,
+        limit_value: 256,
+        observed: Some(300),
+        entry: None,
+    }));
+    assert_eq!(failure.code, "archive.over_limit.entries");
+    assert_eq!(
+        failure.message(),
         "archive.over_limit.entries (limit 256, observed 300)"
     );
 }

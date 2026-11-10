@@ -16,6 +16,16 @@ and such a change is recorded here explicitly.
 
 ### Added
 
+- **Unit tests for the CLI's mutation survivors.** The component walk in
+  `extract/unix_fd.rs` is now compiled into every Unix test build, Linux
+  included, and its plain-name, symbolic-link, non-directory and descent rules
+  are driven directly; the portable resolver arm's marker and directory
+  refusals, the extraction ledger's withdrawn records, the `repack.invalid.*`
+  sentences, the conversions that keep a write or profile refusal's numbers,
+  and the singular and plural nouns of the `create` and `repack` reports each
+  gained a test. `extract/tests.rs` is excluded from mutation as the test
+  module it is. See [docs/testing.md](docs/testing.md#mutation-testing).
+
 - **A differential inflate test against an independent decoder.**
   `crates/openkrx-core/tests/differential_inflate.rs` decodes every stream the
   repository can produce a second time with `zune-inflate` — a port of
