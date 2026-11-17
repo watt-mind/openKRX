@@ -172,3 +172,91 @@ impl Ledger {
         self.undo(&Resolver::Portable, Path::new(""))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! The ledger's own bookkeeping, held on every platform.
+    //!
+    //! The extraction tests count what an undo removed; these hold the one
+    //! rule they cannot reach directly — that a withdrawn record is the record
+    //! it names, and no other — with named files, which every platform undoes
+    //! the same way.
+
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{Cleanup, Ledger};
+
+    /// Distinguishes two scratch directories created in the same process.
+    static SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+    /// A directory this test owns, removed when it is dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let sequence = SCRATCH.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "openkrx-ledger-{label}-{}-{sequence}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("create a scratch directory of this test's own");
+            Self(path)
+        }
+
+        fn file(&self, name: &str) -> PathBuf {
+            let path = self.0.join(name);
+            std::fs::write(&path, b"synthetic").expect("create a file");
+            path
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_withdrawn_record_is_neither_removed_nor_counted() {
+        let scratch = Scratch::new("forget");
+        let kept = scratch.file("kept.bin");
+        let withdrawn = scratch.file("withdrawn.bin");
+        let mut ledger = Ledger::new();
+        ledger.named_file(kept.clone());
+        let recorded = ledger.named_file(withdrawn.clone());
+        ledger.forget(recorded);
+        assert_eq!(
+            ledger.undo_by_path(),
+            Cleanup {
+                removed: 1,
+                left_in_place: 0,
+            }
+        );
+        assert!(!kept.exists(), "the record still held is undone");
+        assert!(
+            withdrawn.exists(),
+            "the withdrawn record is not touched by the undo pass"
+        );
+    }
+
+    #[test]
+    fn withdrawing_the_first_record_leaves_the_later_ones_in_force() {
+        let scratch = Scratch::new("first");
+        let first = scratch.file("first.bin");
+        let second = scratch.file("second.bin");
+        let mut ledger = Ledger::new();
+        let recorded = ledger.named_file(first.clone());
+        ledger.named_file(second.clone());
+        ledger.forget(recorded);
+        assert_eq!(
+            ledger.undo_by_path(),
+            Cleanup {
+                removed: 1,
+                left_in_place: 0,
+            }
+        );
+        assert!(first.exists(), "the withdrawn record is the one it named");
+        assert!(!second.exists());
+    }
+}

@@ -25,10 +25,16 @@
 # - `fuzz/**` is a separate package with its own workspace and lockfile on a
 #   nightly toolchain (see fuzz/Cargo.toml). `cargo mutants --workspace`
 #   never reaches it; the entry documents that this is deliberate.
+# - `crates/openkrx-cli/src/extract/tests.rs` is a unit-test module, declared
+#   `#[cfg(all(test, unix))]`. `cargo mutants` recognises a bare
+#   `#[cfg(test)]` and skips what it guards, but not that compound form, so
+#   without this entry it mutates the tests' own scratch-directory helpers
+#   and reports a test helper nobody calls a survivor.
 exclude_globs = [
     "crates/openkrx-core/src/synthetic/**",
     "crates/openkrx-core/examples/**",
     "fuzz/**",
+    "crates/openkrx-cli/src/extract/tests.rs",
 ]
 
 # A mutant is killed once it runs past this multiple of the unmutated

@@ -8,3 +8,6 @@
 
 pub mod human;
 pub mod json;
+
+#[cfg(test)]
+mod tests;

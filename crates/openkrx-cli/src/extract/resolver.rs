@@ -452,3 +452,94 @@ const fn code(error: &Errno) -> &'static str {
         _ => OUTPUT_IO,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! The portable arm's own refusals, held on every platform.
+    //!
+    //! Windows always takes this arm and a Linux kernel without `openat2`
+    //! falls back to it, but a Linux or macOS host running the subprocess
+    //! suite never does, so the rules it holds are driven here directly: an
+    //! existing marker is the partial-marker refusal rather than an I/O
+    //! failure, and an existing directory is reused while a missing parent is
+    //! an I/O failure rather than something already there.
+
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{Directory, Resolver};
+    use crate::exit::{OUTPUT_IO, OUTPUT_PARTIAL_MARKER_PRESENT};
+
+    /// Distinguishes two scratch directories created in the same process.
+    static SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+    /// A directory this test owns, removed when it is dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let sequence = SCRATCH.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "openkrx-portable-{label}-{}-{sequence}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("create a scratch directory of this test's own");
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn components(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_second_portable_marker_is_the_partial_marker_refusal() {
+        let scratch = Scratch::new("marker");
+        Resolver::Portable
+            .marker(&scratch.0)
+            .expect("the first marker is created");
+        let refused = Resolver::Portable
+            .marker(&scratch.0)
+            .expect_err("a marker already there is refused");
+        assert_eq!(refused.code, OUTPUT_PARTIAL_MARKER_PRESENT);
+    }
+
+    #[test]
+    fn a_portable_marker_in_a_missing_destination_is_an_io_failure() {
+        let scratch = Scratch::new("marker-missing");
+        let refused = Resolver::Portable
+            .marker(&scratch.0.join("absent"))
+            .expect_err("nowhere to create the marker");
+        assert_eq!(refused.code, OUTPUT_IO);
+    }
+
+    #[test]
+    fn a_portable_directory_is_created_then_reused() {
+        let scratch = Scratch::new("directory");
+        let path = components(&["payload"]);
+        let created = Resolver::Portable
+            .directory(&scratch.0, &path, &mut |_| {})
+            .expect("the directory is created");
+        assert_eq!(created, Directory::Created);
+        let reused = Resolver::Portable
+            .directory(&scratch.0, &path, &mut |_| {})
+            .expect("an existing real directory is reused");
+        assert_eq!(reused, Directory::AlreadyThere);
+    }
+
+    #[test]
+    fn a_portable_directory_under_a_missing_parent_is_an_io_failure() {
+        let scratch = Scratch::new("directory-missing");
+        let refused = Resolver::Portable
+            .directory(&scratch.0, &components(&["absent", "payload"]), &mut |_| {})
+            .expect_err("the parent is not there");
+        assert_eq!(refused.failure.code, OUTPUT_IO);
+        assert!(!refused.created, "nothing was created");
+    }
+}

@@ -423,13 +423,28 @@ flags are `-p openkrx-core` or `-p openkrx-cli` for one crate,
 counts them without running any.
 
 `.cargo/mutants.toml` holds the configuration and the reason for each entry:
-`exclude_globs` drops the test-only synthetic writer, the examples directory
-and the separate fuzz package, none of which is shipped behaviour, and
+`exclude_globs` drops the test-only synthetic writer, the examples directory,
+the separate fuzz package and `openkrx-cli`'s `extract/tests.rs` — a unit-test
+module behind `#[cfg(all(test, unix))]`, a compound `cfg` that
+`cargo mutants` does not recognise as test-only the way it does a bare
+`#[cfg(test)]` — none of which is shipped behaviour, and
 `timeout_multiplier` with `minimum_test_timeout` bound a mutant that loops
 forever without turning a slow runner into a false timeout. There is no
 function-name exclusion: the `Display` impls in this workspace are held by
 content-free assertions in the rejection tests, and a survivor is a reason to
 write a test, never a reason to add an exclusion.
+
+**Platform-gated code.** `cargo mutants` rewrites source text without
+evaluating `cfg`, so a mutant in a function the host does not compile builds
+cleanly, changes nothing the suite runs, and is reported as missed. The
+scheduled lane runs on Linux, which is why the component walk in
+`extract/unix_fd.rs` — the resolver every Unix but Linux ships — is compiled
+into every Unix *test* build and driven directly by that module's unit tests:
+the lane measures it rather than counting it as a gap. What stays gated off on
+Linux — the Windows reparse-point bit in `extract/preflight.rs` and the
+non-Linux arms of `Resolver::open`, `Resolver::fell_back` and
+`unix_fd::resolve` — still appears as missed there, and is held by the
+Windows and macOS jobs of `ci.yml` instead.
 
 ### Reading survivors
 
